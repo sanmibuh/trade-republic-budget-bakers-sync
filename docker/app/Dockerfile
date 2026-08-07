@@ -1,4 +1,4 @@
-FROM ghcr.io/sanmibuh/python-trade-republic:latest
+FROM ghcr.io/sanmibuh/python-trade-republic:v1.0.0
 
 WORKDIR /app
 
