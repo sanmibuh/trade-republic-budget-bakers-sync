@@ -12,14 +12,6 @@ from app.tr_client import fetch_timeline_events
 # fetch_timeline_events
 # ---------------------------------------------------------------------------
 
-def _client_with(**methods):
-    """Build a mock TR client that has only the specified methods."""
-    client = MagicMock(spec=list(methods.keys()))
-    for name, return_value in methods.items():
-        getattr(client, name).return_value = return_value
-    return client
-
-
 SINCE = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
 

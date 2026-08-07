@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 import requests
 
 from app.notifier import (
@@ -91,7 +90,6 @@ def test_notify_authentication_required_calls_send():
 
     assert result is True
     mock_send.assert_called_once()
-    _, kwargs = mock_send.call_args
     # owner name should appear in the message (possibly escaped)
     message = mock_send.call_args.args[2] if mock_send.call_args.args else mock_send.call_args.kwargs.get("message", "")
     assert "myuser" in message or "myuser".replace("_", r"\_") in message
