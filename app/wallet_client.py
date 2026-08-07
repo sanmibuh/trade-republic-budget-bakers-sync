@@ -148,7 +148,7 @@ _EVENT_TITLES: dict[str, str] = {
     "CARD_TRANSACTION": "Card Transaction",
     "CARD_VERIFICATION": "Card Verification",
     "PAYMENT_INBOUND": "Payment Inbound",
-    "PAYMENT_OUTBOUND": "Payment Outbound",
+    "BANK_TRANSACTION_INCOMING": "Bank Transfer In",
 }
 
 
@@ -195,6 +195,8 @@ def build_records_for_event(
         note_: str,
         transfer_account_id: str | None = None,
         payment_type: str | None = None,
+        counter_party: str | None = None,
+        unpaired_transfer: bool = False,
     ) -> dict[str, Any]:
         r: dict[str, Any] = {
             "accountId": account_id,
@@ -205,6 +207,10 @@ def build_records_for_event(
         }
         if transfer_account_id:
             r["transfer"] = {"pairingMode": "new", "accountId": transfer_account_id}
+        elif unpaired_transfer:
+            r["transfer"] = {"pairingMode": "unpaired"}
+        if counter_party:
+            r["counterParty"] = counter_party[:255]
         return r
 
     if event_type == "INTEREST_PAYMENT":
@@ -221,6 +227,18 @@ def build_records_for_event(
 
     if event_type == "CARD_TRANSACTION":
         return [_rec(cash_account_id, amount, note, payment_type="debit_card")]
+
+    if event_type == "BANK_TRANSACTION_INCOMING":
+        counter_party = str(event.get("subtitle") or "").strip() or None
+        tr_title = str(_get_first_match(event, "title", "name", "description") or "").strip()
+        direction = "From" if amount > 0 else "To"
+        transfer_note = f"{direction}: {tr_title}" if tr_title else note
+        return [_rec(
+            cash_account_id, amount, transfer_note,
+            payment_type="transfer",
+            counter_party=counter_party,
+            unpaired_transfer=True,
+        )]
 
     # Default: cash account
     return [_rec(cash_account_id, amount, note)]

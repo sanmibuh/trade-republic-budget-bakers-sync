@@ -176,6 +176,53 @@ def test_build_card_transaction_uses_debit_card():
     assert records[0]["note"] == "Supermarket"  # TR title, not mapped
 
 
+def test_build_bank_transaction_incoming_uses_transfer():
+    event = {
+        "eventType": "BANK_TRANSACTION_INCOMING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "500.00",
+        "title": "Salary",
+        "subtitle": "DE89370400440532013000",
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert len(records) == 1
+    r = records[0]
+    assert r["paymentType"] == "transfer"
+    assert r["accountId"] == "cash"
+    assert r["note"] == "From: Salary"
+    assert r["transfer"] == {"pairingMode": "unpaired"}
+    assert r["counterParty"] == "DE89370400440532013000"
+
+
+def test_build_bank_transaction_negative_uses_to():
+    event = {
+        "eventType": "BANK_TRANSACTION_INCOMING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "-200.00",
+        "title": "Landlord",
+        "subtitle": None,
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert records[0]["note"] == "To: Landlord"
+
+
+def test_build_bank_transaction_incoming_no_subtitle():
+    event = {
+        "eventType": "BANK_TRANSACTION_INCOMING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "500.00",
+        "title": "Salary",
+        "subtitle": None,
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert "counterParty" not in records[0]
+    assert records[0]["transfer"] == {"pairingMode": "unpaired"}
+    assert records[0]["note"] == "From: Salary"
+
+
 def test_build_unknown_event_type_posts_to_cash():
     event = {"eventType": "UNKNOWN_EVENT", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00", "title": "Something"}
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
