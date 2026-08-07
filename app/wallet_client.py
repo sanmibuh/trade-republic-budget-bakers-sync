@@ -145,6 +145,7 @@ _EVENT_TITLES: dict[str, str] = {
     "SAVEBACK_AGGREGATE": "Saveback",
     "BUY_ORDER": "Buy Order",
     "SELL_ORDER": "Sell Order",
+    "SAVINGS_PLAN": "Savings Plan",
     "TRADING_SAVINGSPLAN_EXECUTED": "Savings Plan",
     "CARD_TRANSACTION": "Card Transaction",
     "CARD_VERIFICATION": "Card Verification",
@@ -184,7 +185,6 @@ def build_records_for_event(
     record_date = normalize_event_time(event)
     note = _event_note(event, event_type)
     amount = extract_amount(event, "amount", "value", "grossAmount", "gross", "total")
-    tax = extract_amount(event, "tax", "taxAmount", "withholdingTax")
 
     log.debug("Building record(s) for event type=%s amount=%s date=%s — raw: %s", event_type, amount, record_date, event)
     if amount == 0:

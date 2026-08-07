@@ -145,6 +145,35 @@ def test_build_interest_payment_no_tax():
     assert "transfer" not in r
 
 
+def test_build_interest_payout_note_format():
+    event = {
+        "eventType": "INTEREST_PAYOUT",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "63.73",
+        "title": "Zinsen",
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert len(records) == 1
+    assert records[0]["note"] == "Interest Payout: Zinsen"
+    assert records[0]["accountId"] == "cash"
+    assert records[0]["paymentType"] == "web_payment"
+
+
+def test_build_interest_no_tr_title_uses_mapped():
+    """Interest event with no TR title falls back to mapped title only."""
+    event = {"eventType": "INTEREST_PAYOUT", "timestamp": "2024-01-01T00:00:00Z", "amount": "10.00"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["note"] == "Interest Payout"
+
+
+def test_build_unknown_event_no_title_uses_event_type():
+    """Unknown event type with no TR title falls back to the event_type string."""
+    event = {"eventType": "SOME_FUTURE_TYPE", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["note"] == "SOME_FUTURE_TYPE"
+
+
 @pytest.mark.parametrize("event_type", ["BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER", "TRADING_SAVINGSPLAN_EXECUTED", "SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE"])
 def test_build_order_events_use_transfer(event_type):
     event = {"eventType": event_type, "timestamp": "2024-01-01T00:00:00Z", "amount": "200.00"}
@@ -211,6 +240,20 @@ def test_build_bank_transaction_outgoing_uses_to():
     assert r["note"] == "To: Landlord"
     assert r["transfer"] == {"pairingMode": "unpaired"}
     assert r["counterParty"] == "DE12345678901234567890"
+
+
+def test_build_bank_transaction_counter_party_truncated():
+    """counterParty must not exceed 255 characters."""
+    long_subtitle = "X" * 300
+    event = {
+        "eventType": "BANK_TRANSACTION_INCOMING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "100.00",
+        "title": "Test",
+        "subtitle": long_subtitle,
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert len(records[0]["counterParty"]) == 255
 
 
 def test_build_bank_transaction_incoming_no_subtitle():
@@ -312,6 +355,15 @@ def test_post_records_400_returns_results():
     client = _make_client()
     results = [{"inputIndex": 0, "success": False, "error": {"message": "validation"}}]
     client.session.post = MagicMock(return_value=_mock_response(400, {"results": results}))
+
+    out = client.post_records([{}])
+    assert out == results
+
+
+def test_post_records_500_returns_results():
+    client = _make_client()
+    results = [{"inputIndex": 0, "success": False, "error": {"message": "internal error"}}]
+    client.session.post = MagicMock(return_value=_mock_response(500, {"results": results}))
 
     out = client.post_records([{}])
     assert out == results
