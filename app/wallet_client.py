@@ -144,7 +144,7 @@ _EVENT_TITLES: dict[str, str] = {
     "SAVEBACK": "Saveback",
     "BUY_ORDER": "Buy Order",
     "SELL_ORDER": "Sell Order",
-    "SAVINGS_PLAN": "Savings Plan",
+    "TRADING_SAVINGSPLAN_EXECUTED": "Savings Plan",
     "CARD_TRANSACTION": "Card Transaction",
     "CARD_VERIFICATION": "Card Verification",
     "PAYMENT_INBOUND": "Payment Inbound",
@@ -219,7 +219,7 @@ def build_records_for_event(
     if event_type == "INTEREST_PAYOUT":
         return [_rec(cash_account_id, amount, note)]
 
-    if event_type in {"BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER"}:
+    if event_type in {"BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER", "TRADING_SAVINGSPLAN_EXECUTED"}:
         return [_rec(cash_account_id, amount, note, transfer_account_id=portfolio_account_id)]
 
     if event_type == "SAVEBACK":

@@ -145,7 +145,7 @@ def test_build_interest_payment_no_tax():
     assert "transfer" not in r
 
 
-@pytest.mark.parametrize("event_type", ["BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER"])
+@pytest.mark.parametrize("event_type", ["BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER", "TRADING_SAVINGSPLAN_EXECUTED"])
 def test_build_order_events_use_transfer(event_type):
     event = {"eventType": event_type, "timestamp": "2024-01-01T00:00:00Z", "amount": "200.00"}
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
