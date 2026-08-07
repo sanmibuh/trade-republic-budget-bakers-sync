@@ -2,13 +2,13 @@ COMPOSE_FILE   ?= docker-compose.yml
 BASE_IMAGE     ?= python-trade-republic
 IMAGE          ?= tr-wallet-sync
 
-# SERVICE must be passed explicitly, e.g.: make sync SERVICE=david
+# SERVICE must be passed explicitly, e.g.: make sync SERVICE=service1
 ifndef SERVICE
   ifneq ($(MAKECMDGOALS),help)
   ifneq ($(MAKECMDGOALS),build-base)
   ifneq ($(MAKECMDGOALS),test)
   ifneq ($(MAKECMDGOALS),clean)
-  $(error SERVICE is required. Usage: make <target> SERVICE=<name>  e.g. make sync SERVICE=david)
+  $(error SERVICE is required. Usage: make <target> SERVICE=<name>  e.g. make sync SERVICE=service1)
   endif
   endif
   endif
@@ -28,7 +28,7 @@ help:
 	@echo ""
 	@echo "Usage: make <target> SERVICE=<name> [VARIABLE=value]"
 	@echo ""
-	@echo "  SERVICE is required for most targets (e.g. SERVICE=david)"
+	@echo "  SERVICE is required for most targets (e.g. SERVICE=service1)"
 	@echo "  Directories are resolved as ./<SERVICE>/data and ./<SERVICE>/output"
 	@echo ""
 	@echo "Docker Compose targets  (uses COMPOSE_FILE=$(COMPOSE_FILE))"
@@ -52,13 +52,13 @@ help:
 # ── Docker Compose ──────────────────────────────────────────────────────────
 
 build-base:
-	docker build -f Dockerfile.base -t $(BASE_IMAGE):latest .
+	docker build -f docker/base/Dockerfile -t $(BASE_IMAGE):latest .
 
 build:
 	docker compose -f $(COMPOSE_FILE) build $(SERVICE)
 
 build-all:
-	docker build --no-cache -f Dockerfile.base -t $(BASE_IMAGE):latest .
+	docker build --no-cache -f docker/base/Dockerfile -t $(BASE_IMAGE):latest .
 	docker compose -f $(COMPOSE_FILE) build --no-cache $(SERVICE)
 
 bootstrap:
