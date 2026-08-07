@@ -1,10 +1,11 @@
 COMPOSE_FILE   ?= docker-compose.yml
 SERVICE        ?= tr-sync-david
+BASE_IMAGE     ?= tr-sync-base
 IMAGE          ?= tr-wallet-sync
 DATA_DIR       ?= ./data/david
 OUTPUT_DIR     ?= ./output/david
 
-.PHONY: help build rebuild bootstrap sync \
+.PHONY: help build-base build rebuild bootstrap sync \
         docker-build docker-rebuild docker-bootstrap docker-sync \
         test clean
 
@@ -15,6 +16,7 @@ help:
 	@echo "Usage: make <target> [VARIABLE=value]"
 	@echo ""
 	@echo "Docker Compose targets  (uses COMPOSE_FILE=$(COMPOSE_FILE), SERVICE=$(SERVICE))"
+	@echo "  build-base      Build the base image (python + git + pip install) -- rebuild when requirements.txt or Python version changes"
 	@echo "  build           Build the service image (uses cache)"
 	@echo "  rebuild         Build the service image (no cache)"
 	@echo "  bootstrap       Run interactively to complete first-time 2FA login"
@@ -33,7 +35,10 @@ help:
 
 # ── Docker Compose ──────────────────────────────────────────────────────────
 
-build:
+build-base:
+	docker build -f Dockerfile.base -t $(BASE_IMAGE):latest .
+
+build: build-base
 	docker compose -f $(COMPOSE_FILE) build $(SERVICE)
 
 rebuild:
