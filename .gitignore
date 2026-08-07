@@ -1,3 +1,33 @@
+# Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment / secrets
 .env
+*.env
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IntelliJ / PyCharm
+.idea/
+*.iml
+
+# macOS
+.DS_Store
+
+# Runtime data (mounted volumes in Docker — not for repo)
+data/
+output/
