@@ -4,148 +4,173 @@ Dockerized Python service that runs a one-shot sync from Trade Republic (`pytr`)
 
 ## Architecture
 
-- `app/main.py` — orchestration entrypoint; reads env vars, fetches timeline events, applies lookback and dedup, writes CSV backup.
-- `app/tr_client.py` — Trade Republic client bootstrap/login and timeline retrieval fallback.
-- `app/wallet_client.py` — BudgetBakers API client and Trade Republic event → Wallet record mapping.
-- `app/notifier.py` — Telegram notification helper for authentication/session renewal alerts.
-- `/app/data` (mounted volume) — persistent `pytr` session/cookies + SQLite dedup DB (`processed_events.db`).
-- `/app/output` (mounted volume) — monthly append-only CSV backups (`TradeRepublic_<OWNER_NAME>_<YYYY-MM>.csv`).
+```
+app/
+  config.py         # Config dataclass — reads all env vars in one place
+  persistence.py    # SQLite dedup DB + monthly CSV backup
+  tr_mapper.py      # Trade Republic event → BudgetBakers record conversion
+  tr_client.py      # pytr wrapper: login, 2FA, timeline fetch
+  wallet_client.py  # BudgetBakers HTTP client (POST /v1/api/records)
+  notifier.py       # Telegram notifications (transversal)
+  logging_setup.py  # Rotating file + console logging (transversal)
+  main.py           # Orchestrator: wires all modules together
+```
+
+**Data volumes (mounted from host):**
+
+- `/app/data` — pytr session/cookies + SQLite dedup DB (`processed_events.db`) + `sync.log`
+- `/app/output` — monthly append-only CSV backups (`TradeRepublic_<OWNER_NAME>_<YYYY-MM>.csv`)
+
+**Docker images:**
+
+- `ghcr.io/sanmibuh/python-trade-republic` — base image (Python 3.11 + system deps + pip packages). Published on major releases.
+- `ghcr.io/sanmibuh/tr-wallet-sync` — app image. Published on minor/patch releases.
 
 ## Required environment variables
 
-- `OWNER_NAME`
-- `PHONE_NUMBER`
-- `PIN` — your Trade Republic account PIN
-- `WALLET_API_KEY`
-- `WALLET_CASH_ACCOUNT_ID`
-- `WALLET_PORTFOLIO_ACCOUNT_ID`
+| Variable | Description |
+|---|---|
+| `OWNER_NAME` | Display name used in logs and Telegram messages |
+| `PHONE_NUMBER` | Trade Republic account phone number (e.g. `+49123456789`) |
+| `PIN` | Trade Republic account PIN |
+| `WALLET_API_KEY` | BudgetBakers Wallet API key |
+| `WALLET_CASH_ACCOUNT_ID` | BudgetBakers cash account UUID |
+| `WALLET_PORTFOLIO_ACCOUNT_ID` | BudgetBakers portfolio account UUID |
 
 Optional:
 
-- `LOOKBACK_DAYS` (default: `7`)
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
+| Variable | Default | Description |
+|---|---|---|
+| `LOOKBACK_DAYS` | `7` | How many days back to fetch events |
+| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for notifications |
+| `TELEGRAM_CHAT_ID` | — | Telegram chat ID for notifications |
 
-## Build and run (single account)
+## Quickstart (Docker Compose)
 
-```bash
-docker build -t tr-wallet-sync .
+### 1. Create your `docker-compose.yml`
 
-docker run --rm \
-  -e OWNER_NAME="username1" \
-  -e PHONE_NUMBER="+49123456789" \
-  -e PIN="<your_tr_pin>" \
-  -e WALLET_API_KEY="<wallet_api_key>" \
-  -e WALLET_CASH_ACCOUNT_ID="<cash_account_id>" \
-  -e WALLET_PORTFOLIO_ACCOUNT_ID="<portfolio_account_id>" \
-  -e LOOKBACK_DAYS="7" \
-  -e TELEGRAM_BOT_TOKEN="<telegram_bot_token>" \
-  -e TELEGRAM_CHAT_ID="<telegram_chat_id>" \
-  -v "$(pwd)/data/username1:/app/data" \
-  -v "$(pwd)/output/username1:/app/output" \
-  tr-wallet-sync
+> `docker-compose.yml` is gitignored — never commit secrets.
+
+```yaml
+services:
+  username1:
+    image: ghcr.io/sanmibuh/tr-wallet-sync:latest
+    environment:
+      OWNER_NAME: "username1"
+      PHONE_NUMBER: "+49123456789"
+      PIN: "<your_tr_pin>"
+      WALLET_API_KEY: "<wallet_api_key>"
+      WALLET_CASH_ACCOUNT_ID: "<cash_account_id>"
+      WALLET_PORTFOLIO_ACCOUNT_ID: "<portfolio_account_id>"
+      LOOKBACK_DAYS: "7"
+      TELEGRAM_BOT_TOKEN: "<telegram_bot_token>"
+      TELEGRAM_CHAT_ID: "<telegram_chat_id>"
+    volumes:
+      - ./username1/data:/app/data
+      - ./username1/output:/app/output
 ```
 
-## Trade Republic session/token bootstrap
+### 2. First-time login (interactive 2FA)
 
-`pytr` stores the authenticated Trade Republic session in `/app/data` (mounted from your host).  
-For a first-time setup (or after session expiry) you must run the container **interactively** so the login/2FA flow can be completed and the session persisted to disk. Choose the method that matches your setup:
-
-### Via docker run
+`pytr` needs an interactive login the first time (or after session expiry):
 
 ```bash
-docker run --rm -it \
-  -e OWNER_NAME="username1" \
-  -e PHONE_NUMBER="+49123456789" \
-  -e PIN="<your_tr_pin>" \
-  -e WALLET_API_KEY="<wallet_api_key>" \
-  -e WALLET_CASH_ACCOUNT_ID="<cash_account_id>" \
-  -e WALLET_PORTFOLIO_ACCOUNT_ID="<portfolio_account_id>" \
-  -v "$(pwd)/data/username1:/app/data" \
-  -v "$(pwd)/output/username1:/app/output" \
-  tr-wallet-sync
+make bootstrap SERVICE=username1
 ```
 
-### Via Docker Compose
+Approve the push notification in your Trade Republic app (or enter the authenticator code).
+The session is saved to `./username1/data` and reused in future runs.
+
+### 3. Run a sync
 
 ```bash
-docker compose -f /path/to/your-compose.yml run --rm <service-name>
+make sync SERVICE=username1
 ```
 
-Replace `<service-name>` with the name defined in your compose file (e.g. `tr-sync-username1`).
+## Makefile targets
 
-After successful authentication, keep using the same `./data/username1` mount so the saved session/token can be reused in non-interactive runs.
+```
+make <target> SERVICE=<name>
+```
+
+`SERVICE` is required for all targets except `build-base`, `test`, and `clean`.
+
+| Target | Description |
+|---|---|
+| `build-base` | Build the base Docker image (`python-trade-republic`) |
+| `build` | Build the app image (assumes base exists) |
+| `build-all` | Full rebuild — base + app, no cache |
+| `bootstrap` | Interactive first-time login |
+| `sync` | One-shot sync run |
+| `test` | Run the test suite |
+| `clean` | Remove `__pycache__` and `.pytest_cache` |
+
+## Building from source
+
+If you prefer to build locally instead of pulling from ghcr:
+
+```bash
+make build-base          # builds python-trade-republic:latest
+make build SERVICE=username1
+make sync  SERVICE=username1
+```
 
 ## Periodic execution (cron)
 
 Example crontab entry to run every day at 06:00:
 
 ```cron
-0 6 * * * /usr/bin/docker run --rm --env-file /absolute/path/to/trade-republic-budget-bakers-sync/env/username1.env -v /absolute/path/to/trade-republic-budget-bakers-sync/data/username1:/app/data -v /absolute/path/to/trade-republic-budget-bakers-sync/output/username1:/app/output tr-wallet-sync >> /var/log/tr-wallet-sync-username1.log 2>&1
+0 6 * * * cd /path/to/trade-republic-budget-bakers-sync && make sync SERVICE=username1 >> /var/log/tr-sync-username1.log 2>&1
 ```
 
-Store `OWNER_NAME`, `PHONE_NUMBER`, `PIN`, `WALLET_API_KEY`, `WALLET_CASH_ACCOUNT_ID`, `WALLET_PORTFOLIO_ACCOUNT_ID`, and optional Telegram values in the env file (e.g. `env/username1.env`) instead of writing secrets directly in crontab.
+Or with plain Docker if you prefer not to use Make:
 
-If you use Docker Compose locally, place your compose file in your infrastructure folder and schedule `docker compose -f /path/to/your-compose.yml run --rm <service-name>` instead.
+```cron
+0 6 * * * docker run --rm --env-file /path/to/username1.env \
+  -v /path/to/username1/data:/app/data \
+  -v /path/to/username1/output:/app/output \
+  ghcr.io/sanmibuh/tr-wallet-sync:latest >> /var/log/tr-sync-username1.log 2>&1
+```
 
-## Docker Compose examples
+## Multiple accounts
 
-`docker-compose.yml` is intentionally not committed. You can create your own compose file depending on how many accounts you run.
-
-### Example: single account
+Add one service per account in `docker-compose.yml`:
 
 ```yaml
 services:
-  tr-sync-username1:
-    build: .
+  username1:
+    image: ghcr.io/sanmibuh/tr-wallet-sync:latest
     environment:
       OWNER_NAME: "username1"
-      PHONE_NUMBER: "${USERNAME1_PHONE_NUMBER:?USERNAME1_PHONE_NUMBER is required}"
-      PIN: "${USERNAME1_PIN:?USERNAME1_PIN is required}"
-      WALLET_API_KEY: "${USERNAME1_WALLET_API_KEY:?USERNAME1_WALLET_API_KEY is required}"
-      WALLET_CASH_ACCOUNT_ID: "${USERNAME1_WALLET_CASH_ACCOUNT_ID:?USERNAME1_WALLET_CASH_ACCOUNT_ID is required}"
-      WALLET_PORTFOLIO_ACCOUNT_ID: "${USERNAME1_WALLET_PORTFOLIO_ACCOUNT_ID:?USERNAME1_WALLET_PORTFOLIO_ACCOUNT_ID is required}"
-      TELEGRAM_BOT_TOKEN: "${USERNAME1_TELEGRAM_BOT_TOKEN:-}"
-      TELEGRAM_CHAT_ID: "${USERNAME1_TELEGRAM_CHAT_ID:-}"
-      LOOKBACK_DAYS: "7"
+      PHONE_NUMBER: "${USERNAME1_PHONE:?required}"
+      PIN: "${USERNAME1_PIN:?required}"
+      WALLET_API_KEY: "${USERNAME1_WALLET_API_KEY:?required}"
+      WALLET_CASH_ACCOUNT_ID: "${USERNAME1_CASH_ID:?required}"
+      WALLET_PORTFOLIO_ACCOUNT_ID: "${USERNAME1_PORTFOLIO_ID:?required}"
     volumes:
-      - ./data/username1:/app/data
-      - ./output/username1:/app/output
-```
+      - ./username1/data:/app/data
+      - ./username1/output:/app/output
 
-### Example: multiple accounts
-
-```yaml
-services:
-  tr-sync-username1:
-    build: .
-    environment:
-      OWNER_NAME: "username1"
-      PHONE_NUMBER: "${USERNAME1_PHONE_NUMBER:?USERNAME1_PHONE_NUMBER is required}"
-      PIN: "${USERNAME1_PIN:?USERNAME1_PIN is required}"
-      WALLET_API_KEY: "${USERNAME1_WALLET_API_KEY:?USERNAME1_WALLET_API_KEY is required}"
-      WALLET_CASH_ACCOUNT_ID: "${USERNAME1_WALLET_CASH_ACCOUNT_ID:?USERNAME1_WALLET_CASH_ACCOUNT_ID is required}"
-      WALLET_PORTFOLIO_ACCOUNT_ID: "${USERNAME1_WALLET_PORTFOLIO_ACCOUNT_ID:?USERNAME1_WALLET_PORTFOLIO_ACCOUNT_ID is required}"
-      TELEGRAM_BOT_TOKEN: "${USERNAME1_TELEGRAM_BOT_TOKEN:-}"
-      TELEGRAM_CHAT_ID: "${USERNAME1_TELEGRAM_CHAT_ID:-}"
-      LOOKBACK_DAYS: "7"
-    volumes:
-      - ./data/username1:/app/data
-      - ./output/username1:/app/output
-
-  tr-sync-username2:
-    build: .
+  username2:
+    image: ghcr.io/sanmibuh/tr-wallet-sync:latest
     environment:
       OWNER_NAME: "username2"
-      PHONE_NUMBER: "${USERNAME2_PHONE_NUMBER:?USERNAME2_PHONE_NUMBER is required}"
-      PIN: "${USERNAME2_PIN:?USERNAME2_PIN is required}"
-      WALLET_API_KEY: "${USERNAME2_WALLET_API_KEY:?USERNAME2_WALLET_API_KEY is required}"
-      WALLET_CASH_ACCOUNT_ID: "${USERNAME2_WALLET_CASH_ACCOUNT_ID:?USERNAME2_WALLET_CASH_ACCOUNT_ID is required}"
-      WALLET_PORTFOLIO_ACCOUNT_ID: "${USERNAME2_WALLET_PORTFOLIO_ACCOUNT_ID:?USERNAME2_WALLET_PORTFOLIO_ACCOUNT_ID is required}"
-      TELEGRAM_BOT_TOKEN: "${USERNAME2_TELEGRAM_BOT_TOKEN:-}"
-      TELEGRAM_CHAT_ID: "${USERNAME2_TELEGRAM_CHAT_ID:-}"
-      LOOKBACK_DAYS: "7"
+      PHONE_NUMBER: "${USERNAME2_PHONE:?required}"
+      PIN: "${USERNAME2_PIN:?required}"
+      WALLET_API_KEY: "${USERNAME2_WALLET_API_KEY:?required}"
+      WALLET_CASH_ACCOUNT_ID: "${USERNAME2_CASH_ID:?required}"
+      WALLET_PORTFOLIO_ACCOUNT_ID: "${USERNAME2_PORTFOLIO_ID:?required}"
     volumes:
-      - ./data/username2:/app/data
-      - ./output/username2:/app/output
+      - ./username2/data:/app/data
+      - ./username2/output:/app/output
+```
+
+Then bootstrap and sync each independently:
+
+```bash
+make bootstrap SERVICE=username1
+make bootstrap SERVICE=username2
+
+make sync SERVICE=username1
+make sync SERVICE=username2
 ```
