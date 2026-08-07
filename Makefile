@@ -1,9 +1,22 @@
 COMPOSE_FILE   ?= docker-compose.yml
-SERVICE        ?= tr-sync-david
-BASE_IMAGE     ?= tr-sync-base
+BASE_IMAGE     ?= python-trade-republic
 IMAGE          ?= tr-wallet-sync
-DATA_DIR       ?= ./data/david
-OUTPUT_DIR     ?= ./output/david
+
+# SERVICE must be passed explicitly, e.g.: make sync SERVICE=david
+ifndef SERVICE
+  ifneq ($(MAKECMDGOALS),help)
+  ifneq ($(MAKECMDGOALS),build-base)
+  ifneq ($(MAKECMDGOALS),test)
+  ifneq ($(MAKECMDGOALS),clean)
+  $(error SERVICE is required. Usage: make <target> SERVICE=<name>  e.g. make sync SERVICE=david)
+  endif
+  endif
+  endif
+  endif
+endif
+
+DATA_DIR       = ./$(SERVICE)/data
+OUTPUT_DIR     = ./$(SERVICE)/output
 
 .PHONY: help build-base build build-all bootstrap sync \
         docker-build docker-rebuild docker-bootstrap docker-sync \
@@ -13,9 +26,12 @@ OUTPUT_DIR     ?= ./output/david
 
 help:
 	@echo ""
-	@echo "Usage: make <target> [VARIABLE=value]"
+	@echo "Usage: make <target> SERVICE=<name> [VARIABLE=value]"
 	@echo ""
-	@echo "Docker Compose targets  (uses COMPOSE_FILE=$(COMPOSE_FILE), SERVICE=$(SERVICE))"
+	@echo "  SERVICE is required for most targets (e.g. SERVICE=david)"
+	@echo "  Directories are resolved as ./<SERVICE>/data and ./<SERVICE>/output"
+	@echo ""
+	@echo "Docker Compose targets  (uses COMPOSE_FILE=$(COMPOSE_FILE))"
 	@echo "  build-base      Build the base image (python + git + pip install) -- run when requirements.txt or Python version changes"
 	@echo "  build           Build the app image only (assumes base exists) -- run after code changes"
 	@echo "  build-all       Rebuild base + app both from scratch (no cache) -- full clean build"

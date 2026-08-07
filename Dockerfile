@@ -1,4 +1,4 @@
-FROM tr-sync-base:latest
+FROM python-trade-republic:latest
 
 WORKDIR /app
 
