@@ -88,7 +88,7 @@ def test_send_telegram_message_disables_ssl_verify():
     assert mock_post.call_args.kwargs["verify"] is False
 
 
-
+def test_send_telegram_message_request_exception_returns_false():
     mock_response = MagicMock()
     mock_response.raise_for_status.side_effect = requests.RequestException("fail")
 
