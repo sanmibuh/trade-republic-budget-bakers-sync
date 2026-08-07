@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import logging
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -10,6 +11,7 @@ from typing import Any
 
 from requests import HTTPError
 
+from app.logging_setup import setup_logging
 from app.notifier import notify_authentication_required, notify_error, notify_login_failed, notify_login_required, notify_login_success
 from app.tr_client import connect_trade_republic, fetch_timeline_events, LoginFailedError
 from app.wallet_client import WalletClient, normalize_event_time, sync_event_to_wallet
@@ -144,11 +146,15 @@ def run() -> int:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    log = setup_logging(DATA_DIR)
+    log.info("Starting sync for owner: %s", owner_name)
+
     conn = _init_db(DB_PATH)
     try:
         wallet_client = WalletClient(api_key=wallet_api_key)
 
         since = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        log.info("Fetching events since %s", since.isoformat())
 
         try:
             tr_client = connect_trade_republic(
@@ -166,8 +172,11 @@ def run() -> int:
                     owner_name=owner_name,
                 ),
             )
+            log.info("Trade Republic session established")
             events = fetch_timeline_events(tr_client, since=since)
+            log.info("Fetched %d timeline events", len(events))
         except LoginFailedError:
+            log.exception("Login failed")
             notify_login_failed(
                 bot_token=telegram_bot_token,
                 chat_id=telegram_chat_id,
@@ -175,6 +184,7 @@ def run() -> int:
             )
             return 1
         except AuthenticationError:
+            log.exception("Authentication error")
             notify_authentication_required(
                 bot_token=telegram_bot_token,
                 chat_id=telegram_chat_id,
@@ -183,6 +193,7 @@ def run() -> int:
             return 1
         except HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else None
+            log.exception("HTTP error (status=%s)", status)
             if status == 401:
                 notify_authentication_required(
                     bot_token=telegram_bot_token,
@@ -193,14 +204,18 @@ def run() -> int:
             notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
             raise
         except Exception as exc:
+            log.exception("Unexpected error during TR connection/fetch")
             notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
             raise
 
         recent_events = _filter_by_lookback(events, since)
         new_events = _filter_unprocessed_events(recent_events, conn)
+        log.info("%d new events to sync (after dedup)", len(new_events))
 
         try:
             for event in new_events:
+                event_id = _dedup_event_id(event)
+                log.debug("Syncing event %s", event_id)
                 sync_event_to_wallet(
                     wallet_client,
                     event,
@@ -209,9 +224,12 @@ def run() -> int:
                 )
                 _mark_processed(conn, event)
                 conn.commit()
+                log.debug("Event %s synced and marked processed", event_id)
 
             _backup_csv(owner_name=owner_name, events=new_events)
+            log.info("Sync complete. %d events synced.", len(new_events))
         except Exception as exc:
+            log.exception("Error syncing events to wallet")
             notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
             raise
 

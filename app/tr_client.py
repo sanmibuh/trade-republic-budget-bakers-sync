@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+
+log = logging.getLogger(__name__)
 
 
 def connect_trade_republic(
@@ -25,7 +28,10 @@ def connect_trade_republic(
 
     # Try to reuse an existing session first.
     if client.resume_websession():
+        log.info("Resumed existing Trade Republic session")
         return client
+
+    log.info("No saved session found, starting interactive login")
 
     # No saved session — notify and run the interactive login flow.
     if on_login_required:
@@ -33,12 +39,33 @@ def connect_trade_republic(
 
     try:
         client.initiate_weblogin()
-        verify_code = input("Enter the 2FA code sent by Trade Republic: ").strip()
-        client.complete_weblogin(verify_code=verify_code)
-        # v1 login calls save_websession() internally; call explicitly as safety net
-        client.save_websession()
+
+        if client.weblogin_needs_authenticator:
+            print("Enter the code from your authenticator app: ", end="", flush=True)
+            code = input().strip()
+            log.debug("Submitting authenticator code")
+            client.complete_weblogin(verify_code=code)
+            # complete_weblogin() for authenticator verifies the code but never
+            # polls for CONFIRMED status on the login process. That final GET
+            # /processes/{id} response is what transitions the session from
+            # "pending" to fully active (and may set additional cookies).
+            # _await_weblogin_confirmation() returns immediately if already
+            # CONFIRMED, but still makes the request that establishes the session.
+            log.debug("Polling login process for CONFIRMED status")
+            client._await_weblogin_confirmation()
+            client.save_websession()
+        else:
+            log.info("Waiting for push notification approval in Trade Republic app...")
+            print("Waiting for you to approve the login in the Trade Republic app...")
+            client.complete_weblogin()
+
+        log.info("Login completed, session saved")
+        # complete_weblogin() already calls save_websession() internally.
+    except LoginFailedError:
+        raise
     except Exception as exc:
-        raise LoginFailedError("2FA login failed") from exc
+        log.exception("Login failed with exception: %s", exc)
+        raise LoginFailedError(f"2FA login failed: {exc}") from exc
 
     if on_login_success:
         on_login_success()
@@ -51,30 +78,42 @@ class LoginFailedError(Exception):
 
 
 def fetch_timeline_events(client: Any, since: datetime) -> list[dict[str, Any]]:
-    providers = [
-        ("timeline", (since,)),
-        ("timeline", ()),
-        ("get_timeline", (since,)),
-        ("get_timeline", ()),
-        ("timeline_transactions", (since,)),
-        ("timeline_transactions", ()),
-    ]
+    # Before opening a websocket subscription, the web session token must be
+    # present in the cookie jar. pytr's _web_request calls
+    # GET /api/v1/auth/web/session on its first HTTP request and that endpoint
+    # sets (or refreshes) the auth token cookie.  Without it the websocket
+    # server replies with AUTHENTICATION_ERROR: No auth token.
+    log.debug("Calling settings() to prime the web session token")
+    try:
+        client.settings()
+        log.debug("settings() succeeded — web session token is ready")
+    except Exception as exc:
+        log.warning("settings() failed before websocket subscription: %s", exc)
 
-    last_error: Exception | None = None
-    for method_name, args in providers:
+    # The web login connection (connect_id=31) does not support the `timeline`
+    # subscription type — it requires `timelineTransactions` or
+    # `timelineActivityLog`. Try both in order.
+    candidates = ["timeline_transactions", "timeline_activity_log"]
+
+    for method_name in candidates:
         method = getattr(client, method_name, None)
         if method is None:
+            log.debug("Method %s not found on client, skipping", method_name)
             continue
+        log.debug("Fetching timeline via %s", method_name)
         try:
-            result = _resolve(client, method(*args))
-            return _parse_result(result)
-        except TypeError as exc:
-            last_error = exc
-            continue
+            result = _resolve(client, method())
+            events = _parse_result(result)
+            log.debug("Got %d raw events from %s", len(events), method_name)
+            return events
+        except Exception as exc:
+            log.warning("Method %s failed: %s — client event loop may be tainted, stopping", method_name, exc)
+            # After any asyncio.run() failure the client's internal lock is
+            # attached to the now-closed loop. Stop trying rather than retrying
+            # with the same client.
+            raise RuntimeError(f"Timeline fetch via {method_name} failed: {exc}") from exc
 
-    if last_error:
-        raise RuntimeError("Unable to fetch timeline events with known pytr methods") from last_error
-    raise RuntimeError("No supported timeline method found on pytr client")
+    raise RuntimeError("No supported timeline method worked for the current pytr connection")
 
 
 def _resolve(client: Any, coroutine_or_result: Any) -> Any:

@@ -4,13 +4,17 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import urllib3
 import requests
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class WalletClient:
     def __init__(self, api_key: str, base_url: str = "https://api.budgetbakers.com") -> None:
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
+        self.session.verify = False
         self.session.headers.update(
             {
                 "Authorization": "Bearer " + api_key,
