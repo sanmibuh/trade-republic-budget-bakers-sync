@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -48,8 +49,26 @@ def _event_id(event: dict[str, Any]) -> str:
     return ""
 
 
+def _dedup_event_id(event: dict[str, Any]) -> str:
+    event_id = _event_id(event)
+    if event_id:
+        return event_id
+
+    seed = "|".join(
+        [
+            str(event.get("eventType") or event.get("type") or event.get("event_type") or ""),
+            normalize_event_time(event),
+            str(event.get("amount") or event.get("value") or ""),
+            str(event.get("title") or event.get("name") or event.get("description") or ""),
+        ]
+    )
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return f"hash:{digest}"
+
+
 def _filter_unprocessed_events(events: list[dict[str, Any]], conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    ids = [event_id for event_id in (_event_id(event) for event in events) if event_id]
+    events_with_ids = [(event, _dedup_event_id(event)) for event in events]
+    ids = [dedup_id for _, dedup_id in events_with_ids]
     if not ids:
         return []
 
@@ -59,7 +78,7 @@ def _filter_unprocessed_events(events: list[dict[str, Any]], conn: sqlite3.Conne
     ).fetchall()
     processed = {row[0] for row in rows}
 
-    return [event for event in events if (_event_id(event) and _event_id(event) not in processed)]
+    return [event for event, dedup_id in events_with_ids if dedup_id not in processed]
 
 
 def _filter_by_lookback(events: list[dict[str, Any]], since: datetime) -> list[dict[str, Any]]:
@@ -79,10 +98,7 @@ def _filter_by_lookback(events: list[dict[str, Any]], since: datetime) -> list[d
 
 
 def _mark_processed(conn: sqlite3.Connection, event: dict[str, Any]) -> None:
-    event_id = _event_id(event)
-    if not event_id:
-        return
-
+    event_id = _dedup_event_id(event)
     event_time = normalize_event_time(event)
     conn.execute(
         "INSERT OR IGNORE INTO processed_events (event_id, timestamp) VALUES (?, ?)",
@@ -95,15 +111,16 @@ def _backup_csv(owner_name: str, events: list[dict[str, Any]]) -> Path:
     backup_file = OUTPUT_DIR / f"TradeRepublic_{owner_name}_{month}.csv"
     headers = ["event_id", "event_type", "timestamp", "raw"]
 
+    file_has_data = backup_file.exists() and backup_file.stat().st_size > 0
     with backup_file.open("a", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=headers)
-        if handle.tell() == 0:
+        if not file_has_data:
             writer.writeheader()
 
         for event in events:
             writer.writerow(
                 {
-                    "event_id": _event_id(event),
+                    "event_id": _dedup_event_id(event),
                     "event_type": event.get("eventType") or event.get("type") or event.get("event_type") or "",
                     "timestamp": normalize_event_time(event),
                     "raw": str(event),
@@ -127,48 +144,49 @@ def run() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     conn = _init_db(DB_PATH)
-    wallet_client = WalletClient(api_key=wallet_api_key)
-
-    since = datetime.now(timezone.utc) - timedelta(days=lookback_days)
-
     try:
-        tr_client = connect_trade_republic(phone_number=phone_number, data_dir=DATA_DIR)
-        events = fetch_timeline_events(tr_client, since=since)
-    except AuthenticationError:
-        notify_authentication_required(
-            bot_token=telegram_bot_token,
-            chat_id=telegram_chat_id,
-            owner_name=owner_name,
-        )
-        return 1
-    except HTTPError as exc:
-        status = exc.response.status_code if exc.response is not None else None
-        if status == 401:
+        wallet_client = WalletClient(api_key=wallet_api_key)
+
+        since = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+
+        try:
+            tr_client = connect_trade_republic(phone_number=phone_number, data_dir=DATA_DIR)
+            events = fetch_timeline_events(tr_client, since=since)
+        except AuthenticationError:
             notify_authentication_required(
                 bot_token=telegram_bot_token,
                 chat_id=telegram_chat_id,
                 owner_name=owner_name,
             )
             return 1
-        raise
+        except HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            if status == 401:
+                notify_authentication_required(
+                    bot_token=telegram_bot_token,
+                    chat_id=telegram_chat_id,
+                    owner_name=owner_name,
+                )
+                return 1
+            raise
 
-    recent_events = _filter_by_lookback(events, since)
-    new_events = _filter_unprocessed_events(recent_events, conn)
+        recent_events = _filter_by_lookback(events, since)
+        new_events = _filter_unprocessed_events(recent_events, conn)
 
-    for event in new_events:
-        sync_event_to_wallet(
-            wallet_client,
-            event,
-            cash_account_id=wallet_cash_account_id,
-            portfolio_account_id=wallet_portfolio_account_id,
-        )
-        _mark_processed(conn, event)
+        for event in new_events:
+            sync_event_to_wallet(
+                wallet_client,
+                event,
+                cash_account_id=wallet_cash_account_id,
+                portfolio_account_id=wallet_portfolio_account_id,
+            )
+            _mark_processed(conn, event)
+            conn.commit()
 
-    conn.commit()
-    conn.close()
-
-    _backup_csv(owner_name=owner_name, events=new_events)
-    return 0
+        _backup_csv(owner_name=owner_name, events=new_events)
+        return 0
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

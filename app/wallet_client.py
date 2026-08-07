@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -68,7 +68,7 @@ def _to_decimal(value: Any) -> Decimal:
     return Decimal("0")
 
 
-def _get_nested(payload: dict[str, Any], *keys: str) -> Any:
+def _get_first_match(payload: dict[str, Any], *keys: str) -> Any:
     for key in keys:
         if key in payload:
             return payload[key]
@@ -76,9 +76,9 @@ def _get_nested(payload: dict[str, Any], *keys: str) -> Any:
 
 
 def extract_amount(event: dict[str, Any], *keys: str) -> Decimal:
-    value = _get_nested(event, *keys)
+    value = _get_first_match(event, *keys)
     if value is None and isinstance(event.get("amount"), dict):
-        value = _get_nested(event["amount"], *keys)
+        value = _get_first_match(event["amount"], *keys)
     return _to_decimal(value)
 
 
@@ -90,7 +90,7 @@ def normalize_event_time(event: dict[str, Any]) -> str:
         if isinstance(value, datetime):
             return value.isoformat()
         return str(value)
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def sync_event_to_wallet(
@@ -100,9 +100,9 @@ def sync_event_to_wallet(
     cash_account_id: str,
     portfolio_account_id: str,
 ) -> None:
-    event_type = str(_get_nested(event, "eventType", "type", "event_type") or "").upper()
+    event_type = str(_get_first_match(event, "eventType", "type", "event_type") or "").upper()
     event_time = normalize_event_time(event)
-    event_label = str(_get_nested(event, "title", "name", "description") or event_type or "Trade Republic event")
+    event_label = str(_get_first_match(event, "title", "name", "description") or event_type or "Trade Republic event")
 
     amount = extract_amount(event, "amount", "value", "grossAmount", "gross", "total")
     tax = extract_amount(event, "tax", "taxAmount", "withholdingTax")

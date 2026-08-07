@@ -10,6 +10,7 @@ def connect_trade_republic(phone_number: str, data_dir: Path) -> Any:
 
     # pytr stores and reuses session files from this path.
     client = TradeRepublicApi(phone_no=phone_number, save_cookies=True, cookie_path=str(data_dir))
+    did_attempt_login = False
 
     for method_name in ("resume_websession", "resume_session", "login"):
         method = getattr(client, method_name, None)
@@ -17,9 +18,13 @@ def connect_trade_republic(phone_number: str, data_dir: Path) -> Any:
             continue
         try:
             method()
+            did_attempt_login = True
             break
         except TypeError:
             continue
+
+    if not did_attempt_login:
+        raise RuntimeError("No supported pytr authentication method found on client")
 
     return client
 

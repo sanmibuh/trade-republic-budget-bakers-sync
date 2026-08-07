@@ -4,12 +4,12 @@ services:
     container_name: tr-sync-david
     environment:
       OWNER_NAME: "david"
-      PHONE_NUMBER: ""
-      WALLET_API_KEY: ""
-      WALLET_CASH_ACCOUNT_ID: ""
-      WALLET_PORTFOLIO_ACCOUNT_ID: ""
-      TELEGRAM_BOT_TOKEN: ""
-      TELEGRAM_CHAT_ID: ""
+      PHONE_NUMBER: "${DAVID_PHONE_NUMBER:-}"
+      WALLET_API_KEY: "${DAVID_WALLET_API_KEY:-}"
+      WALLET_CASH_ACCOUNT_ID: "${DAVID_WALLET_CASH_ACCOUNT_ID:-}"
+      WALLET_PORTFOLIO_ACCOUNT_ID: "${DAVID_WALLET_PORTFOLIO_ACCOUNT_ID:-}"
+      TELEGRAM_BOT_TOKEN: "${DAVID_TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_CHAT_ID: "${DAVID_TELEGRAM_CHAT_ID:-}"
       LOOKBACK_DAYS: "7"
     volumes:
       - ./data/david:/app/data
@@ -20,12 +20,12 @@ services:
     container_name: tr-sync-eli
     environment:
       OWNER_NAME: "eli"
-      PHONE_NUMBER: ""
-      WALLET_API_KEY: ""
-      WALLET_CASH_ACCOUNT_ID: ""
-      WALLET_PORTFOLIO_ACCOUNT_ID: ""
-      TELEGRAM_BOT_TOKEN: ""
-      TELEGRAM_CHAT_ID: ""
+      PHONE_NUMBER: "${ELI_PHONE_NUMBER:-}"
+      WALLET_API_KEY: "${ELI_WALLET_API_KEY:-}"
+      WALLET_CASH_ACCOUNT_ID: "${ELI_WALLET_CASH_ACCOUNT_ID:-}"
+      WALLET_PORTFOLIO_ACCOUNT_ID: "${ELI_WALLET_PORTFOLIO_ACCOUNT_ID:-}"
+      TELEGRAM_BOT_TOKEN: "${ELI_TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_CHAT_ID: "${ELI_TELEGRAM_CHAT_ID:-}"
       LOOKBACK_DAYS: "7"
     volumes:
       - ./data/eli:/app/data
