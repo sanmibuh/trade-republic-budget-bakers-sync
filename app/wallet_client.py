@@ -141,7 +141,8 @@ def normalize_event_time(event: dict[str, Any]) -> str:
 _EVENT_TITLES: dict[str, str] = {
     "INTEREST_PAYOUT": "Interest Payout",
     "INTEREST_PAYMENT": "Interest Payment",
-    "SAVEBACK": "Saveback",
+    "SPARE_CHANGE_AGGREGATE": "Round-up Investment",
+    "SAVEBACK_AGGREGATE": "Saveback",
     "BUY_ORDER": "Buy Order",
     "SELL_ORDER": "Sell Order",
     "TRADING_SAVINGSPLAN_EXECUTED": "Savings Plan",
@@ -149,6 +150,7 @@ _EVENT_TITLES: dict[str, str] = {
     "CARD_VERIFICATION": "Card Verification",
     "PAYMENT_INBOUND": "Payment Inbound",
     "BANK_TRANSACTION_INCOMING": "Bank Transfer In",
+    "BANK_TRANSACTION_OUTGOING": "Bank Transfer Out",
 }
 
 
@@ -219,7 +221,7 @@ def build_records_for_event(
     if event_type == "INTEREST_PAYOUT":
         return [_rec(cash_account_id, amount, note)]
 
-    if event_type in {"BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER", "TRADING_SAVINGSPLAN_EXECUTED"}:
+    if event_type in {"BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER", "TRADING_SAVINGSPLAN_EXECUTED", "SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE"}:
         return [_rec(cash_account_id, amount, note, transfer_account_id=portfolio_account_id)]
 
     if event_type == "SAVEBACK":
@@ -228,10 +230,10 @@ def build_records_for_event(
     if event_type == "CARD_TRANSACTION":
         return [_rec(cash_account_id, amount, note, payment_type="debit_card")]
 
-    if event_type == "BANK_TRANSACTION_INCOMING":
+    if event_type in {"BANK_TRANSACTION_INCOMING", "BANK_TRANSACTION_OUTGOING"}:
         counter_party = str(event.get("subtitle") or "").strip() or None
         tr_title = str(_get_first_match(event, "title", "name", "description") or "").strip()
-        direction = "From" if amount > 0 else "To"
+        direction = "From" if event_type == "BANK_TRANSACTION_INCOMING" else "To"
         transfer_note = f"{direction}: {tr_title}" if tr_title else note
         return [_rec(
             cash_account_id, amount, transfer_note,

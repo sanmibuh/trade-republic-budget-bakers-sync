@@ -145,7 +145,7 @@ def test_build_interest_payment_no_tax():
     assert "transfer" not in r
 
 
-@pytest.mark.parametrize("event_type", ["BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER", "TRADING_SAVINGSPLAN_EXECUTED"])
+@pytest.mark.parametrize("event_type", ["BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER", "TRADING_SAVINGSPLAN_EXECUTED", "SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE"])
 def test_build_order_events_use_transfer(event_type):
     event = {"eventType": event_type, "timestamp": "2024-01-01T00:00:00Z", "amount": "200.00"}
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
@@ -195,17 +195,22 @@ def test_build_bank_transaction_incoming_uses_transfer():
     assert r["counterParty"] == "DE89370400440532013000"
 
 
-def test_build_bank_transaction_negative_uses_to():
+def test_build_bank_transaction_outgoing_uses_to():
     event = {
-        "eventType": "BANK_TRANSACTION_INCOMING",
+        "eventType": "BANK_TRANSACTION_OUTGOING",
         "timestamp": "2024-01-01T00:00:00Z",
         "amount": "-200.00",
         "title": "Landlord",
-        "subtitle": None,
+        "subtitle": "DE12345678901234567890",
     }
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
 
-    assert records[0]["note"] == "To: Landlord"
+    assert len(records) == 1
+    r = records[0]
+    assert r["paymentType"] == "transfer"
+    assert r["note"] == "To: Landlord"
+    assert r["transfer"] == {"pairingMode": "unpaired"}
+    assert r["counterParty"] == "DE12345678901234567890"
 
 
 def test_build_bank_transaction_incoming_no_subtitle():
