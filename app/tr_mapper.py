@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Callable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def filter_by_lookback(events: list[dict[str, Any]], since: datetime) -> list[di
 
 def _to_decimal(value: Any) -> Decimal:
     if value is None:
-        return Decimal("0")
+        return Decimal(0)
     if isinstance(value, Decimal):
         return value
     if isinstance(value, (int, float)):
@@ -56,12 +57,12 @@ def _to_decimal(value: Any) -> Decimal:
     if isinstance(value, str):
         normalized = value.replace(",", ".").replace("€", "").replace(" ", "").strip()
         if normalized == "":
-            return Decimal("0")
+            return Decimal(0)
         try:
             return Decimal(normalized)
         except InvalidOperation:
-            return Decimal("0")
-    return Decimal("0")
+            return Decimal(0)
+    return Decimal(0)
 
 
 def _get_first_match(payload: dict[str, Any], *keys: str) -> Any:
@@ -209,9 +210,12 @@ _HANDLERS: dict[str, _EventHandler] = {
     "SPARE_CHANGE_AGGREGATE":       _handle_transfer_to_portfolio,
     "SAVEBACK":                     _handle_saveback,
     "CARD_TRANSACTION":             _handle_card,
+    "CARD_VERIFICATION":            _handle_cash,   # always zero-amount; handler never reached
     "BANK_TRANSACTION_INCOMING":    _handle_bank_transaction,
     "BANK_TRANSACTION_OUTGOING":    _handle_bank_transaction,
 }
+
+KNOWN_EVENT_TYPES: frozenset[str] = frozenset(_HANDLERS)
 
 
 # ---------------------------------------------------------------------------
@@ -239,5 +243,8 @@ def build_records_for_event(
 
     record_date = normalize_event_time(event)
     note = _event_note(event, event_type)
-    handler = _HANDLERS.get(event_type, _handle_cash)
+    handler = _HANDLERS.get(event_type)
+    if handler is None:
+        log.warning("Unknown TR event type %r — falling back to cash handler", event_type)
+        handler = _handle_cash
     return handler(event, amount, note, record_date, cash_account_id, portfolio_account_id)

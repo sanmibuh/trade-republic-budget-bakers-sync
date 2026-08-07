@@ -1,37 +1,37 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 
 from app.tr_mapper import (
-    _to_decimal,
+    KNOWN_EVENT_TYPES,
     _get_first_match,
-    extract_amount,
-    normalize_event_time,
+    _to_decimal,
     build_records_for_event,
+    extract_amount,
     filter_by_lookback,
+    normalize_event_time,
 )
-
 
 # ---------------------------------------------------------------------------
 # _to_decimal
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("value,expected", [
-    (None, Decimal("0")),
-    (0, Decimal("0")),
-    (5, Decimal("5")),
+    (None, Decimal(0)),
+    (0, Decimal(0)),
+    (5, Decimal(5)),
     (3.14, Decimal("3.14")),
     (Decimal("1.5"), Decimal("1.5")),
     ("10.50", Decimal("10.50")),
     ("10,50", Decimal("10.50")),
     ("€ 9.99", Decimal("9.99")),
-    ("", Decimal("0")),
-    ("  ", Decimal("0")),
-    ("not-a-number", Decimal("0")),
+    ("", Decimal(0)),
+    ("  ", Decimal(0)),
+    ("not-a-number", Decimal(0)),
 ])
 def test_to_decimal(value, expected):
     assert _to_decimal(value) == expected
@@ -39,8 +39,8 @@ def test_to_decimal(value, expected):
 
 def test_to_decimal_unsupported_type_returns_zero():
     """An unsupported type (e.g. list) should fall through to the final return Decimal('0')."""
-    assert _to_decimal([1, 2, 3]) == Decimal("0")
-    assert _to_decimal({"value": 5}) == Decimal("0")
+    assert _to_decimal([1, 2, 3]) == Decimal(0)
+    assert _to_decimal({"value": 5}) == Decimal(0)
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +73,7 @@ def test_extract_amount_nested_dict():
 
 
 def test_extract_amount_missing_returns_zero():
-    assert extract_amount({}, "amount") == Decimal("0")
+    assert extract_amount({}, "amount") == Decimal(0)
 
 
 def test_extract_amount_tr_dict_format():
@@ -281,6 +281,29 @@ def test_build_unknown_event_type_posts_to_cash():
     assert len(records) == 1
     assert records[0]["accountId"] == "cash"
     assert records[0]["note"] == "Something"
+
+
+def test_build_unknown_event_type_logs_warning():
+    event = {"eventType": "MYSTERY_TYPE", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00"}
+    import logging
+    with patch.object(logging.getLogger("app.tr_mapper"), "warning") as mock_warn:
+        build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    mock_warn.assert_called_once()
+    assert "MYSTERY_TYPE" in mock_warn.call_args.args[1]
+
+
+def test_known_event_types_contains_expected_types():
+    for t in ("BUY_ORDER", "SELL_ORDER", "CARD_TRANSACTION", "INTEREST_PAYMENT",
+              "BANK_TRANSACTION_INCOMING", "BANK_TRANSACTION_OUTGOING"):
+        assert t in KNOWN_EVENT_TYPES
+
+
+def test_known_event_type_does_not_log_warning():
+    event = {"eventType": "BUY_ORDER", "timestamp": "2024-01-01T00:00:00Z", "amount": "100.00"}
+    import logging
+    with patch.object(logging.getLogger("app.tr_mapper"), "warning") as mock_warn:
+        build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    mock_warn.assert_not_called()
 
 
 def test_build_zero_amount_returns_empty():

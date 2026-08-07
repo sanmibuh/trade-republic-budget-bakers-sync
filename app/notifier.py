@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
-import urllib3
+
 import requests
+import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -135,6 +136,17 @@ class Notifier:
             f"New: *{new}* · Skipped \\(already synced\\): *{skipped}*"
         )
 
+    def unknown_event_type(self, event_type: str) -> bool:
+        safe = self._safe_owner()
+        safe_type = _escape_markdown(event_type)
+        return self._send(
+            "⚠️ *Trade Republic Sync: Unknown Event Type*\n\n"
+            f"Owner: *{safe}*\n"
+            f"Event type `{safe_type}` is not recognised\\.\n"
+            "It has been processed using the default cash handler\\.\n"
+            "Please report this type so a proper handler can be added\\."
+        )
+
     def sync_complete(
         self,
         *,
@@ -177,6 +189,10 @@ def notify_login_failed(bot_token: str | None, chat_id: str | None, owner_name: 
 
 def notify_login_success(bot_token: str | None, chat_id: str | None, owner_name: str) -> bool:
     return Notifier(bot_token, chat_id, owner_name).login_success()
+
+
+def notify_unknown_event_type(bot_token: str | None, chat_id: str | None, owner_name: str, event_type: str) -> bool:
+    return Notifier(bot_token, chat_id, owner_name).unknown_event_type(event_type)
 
 
 def notify_error(bot_token: str | None, chat_id: str | None, owner_name: str, error: Exception) -> bool:

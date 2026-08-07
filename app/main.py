@@ -12,12 +12,12 @@ from app.logging_setup import setup_logging
 from app.notifier import Notifier
 from app.persistence import EventRepository, dedup_event_id
 from app.tr_client import LoginFailedError, TRClient
-from app.tr_mapper import build_records_for_event, filter_by_lookback
+from app.tr_mapper import KNOWN_EVENT_TYPES, build_records_for_event, filter_by_lookback
 from app.wallet_client import WalletClient
 
 try:
     from pytr.exceptions import AuthenticationError
-except Exception:  # pragma: no cover
+except Exception:  # pragma: no cover  # noqa: BLE001
     AuthenticationError = Exception
 
 log = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ def _fetch_events(
             on_login_success=notifier.login_success,
         )
         log.info("Trade Republic session established")
-        events = tr_client.fetch_timeline_events(since=since)
+        events = tr_client.fetch_timeline_events()
         log.info("Fetched %d timeline events", len(events))
         return events
     except LoginFailedError:
@@ -90,6 +90,7 @@ def _build_batch(
     new_events: list[dict[str, Any]],
     cfg: Config,
     repo: EventRepository,
+    notifier: Notifier,
 ) -> _Batch:
     """Convert new events into API records, marking zero-amount ones as excluded."""
     all_records: list[dict] = []
@@ -97,6 +98,13 @@ def _build_batch(
     excluded_count = 0
 
     for event_idx, event in enumerate(new_events):
+        event_type = str(
+            event.get("eventType") or event.get("type") or event.get("event_type") or ""
+        ).upper()
+        if event_type and event_type not in KNOWN_EVENT_TYPES:
+            log.warning("Unknown TR event type %r — notifying and falling back to cash handler", event_type)
+            notifier.unknown_event_type(event_type)
+
         recs = build_records_for_event(
             event,
             cash_account_id=cfg.wallet_cash_account_id,
@@ -138,7 +146,7 @@ def _process_results(
             repo.mark_processed(event)
             synced += 1
         else:
-            failed += len(failures)
+            failed += 1
             eid = dedup_event_id(event)
             for f in failures:
                 log.error("Event %s record %d failed: %s", eid, f.get("inputIndex"), f.get("error"))
@@ -180,7 +188,7 @@ def run() -> int:
 
         counts = _SyncCounts()
         try:
-            batch = _build_batch(new_events, cfg, repo)
+            batch = _build_batch(new_events, cfg, repo, notifier)
             counts.excluded = batch.excluded_count
 
             if batch.records:

@@ -7,16 +7,16 @@ import requests
 from app.notifier import (
     Notifier,
     _escape_markdown,
-    send_telegram_message,
     notify_authentication_required,
-    notify_login_required,
-    notify_login_failed,
-    notify_login_success,
     notify_error,
     notify_fetch_summary,
+    notify_login_failed,
+    notify_login_required,
+    notify_login_success,
     notify_sync_complete,
+    notify_unknown_event_type,
+    send_telegram_message,
 )
-
 
 # ---------------------------------------------------------------------------
 # _escape_markdown
@@ -87,7 +87,7 @@ def test_send_telegram_message_disables_ssl_verify():
     assert mock_post.call_args.kwargs["verify"] is False
 
 
-
+def test_send_telegram_message_request_exception_returns_false():
     mock_response = MagicMock()
     mock_response.raise_for_status.side_effect = requests.RequestException("fail")
 
@@ -113,7 +113,7 @@ def test_notify_authentication_required_calls_send():
 
 
 def test_notify_authentication_required_no_credentials():
-    with patch("app.notifier.send_telegram_message", return_value=False) as mock_send:
+    with patch("app.notifier.send_telegram_message", return_value=False):
         result = notify_authentication_required(None, None, "owner")
     assert result is False
 
@@ -334,3 +334,28 @@ def test_notifier_no_credentials_returns_false():
     notifier = Notifier(bot_token=None, chat_id=None, owner_name="David")
     assert notifier.login_required() is False
     assert notifier.sync_complete(synced=1, failed=0, skipped=0) is False
+
+
+# ---------------------------------------------------------------------------
+# unknown_event_type
+# ---------------------------------------------------------------------------
+
+def test_notifier_unknown_event_type_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = _make_notifier().unknown_event_type("MYSTERY_TYPE")
+    assert result is True
+    msg = mock_send.call_args.kwargs["message"]
+    assert "MYSTERY" in msg  # underscore gets escaped in MarkdownV2
+    assert "⚠" in msg
+
+
+def test_notifier_unknown_event_type_no_credentials():
+    notifier = Notifier(bot_token=None, chat_id=None, owner_name="David")
+    assert notifier.unknown_event_type("MYSTERY_TYPE") is False
+
+
+def test_notify_unknown_event_type_compat():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = notify_unknown_event_type("tok", "chat", "David", "NEW_EVENT")
+    assert result is True
+    assert "NEW" in mock_send.call_args.kwargs["message"]  # underscore gets escaped

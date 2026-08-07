@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -108,7 +108,7 @@ class EventRepository:
         amount = str(event.get("amount") or event.get("value") or "")
         try:
             raw = json.dumps(event, ensure_ascii=False, default=str)
-        except Exception:
+        except TypeError:
             raw = str(event)
         synced_at = datetime.now(timezone.utc).isoformat()
 
@@ -124,7 +124,6 @@ class EventRepository:
         cutoff = datetime.now(timezone.utc).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
-        from datetime import timedelta
         cutoff -= timedelta(days=ttl_days)
         cursor = self._conn.execute(
             "DELETE FROM processed_events WHERE synced_at < ?",
@@ -142,7 +141,7 @@ class EventRepository:
     def close(self) -> None:
         self._conn.close()
 
-    def __enter__(self) -> "EventRepository":
+    def __enter__(self) -> EventRepository:  # noqa: PYI034
         return self
 
     def __exit__(self, *_: object) -> None:
