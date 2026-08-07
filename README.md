@@ -68,7 +68,7 @@ After successful authentication, keep using the same `./data/username1` mount so
 Example crontab entry to run every day at 06:00:
 
 ```cron
-0 6 * * * cd /absolute/path/to/trade-republic-budget-bakers-sync && /usr/bin/docker run --rm --env-file /absolute/path/to/trade-republic-budget-bakers-sync/env/username1.env -v /absolute/path/to/trade-republic-budget-bakers-sync/data/username1:/app/data -v /absolute/path/to/trade-republic-budget-bakers-sync/output/username1:/app/output tr-wallet-sync >> /var/log/tr-wallet-sync-username1.log 2>&1
+0 6 * * * /usr/bin/docker run --rm --env-file /absolute/path/to/trade-republic-budget-bakers-sync/env/username1.env -v /absolute/path/to/trade-republic-budget-bakers-sync/data/username1:/app/data -v /absolute/path/to/trade-republic-budget-bakers-sync/output/username1:/app/output tr-wallet-sync >> /var/log/tr-wallet-sync-username1.log 2>&1
 ```
 
 Store `OWNER_NAME`, `PHONE_NUMBER`, `WALLET_API_KEY`, `WALLET_CASH_ACCOUNT_ID`, `WALLET_PORTFOLIO_ACCOUNT_ID`, and optional Telegram values in the env file (e.g. `env/username1.env`) instead of writing secrets directly in crontab.
