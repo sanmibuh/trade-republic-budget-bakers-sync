@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +21,7 @@ class TRClient:
             on_login_required=notifier.login_required,
             on_login_success=notifier.login_success,
         )
-        events = client.fetch_timeline_events(since=since)
+        events = client.fetch_timeline_events()
     """
 
     def __init__(self, phone_number: str, pin: str, data_dir: Path) -> None:
@@ -79,7 +78,7 @@ class TRClient:
         except LoginFailedError:
             raise
         except Exception as exc:
-            log.exception("Login failed with exception: %s", exc)
+            log.exception("Login failed with exception")
             raise LoginFailedError(f"2FA login failed: {exc}") from exc
 
         if on_login_success:
@@ -87,7 +86,7 @@ class TRClient:
 
         self._api = client
 
-    def fetch_timeline_events(self, since: datetime) -> list[dict[str, Any]]:
+    def fetch_timeline_events(self) -> list[dict[str, Any]]:
         """Fetch all timeline events from Trade Republic."""
         if self._api is None:
             raise RuntimeError("TRClient.connect() must be called before fetch_timeline_events()")
@@ -96,7 +95,7 @@ class TRClient:
         try:
             self._api.settings()
             log.debug("settings() succeeded — web session token is ready")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             log.warning("settings() failed before websocket subscription: %s", exc)
 
         candidates = ["timeline_transactions", "timeline_activity_log"]
@@ -152,10 +151,10 @@ def connect_trade_republic(
     return client
 
 
-def fetch_timeline_events(client: Any, since: datetime) -> list[dict[str, Any]]:
+def fetch_timeline_events(client: Any) -> list[dict[str, Any]]:
     if isinstance(client, TRClient):
-        return client.fetch_timeline_events(since)
+        return client.fetch_timeline_events()
     # Legacy: raw pytr client passed directly
     tr = TRClient.__new__(TRClient)
     tr._api = client
-    return tr.fetch_timeline_events(since)
+    return tr.fetch_timeline_events()

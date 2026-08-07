@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import urllib3
 import requests
+import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 

@@ -1,22 +1,19 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from app.config import _required_env
-from app.config import _positive_int_env
+from app.config import _positive_int_env, _required_env
 from app.persistence import (
     EventRepository,
     dedup_event_id,
     event_id,
 )
 from app.tr_mapper import filter_by_lookback
-
 
 # ---------------------------------------------------------------------------
 # _required_env
@@ -112,7 +109,9 @@ def test_dedup_event_id_falls_back_to_hash():
 
 def test_dedup_event_id_hash_is_deterministic():
     event = {"eventType": "BUY_ORDER", "timestamp": "2024-06-01T10:00:00Z", "amount": "100", "title": "AAPL"}
-    assert dedup_event_id(event) == dedup_event_id(event)
+    first = dedup_event_id(event)
+    second = dedup_event_id(event)
+    assert first == second
 
 
 def test_dedup_event_id_different_events_produce_different_hashes():
@@ -278,7 +277,7 @@ def test_purge_empty_db_returns_zero(tmp_path):
 def test_repo_context_manager_closes_connection(tmp_path):
     with EventRepository(tmp_path / "db") as repo:
         conn = repo._conn
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.ProgrammingError):
         conn.execute("SELECT 1")
 
 
@@ -335,8 +334,8 @@ def test_filter_by_lookback_multiple_events():
 # ---------------------------------------------------------------------------
 
 def test_build_batch_notifies_on_unknown_event_type(tmp_path):
-    from app.main import _build_batch
     from app.config import Config
+    from app.main import _build_batch
     from app.notifier import Notifier
 
     cfg = MagicMock(spec=Config)
@@ -353,8 +352,8 @@ def test_build_batch_notifies_on_unknown_event_type(tmp_path):
 
 
 def test_build_batch_no_notification_for_known_event_type(tmp_path):
-    from app.main import _build_batch
     from app.config import Config
+    from app.main import _build_batch
     from app.notifier import Notifier
 
     cfg = MagicMock(spec=Config)

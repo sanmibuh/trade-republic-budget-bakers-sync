@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Callable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def filter_by_lookback(events: list[dict[str, Any]], since: datetime) -> list[di
 
 def _to_decimal(value: Any) -> Decimal:
     if value is None:
-        return Decimal("0")
+        return Decimal(0)
     if isinstance(value, Decimal):
         return value
     if isinstance(value, (int, float)):
@@ -56,12 +57,12 @@ def _to_decimal(value: Any) -> Decimal:
     if isinstance(value, str):
         normalized = value.replace(",", ".").replace("€", "").replace(" ", "").strip()
         if normalized == "":
-            return Decimal("0")
+            return Decimal(0)
         try:
             return Decimal(normalized)
         except InvalidOperation:
-            return Decimal("0")
-    return Decimal("0")
+            return Decimal(0)
+    return Decimal(0)
 
 
 def _get_first_match(payload: dict[str, Any], *keys: str) -> Any:

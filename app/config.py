@@ -37,7 +37,7 @@ class Config:
     data_dir: Path
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls) -> Config:
         return cls(
             owner_name=_required_env("OWNER_NAME"),
             phone_number=_required_env("PHONE_NUMBER"),

@@ -108,7 +108,7 @@ class EventRepository:
         amount = str(event.get("amount") or event.get("value") or "")
         try:
             raw = json.dumps(event, ensure_ascii=False, default=str)
-        except Exception:
+        except TypeError:
             raw = str(event)
         synced_at = datetime.now(timezone.utc).isoformat()
 
@@ -141,7 +141,7 @@ class EventRepository:
     def close(self) -> None:
         self._conn.close()
 
-    def __enter__(self) -> "EventRepository":
+    def __enter__(self) -> EventRepository:  # noqa: PYI034
         return self
 
     def __exit__(self, *_: object) -> None:

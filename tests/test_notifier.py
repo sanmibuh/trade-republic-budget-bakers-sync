@@ -7,17 +7,16 @@ import requests
 from app.notifier import (
     Notifier,
     _escape_markdown,
-    send_telegram_message,
     notify_authentication_required,
-    notify_login_required,
-    notify_login_failed,
-    notify_login_success,
     notify_error,
     notify_fetch_summary,
+    notify_login_failed,
+    notify_login_required,
+    notify_login_success,
     notify_sync_complete,
     notify_unknown_event_type,
+    send_telegram_message,
 )
-
 
 # ---------------------------------------------------------------------------
 # _escape_markdown
@@ -114,7 +113,7 @@ def test_notify_authentication_required_calls_send():
 
 
 def test_notify_authentication_required_no_credentials():
-    with patch("app.notifier.send_telegram_message", return_value=False) as mock_send:
+    with patch("app.notifier.send_telegram_message", return_value=False):
         result = notify_authentication_required(None, None, "owner")
     assert result is False
 

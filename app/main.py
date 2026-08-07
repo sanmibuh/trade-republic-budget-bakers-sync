@@ -12,12 +12,12 @@ from app.logging_setup import setup_logging
 from app.notifier import Notifier
 from app.persistence import EventRepository, dedup_event_id
 from app.tr_client import LoginFailedError, TRClient
-from app.tr_mapper import build_records_for_event, filter_by_lookback, KNOWN_EVENT_TYPES
+from app.tr_mapper import KNOWN_EVENT_TYPES, build_records_for_event, filter_by_lookback
 from app.wallet_client import WalletClient
 
 try:
     from pytr.exceptions import AuthenticationError
-except Exception:  # pragma: no cover
+except Exception:  # pragma: no cover  # noqa: BLE001
     AuthenticationError = Exception
 
 log = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ def _fetch_events(
             on_login_success=notifier.login_success,
         )
         log.info("Trade Republic session established")
-        events = tr_client.fetch_timeline_events(since=since)
+        events = tr_client.fetch_timeline_events()
         log.info("Fetched %d timeline events", len(events))
         return events
     except LoginFailedError:

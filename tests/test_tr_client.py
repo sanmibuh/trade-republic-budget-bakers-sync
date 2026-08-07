@@ -1,19 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.tr_client import TRClient, LoginFailedError
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-SINCE = datetime(2024, 1, 1, tzinfo=timezone.utc)
+from app.tr_client import LoginFailedError, TRClient
 
 
 def _make_pytr_client(*, needs_authenticator: bool = True, resume: bool = False) -> MagicMock:
@@ -94,20 +86,22 @@ def test_connect_authenticator_calls_on_login_success(tmp_path):
 def test_connect_authenticator_raises_login_failed_on_bad_code(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
     pytr.complete_weblogin.side_effect = Exception("VALIDATION_CODE_INVALID")
+    tr_client = _make_tr_client(tmp_path)
     with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         patch("builtins.input", return_value="000000"):
+         patch("builtins.input", return_value="000000"):  # noqa: SIM117 — nested with required by S5778
         with pytest.raises(LoginFailedError):
-            _make_tr_client(tmp_path).connect()
+            tr_client.connect()
 
 
 def test_connect_authenticator_no_success_callback_on_failure(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
     pytr.complete_weblogin.side_effect = Exception("401")
     on_login_success = MagicMock()
+    tr_client = _make_tr_client(tmp_path)
     with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         patch("builtins.input", return_value="000000"):
+         patch("builtins.input", return_value="000000"):  # noqa: SIM117 — nested with required by S5778
         with pytest.raises(LoginFailedError):
-            _make_tr_client(tmp_path).connect(on_login_success=on_login_success)
+            tr_client.connect(on_login_success=on_login_success)
     on_login_success.assert_not_called()
 
 
@@ -151,8 +145,9 @@ def test_connect_passes_correct_files_to_api(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_fetch_raises_if_not_connected(tmp_path):
+    tr_client = _make_tr_client(tmp_path)
     with pytest.raises(RuntimeError, match="connect\\(\\)"):
-        _make_tr_client(tmp_path).fetch_timeline_events(SINCE)
+        tr_client.fetch_timeline_events()
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +159,7 @@ def test_fetch_calls_settings_before_subscription(tmp_path):
     pytr.timeline_transactions.return_value = []
     client = _make_tr_client(tmp_path)
     client._api = pytr
-    client.fetch_timeline_events(since=SINCE)
+    client.fetch_timeline_events()
     pytr.settings.assert_called_once()
 
 
@@ -174,7 +169,7 @@ def test_fetch_continues_if_settings_raises(tmp_path):
     pytr.timeline_transactions.return_value = []
     client = _make_tr_client(tmp_path)
     client._api = pytr
-    result = client.fetch_timeline_events(since=SINCE)
+    result = client.fetch_timeline_events()
     assert result == []
 
 
@@ -187,7 +182,7 @@ def test_fetch_uses_timeline_transactions(tmp_path):
     pytr.timeline_transactions.return_value = [{"id": "1"}]
     client = _make_tr_client(tmp_path)
     client._api = pytr
-    result = client.fetch_timeline_events(since=SINCE)
+    result = client.fetch_timeline_events()
     pytr.timeline_transactions.assert_called_once_with()
     assert result == [{"id": "1"}]
 
@@ -197,7 +192,7 @@ def test_fetch_falls_back_to_timeline_activity_log(tmp_path):
     pytr.timeline_activity_log.return_value = [{"id": "2"}]
     client = _make_tr_client(tmp_path)
     client._api = pytr
-    result = client.fetch_timeline_events(since=SINCE)
+    result = client.fetch_timeline_events()
     pytr.timeline_activity_log.assert_called_once_with()
     assert result == [{"id": "2"}]
 
@@ -207,7 +202,7 @@ def test_fetch_raises_when_no_method_found(tmp_path):
     client = _make_tr_client(tmp_path)
     client._api = pytr
     with pytest.raises(RuntimeError, match="No supported timeline method"):
-        client.fetch_timeline_events(since=SINCE)
+        client.fetch_timeline_events()
 
 
 def test_fetch_raises_on_trade_republic_error(tmp_path):
@@ -218,7 +213,7 @@ def test_fetch_raises_on_trade_republic_error(tmp_path):
     client = _make_tr_client(tmp_path)
     client._api = pytr
     with pytest.raises(RuntimeError):
-        client.fetch_timeline_events(since=SINCE)
+        client.fetch_timeline_events()
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +225,7 @@ def test_fetch_parses_list_directly(tmp_path):
     pytr.timeline_transactions.return_value = [{"id": "1"}, {"id": "2"}]
     client = _make_tr_client(tmp_path)
     client._api = pytr
-    assert client.fetch_timeline_events(since=SINCE) == [{"id": "1"}, {"id": "2"}]
+    assert client.fetch_timeline_events() == [{"id": "1"}, {"id": "2"}]
 
 
 def test_fetch_parses_dict_with_items(tmp_path):
@@ -238,7 +233,7 @@ def test_fetch_parses_dict_with_items(tmp_path):
     pytr.timeline_transactions.return_value = {"items": [{"id": "1"}]}
     client = _make_tr_client(tmp_path)
     client._api = pytr
-    assert client.fetch_timeline_events(since=SINCE) == [{"id": "1"}]
+    assert client.fetch_timeline_events() == [{"id": "1"}]
 
 
 def test_fetch_parses_dict_with_data(tmp_path):
@@ -246,7 +241,7 @@ def test_fetch_parses_dict_with_data(tmp_path):
     pytr.timeline_transactions.return_value = {"data": [{"id": "2"}]}
     client = _make_tr_client(tmp_path)
     client._api = pytr
-    assert client.fetch_timeline_events(since=SINCE) == [{"id": "2"}]
+    assert client.fetch_timeline_events() == [{"id": "2"}]
 
 
 def test_fetch_filters_non_dict_items(tmp_path):
@@ -254,7 +249,7 @@ def test_fetch_filters_non_dict_items(tmp_path):
     pytr.timeline_transactions.return_value = [{"id": "ok"}, "string", 42, None]
     client = _make_tr_client(tmp_path)
     client._api = pytr
-    assert client.fetch_timeline_events(since=SINCE) == [{"id": "ok"}]
+    assert client.fetch_timeline_events() == [{"id": "ok"}]
 
 
 def test_fetch_returns_empty_on_none(tmp_path):
@@ -262,7 +257,7 @@ def test_fetch_returns_empty_on_none(tmp_path):
     pytr.timeline_transactions.return_value = None
     client = _make_tr_client(tmp_path)
     client._api = pytr
-    assert client.fetch_timeline_events(since=SINCE) == []
+    assert client.fetch_timeline_events() == []
 
 
 def test_fetch_returns_empty_on_unexpected_type(tmp_path):
@@ -270,7 +265,7 @@ def test_fetch_returns_empty_on_unexpected_type(tmp_path):
     pytr.timeline_transactions.return_value = "unexpected"
     client = _make_tr_client(tmp_path)
     client._api = pytr
-    assert client.fetch_timeline_events(since=SINCE) == []
+    assert client.fetch_timeline_events() == []
 
 
 def test_fetch_handles_async_coroutine(tmp_path):
@@ -284,6 +279,6 @@ def test_fetch_handles_async_coroutine(tmp_path):
     pytr.run_blocking.side_effect = lambda coro, timeout=5.0: asyncio.run(coro)
     client = _make_tr_client(tmp_path)
     client._api = pytr
-    result = client.fetch_timeline_events(since=SINCE)
+    result = client.fetch_timeline_events()
     assert result == [{"id": "async-event"}]
     pytr.run_blocking.assert_called_once()

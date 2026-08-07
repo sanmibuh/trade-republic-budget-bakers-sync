@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
-import urllib3
+
 import requests
+import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 

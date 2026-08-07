@@ -1,38 +1,37 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 
 from app.tr_mapper import (
-    _to_decimal,
-    _get_first_match,
-    extract_amount,
-    normalize_event_time,
-    build_records_for_event,
-    filter_by_lookback,
     KNOWN_EVENT_TYPES,
+    _get_first_match,
+    _to_decimal,
+    build_records_for_event,
+    extract_amount,
+    filter_by_lookback,
+    normalize_event_time,
 )
-
 
 # ---------------------------------------------------------------------------
 # _to_decimal
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("value,expected", [
-    (None, Decimal("0")),
-    (0, Decimal("0")),
-    (5, Decimal("5")),
+    (None, Decimal(0)),
+    (0, Decimal(0)),
+    (5, Decimal(5)),
     (3.14, Decimal("3.14")),
     (Decimal("1.5"), Decimal("1.5")),
     ("10.50", Decimal("10.50")),
     ("10,50", Decimal("10.50")),
     ("€ 9.99", Decimal("9.99")),
-    ("", Decimal("0")),
-    ("  ", Decimal("0")),
-    ("not-a-number", Decimal("0")),
+    ("", Decimal(0)),
+    ("  ", Decimal(0)),
+    ("not-a-number", Decimal(0)),
 ])
 def test_to_decimal(value, expected):
     assert _to_decimal(value) == expected
@@ -40,8 +39,8 @@ def test_to_decimal(value, expected):
 
 def test_to_decimal_unsupported_type_returns_zero():
     """An unsupported type (e.g. list) should fall through to the final return Decimal('0')."""
-    assert _to_decimal([1, 2, 3]) == Decimal("0")
-    assert _to_decimal({"value": 5}) == Decimal("0")
+    assert _to_decimal([1, 2, 3]) == Decimal(0)
+    assert _to_decimal({"value": 5}) == Decimal(0)
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +73,7 @@ def test_extract_amount_nested_dict():
 
 
 def test_extract_amount_missing_returns_zero():
-    assert extract_amount({}, "amount") == Decimal("0")
+    assert extract_amount({}, "amount") == Decimal(0)
 
 
 def test_extract_amount_tr_dict_format():
