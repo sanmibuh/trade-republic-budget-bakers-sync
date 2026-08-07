@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -12,7 +12,7 @@ from app.wallet_client import (
     _get_first_match,
     extract_amount,
     normalize_event_time,
-    sync_event_to_wallet,
+    build_records_for_event,
 )
 
 
@@ -70,6 +70,12 @@ def test_extract_amount_missing_returns_zero():
     assert extract_amount({}, "amount") == Decimal("0")
 
 
+def test_extract_amount_tr_dict_format():
+    """TR sends amount as {"value": 100.0, "currency": "EUR"} — must unwrap value."""
+    event = {"amount": {"value": 100.0, "currency": "EUR"}}
+    assert extract_amount(event, "amount") == Decimal("100.0")
+
+
 # ---------------------------------------------------------------------------
 # normalize_event_time
 # ---------------------------------------------------------------------------
@@ -97,9 +103,7 @@ def test_normalize_event_time_datetime_object():
 
 
 def test_normalize_event_time_fallback_is_isoformat():
-    # No known keys → returns current time as ISO string
     result = normalize_event_time({})
-    # Should parse without error
     datetime.fromisoformat(result.replace("Z", "+00:00"))
 
 
@@ -108,96 +112,298 @@ def test_normalize_event_time_prefers_timestamp_over_date():
     assert normalize_event_time(event) == "2024-01-01T10:00:00Z"
 
 
+def test_normalize_event_time_fixes_numeric_tz_offset():
+    """TR sends +0000 / +0200 without colon — must be normalised to +00:00 / +02:00."""
+    event = {"timestamp": "2026-08-06T22:29:39.067+0000"}
+    assert normalize_event_time(event) == "2026-08-06T22:29:39.067+00:00"
+
+
+def test_normalize_event_time_fixes_nonzero_tz_offset():
+    event = {"timestamp": "2026-08-06T22:29:39.067+0200"}
+    assert normalize_event_time(event) == "2026-08-06T22:29:39.067+02:00"
+
+
 # ---------------------------------------------------------------------------
-# sync_event_to_wallet
+# build_records_for_event
 # ---------------------------------------------------------------------------
 
-def _mock_wallet():
-    client = MagicMock(spec=WalletClient)
-    client.post_record = MagicMock(return_value={})
-    return client
-
-
-def test_sync_interest_payment_no_tax():
-    client = _mock_wallet()
-    event = {"eventType": "INTEREST_PAYMENT", "timestamp": "2024-01-01T00:00:00Z", "amount": "10.00", "title": "Interest"}
-    sync_event_to_wallet(client, event, cash_account_id="cash", portfolio_account_id="port")
-
-    client.post_record.assert_called_once()
-    call_kwargs = client.post_record.call_args.kwargs
-    assert call_kwargs["account_id"] == "cash"
-    assert call_kwargs["tx_type"] == "income"
-    assert call_kwargs["category"] == "Interests"
-    assert call_kwargs["amount"] == Decimal("10.00")
-
-
-def test_sync_interest_payment_with_tax():
-    client = _mock_wallet()
+def test_build_interest_payment_no_tax():
     event = {
         "eventType": "INTEREST_PAYMENT",
         "timestamp": "2024-01-01T00:00:00Z",
         "amount": "10.00",
-        "tax": "2.50",
-        "title": "Interest",
+        "title": "Zinsen",
     }
-    sync_event_to_wallet(client, event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
 
-    assert client.post_record.call_count == 2
-    tax_call = client.post_record.call_args_list[1].kwargs
-    assert tax_call["amount"] == Decimal("-2.50")
-    assert tax_call["tx_type"] == "expense"
-    assert tax_call["category"] == "Taxes"
-
-
-@pytest.mark.parametrize("event_type", ["BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER"])
-def test_sync_order_events_use_transfer(event_type):
-    client = _mock_wallet()
-    event = {"eventType": event_type, "timestamp": "2024-01-01T00:00:00Z", "amount": "200.00"}
-    sync_event_to_wallet(client, event, cash_account_id="cash", portfolio_account_id="port")
-
-    client.post_record.assert_called_once()
-    call_kwargs = client.post_record.call_args.kwargs
-    assert call_kwargs["transfer_account_id"] == "port"
-    assert call_kwargs["account_id"] == "cash"
+    assert len(records) == 1
+    r = records[0]
+    assert r["accountId"] == "cash"
+    assert r["amount"] == {"value": 10.0}
+    assert r["note"] == "Interest Payment: Zinsen"
+    assert r["paymentType"] == "web_payment"
+    assert "transfer" not in r
 
 
-def test_sync_saveback_no_tax():
-    client = _mock_wallet()
-    event = {"eventType": "SAVEBACK", "timestamp": "2024-01-01T00:00:00Z", "amount": "5.00", "title": "Saveback"}
-    sync_event_to_wallet(client, event, cash_account_id="cash", portfolio_account_id="port")
-
-    client.post_record.assert_called_once()
-    call_kwargs = client.post_record.call_args.kwargs
-    assert call_kwargs["account_id"] == "port"
-    assert call_kwargs["category"] == "Cashback / Bonuses"
-
-
-def test_sync_saveback_with_tax():
-    client = _mock_wallet()
+def test_build_interest_payout_note_format():
     event = {
-        "eventType": "SAVEBACK",
+        "eventType": "INTEREST_PAYOUT",
         "timestamp": "2024-01-01T00:00:00Z",
-        "amount": "5.00",
-        "tax": "1.00",
-        "title": "Saveback",
+        "amount": "63.73",
+        "title": "Zinsen",
     }
-    sync_event_to_wallet(client, event, cash_account_id="cash", portfolio_account_id="port")
-    assert client.post_record.call_count == 2
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert len(records) == 1
+    assert records[0]["note"] == "Interest Payout: Zinsen"
+    assert records[0]["accountId"] == "cash"
+    assert records[0]["paymentType"] == "web_payment"
 
 
-def test_sync_unknown_event_type_posts_to_cash():
-    client = _mock_wallet()
-    event = {"eventType": "UNKNOWN_EVENT", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00"}
-    sync_event_to_wallet(client, event, cash_account_id="cash", portfolio_account_id="port")
-
-    client.post_record.assert_called_once()
-    assert client.post_record.call_args.kwargs["account_id"] == "cash"
+def test_build_interest_no_tr_title_uses_mapped():
+    """Interest event with no TR title falls back to mapped title only."""
+    event = {"eventType": "INTEREST_PAYOUT", "timestamp": "2024-01-01T00:00:00Z", "amount": "10.00"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["note"] == "Interest Payout"
 
 
-def test_sync_uses_lowercase_type_field():
-    client = _mock_wallet()
+def test_build_unknown_event_no_title_uses_event_type():
+    """Unknown event type with no TR title falls back to the event_type string."""
+    event = {"eventType": "SOME_FUTURE_TYPE", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["note"] == "SOME_FUTURE_TYPE"
+
+
+@pytest.mark.parametrize("event_type", ["BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER", "TRADING_SAVINGSPLAN_EXECUTED", "SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE"])
+def test_build_order_events_use_transfer(event_type):
+    event = {"eventType": event_type, "timestamp": "2024-01-01T00:00:00Z", "amount": "200.00"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert len(records) == 1
+    r = records[0]
+    assert r["accountId"] == "cash"
+    assert r["transfer"] == {"pairingMode": "new", "accountId": "port"}
+    assert r["paymentType"] == "transfer"
+
+
+def test_build_saveback_no_tax():
+    event = {"eventType": "SAVEBACK", "timestamp": "2024-01-01T00:00:00Z", "amount": "5.00", "title": "Saveback"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert len(records) == 1
+    assert records[0]["accountId"] == "port"
+    assert records[0]["amount"] == {"value": 5.0}
+
+
+def test_build_card_transaction_uses_debit_card():
+    event = {"eventType": "CARD_TRANSACTION", "timestamp": "2024-01-01T00:00:00Z", "amount": "-20.00", "title": "Supermarket"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert len(records) == 1
+    assert records[0]["paymentType"] == "debit_card"
+    assert records[0]["accountId"] == "cash"
+    assert records[0]["note"] == "Supermarket"  # TR title, not mapped
+
+
+def test_build_bank_transaction_incoming_uses_transfer():
+    event = {
+        "eventType": "BANK_TRANSACTION_INCOMING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "500.00",
+        "title": "Salary",
+        "subtitle": "DE89370400440532013000",
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert len(records) == 1
+    r = records[0]
+    assert r["paymentType"] == "transfer"
+    assert r["accountId"] == "cash"
+    assert r["note"] == "From: Salary"
+    assert r["transfer"] == {"pairingMode": "unpaired"}
+    assert r["counterParty"] == "DE89370400440532013000"
+
+
+def test_build_bank_transaction_outgoing_uses_to():
+    event = {
+        "eventType": "BANK_TRANSACTION_OUTGOING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "-200.00",
+        "title": "Landlord",
+        "subtitle": "DE12345678901234567890",
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert len(records) == 1
+    r = records[0]
+    assert r["paymentType"] == "transfer"
+    assert r["note"] == "To: Landlord"
+    assert r["transfer"] == {"pairingMode": "unpaired"}
+    assert r["counterParty"] == "DE12345678901234567890"
+
+
+def test_build_bank_transaction_counter_party_truncated():
+    """counterParty must not exceed 255 characters."""
+    long_subtitle = "X" * 300
+    event = {
+        "eventType": "BANK_TRANSACTION_INCOMING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "100.00",
+        "title": "Test",
+        "subtitle": long_subtitle,
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert len(records[0]["counterParty"]) == 255
+
+
+def test_build_bank_transaction_incoming_no_subtitle():
+    event = {
+        "eventType": "BANK_TRANSACTION_INCOMING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "500.00",
+        "title": "Salary",
+        "subtitle": None,
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert "counterParty" not in records[0]
+    assert records[0]["transfer"] == {"pairingMode": "unpaired"}
+    assert records[0]["note"] == "From: Salary"
+
+
+def test_build_unknown_event_type_posts_to_cash():
+    event = {"eventType": "UNKNOWN_EVENT", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00", "title": "Something"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert len(records) == 1
+    assert records[0]["accountId"] == "cash"
+    assert records[0]["note"] == "Something"  # TR title used as default
+
+
+def test_build_zero_amount_returns_empty():
+    """Events like CARD_VERIFICATION with amount=0 must be excluded (return empty list)."""
+    event = {"eventType": "CARD_VERIFICATION", "timestamp": "2024-01-01T00:00:00Z", "amount": "0.00"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records == []
+
+
+def test_build_zero_amount_tr_dict_format():
+    """Same exclusion when amount comes as TR dict {"value": 0, "currency": "EUR"}."""
+    event = {"eventType": "CARD_VERIFICATION", "timestamp": "2024-01-01T00:00:00Z",
+             "amount": {"value": 0.0, "currency": "EUR"}}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records == []
+
+
+def test_build_uses_lowercase_type_field():
+    """Lowercase 'type' key is uppercased internally — INTEREST_PAYMENT branch fires."""
     event = {"type": "interest_payment", "timestamp": "2024-01-01T00:00:00Z", "amount": "3.00"}
-    sync_event_to_wallet(client, event, cash_account_id="cash", portfolio_account_id="port")
-    # type is uppercased internally, so INTEREST_PAYMENT branch fires
-    call_kwargs = client.post_record.call_args.kwargs
-    assert call_kwargs["tx_type"] == "income"
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert len(records) == 1
+    assert records[0]["accountId"] == "cash"
+    assert records[0]["amount"] == {"value": 3.0}
+
+
+# ---------------------------------------------------------------------------
+# WalletClient.post_records
+# ---------------------------------------------------------------------------
+
+def _make_client() -> WalletClient:
+    return WalletClient(api_key="test-key", base_url="https://example.com/wallet")
+
+
+def _mock_response(status_code: int, body: dict):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = body
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+def test_post_records_empty_returns_empty():
+    client = _make_client()
+    assert client.post_records([]) == []
+
+
+def test_post_records_200_returns_results():
+    client = _make_client()
+    results = [{"inputIndex": 0, "id": "abc", "success": True}]
+    client.session.post = MagicMock(return_value=_mock_response(200, {"results": results}))
+
+    out = client.post_records([{"accountId": "x"}])
+
+    assert out == results
+    client.session.post.assert_called_once()
+    _, kwargs = client.session.post.call_args
+    assert kwargs["params"] == {"returnData": "false"}
+
+
+def test_post_records_207_returns_results():
+    client = _make_client()
+    results = [
+        {"inputIndex": 0, "id": "abc", "success": True},
+        {"inputIndex": 1, "success": False, "error": {"message": "bad"}},
+    ]
+    client.session.post = MagicMock(return_value=_mock_response(207, {"results": results}))
+
+    out = client.post_records([{}, {}])
+    assert out == results
+
+
+def test_post_records_400_returns_results():
+    client = _make_client()
+    results = [{"inputIndex": 0, "success": False, "error": {"message": "validation"}}]
+    client.session.post = MagicMock(return_value=_mock_response(400, {"results": results}))
+
+    out = client.post_records([{}])
+    assert out == results
+
+
+def test_post_records_500_returns_results():
+    client = _make_client()
+    results = [{"inputIndex": 0, "success": False, "error": {"message": "internal error"}}]
+    client.session.post = MagicMock(return_value=_mock_response(500, {"results": results}))
+
+    out = client.post_records([{}])
+    assert out == results
+
+
+def test_post_records_401_raises():
+    client = _make_client()
+    resp = MagicMock()
+    resp.status_code = 401
+    resp.raise_for_status.side_effect = Exception("Unauthorized")
+    client.session.post = MagicMock(return_value=resp)
+
+    with pytest.raises(Exception, match="Unauthorized"):
+        client.post_records([{}])
+
+
+def test_post_records_chunks_at_20():
+    """21 records must produce exactly 2 POST calls (chunks of 20 + 1)."""
+    client = _make_client()
+
+    def _ok_response(request_args, **kwargs):
+        chunk = kwargs.get("json") or request_args[1]
+        results = [
+            {"inputIndex": i, "id": f"id-{i}", "success": True}
+            for i in range(len(chunk))
+        ]
+        return _mock_response(200, {"results": results})
+
+    client.session.post = MagicMock(side_effect=_ok_response)
+
+    records = [{"accountId": f"acc-{i}"} for i in range(21)]
+    results = client.post_records(records)
+
+    assert client.session.post.call_count == 2
+    assert len(results) == 21
+    # inputIndex must be rebased: second chunk item 0 → global index 20
+    assert results[20]["inputIndex"] == 20
+
+
+def test_to_decimal_unsupported_type_returns_zero():
+    """An unsupported type (e.g. list) should fall through to the final return Decimal('0')."""
+    assert _to_decimal([1, 2, 3]) == Decimal("0")
+    assert _to_decimal({"value": 5}) == Decimal("0")

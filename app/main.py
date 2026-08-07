@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import logging
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -10,9 +11,10 @@ from typing import Any
 
 from requests import HTTPError
 
-from app.notifier import notify_authentication_required
-from app.tr_client import connect_trade_republic, fetch_timeline_events
-from app.wallet_client import WalletClient, normalize_event_time, sync_event_to_wallet
+from app.logging_setup import setup_logging
+from app.notifier import notify_authentication_required, notify_error, notify_fetch_summary, notify_login_failed, notify_login_required, notify_login_success, notify_sync_complete
+from app.tr_client import connect_trade_republic, fetch_timeline_events, LoginFailedError
+from app.wallet_client import WalletClient, normalize_event_time, build_records_for_event
 
 try:
     from pytr.exceptions import AuthenticationError
@@ -132,6 +134,7 @@ def _backup_csv(owner_name: str, events: list[dict[str, Any]]) -> Path:
 def run() -> int:
     owner_name = _required_env("OWNER_NAME")
     phone_number = _required_env("PHONE_NUMBER")
+    pin = _required_env("PIN")
     wallet_api_key = _required_env("WALLET_API_KEY")
     wallet_cash_account_id = _required_env("WALLET_CASH_ACCOUNT_ID")
     wallet_portfolio_account_id = _required_env("WALLET_PORTFOLIO_ACCOUNT_ID")
@@ -143,16 +146,45 @@ def run() -> int:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    log = setup_logging(DATA_DIR)
+    log.info("Starting sync for owner: %s", owner_name)
+
     conn = _init_db(DB_PATH)
     try:
         wallet_client = WalletClient(api_key=wallet_api_key)
 
         since = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        log.info("Fetching events since %s", since.isoformat())
 
         try:
-            tr_client = connect_trade_republic(phone_number=phone_number, data_dir=DATA_DIR)
+            tr_client = connect_trade_republic(
+                phone_number=phone_number,
+                pin=pin,
+                data_dir=DATA_DIR,
+                on_login_required=lambda: notify_login_required(
+                    bot_token=telegram_bot_token,
+                    chat_id=telegram_chat_id,
+                    owner_name=owner_name,
+                ),
+                on_login_success=lambda: notify_login_success(
+                    bot_token=telegram_bot_token,
+                    chat_id=telegram_chat_id,
+                    owner_name=owner_name,
+                ),
+            )
+            log.info("Trade Republic session established")
             events = fetch_timeline_events(tr_client, since=since)
+            log.info("Fetched %d timeline events", len(events))
+        except LoginFailedError:
+            log.exception("Login failed")
+            notify_login_failed(
+                bot_token=telegram_bot_token,
+                chat_id=telegram_chat_id,
+                owner_name=owner_name,
+            )
+            return 1
         except AuthenticationError:
+            log.exception("Authentication error")
             notify_authentication_required(
                 bot_token=telegram_bot_token,
                 chat_id=telegram_chat_id,
@@ -161,6 +193,7 @@ def run() -> int:
             return 1
         except HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else None
+            log.exception("HTTP error (status=%s)", status)
             if status == 401:
                 notify_authentication_required(
                     bot_token=telegram_bot_token,
@@ -168,22 +201,104 @@ def run() -> int:
                     owner_name=owner_name,
                 )
                 return 1
+            notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
+            raise
+        except Exception as exc:
+            log.exception("Unexpected error during TR connection/fetch")
+            notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
             raise
 
         recent_events = _filter_by_lookback(events, since)
         new_events = _filter_unprocessed_events(recent_events, conn)
+        skipped_count = len(recent_events) - len(new_events)
+        log.info("%d new events to sync (after dedup)", len(new_events))
 
-        for event in new_events:
-            sync_event_to_wallet(
-                wallet_client,
-                event,
-                cash_account_id=wallet_cash_account_id,
-                portfolio_account_id=wallet_portfolio_account_id,
+        notify_fetch_summary(
+            bot_token=telegram_bot_token,
+            chat_id=telegram_chat_id,
+            owner_name=owner_name,
+            since=since.strftime("%Y-%m-%d"),
+            until=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            fetched=len(recent_events),
+            new=len(new_events),
+            skipped=skipped_count,
+        )
+
+        synced_count = 0
+        excluded_count = 0
+        try:
+            # Build all record payloads in one pass, tracking which event each belongs to.
+            all_records: list[dict] = []
+            event_record_indices: list[list[int]] = [[] for _ in new_events]
+
+            for event_idx, event in enumerate(new_events):
+                recs = build_records_for_event(
+                    event,
+                    cash_account_id=wallet_cash_account_id,
+                    portfolio_account_id=wallet_portfolio_account_id,
+                )
+                if not recs:
+                    # Zero-amount event (e.g. CARD_VERIFICATION) — mark processed so
+                    # it won't reappear on the next run, but don't send to the API.
+                    _mark_processed(conn, event)
+                    excluded_count += 1
+                    log.info("Excluded zero-amount event %s", _dedup_event_id(event))
+                    continue
+                for r in recs:
+                    event_record_indices[event_idx].append(len(all_records))
+                    all_records.append(r)
+
+            if all_records:
+                results = wallet_client.post_records(all_records)
+                log.debug("API results: %s", results)
+                # Key by inputIndex. Items absent from results are treated as
+                # succeeded (API may omit successful items when returnData=false).
+                failed_by_index = {
+                    r.get("inputIndex", i): r
+                    for i, r in enumerate(results)
+                    if r.get("error")
+                }
+
+                for event_idx, event in enumerate(new_events):
+                    record_indices = event_record_indices[event_idx]
+                    if not record_indices:
+                        # Zero-amount event — already marked processed above, skip.
+                        continue
+                    failures = [failed_by_index[i] for i in record_indices if i in failed_by_index]
+                    if not failures:
+                        _mark_processed(conn, event)
+                        synced_count += 1
+                    else:
+                        event_id = _dedup_event_id(event)
+                        for f in failures:
+                            log.error(
+                                "Event %s record %d failed: %s",
+                                event_id,
+                                f.get("inputIndex"),
+                                f.get("error"),
+                            )
+                conn.commit()
+
+            _backup_csv(owner_name=owner_name, events=new_events)
+            log.info("Sync complete. %d/%d events synced. %d excluded.", synced_count, len(new_events), excluded_count)
+        except Exception as exc:
+            log.exception("Error syncing events to wallet")
+            notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
+            raise
+        finally:
+            failed_count = len(new_events) - synced_count - excluded_count
+            sent = notify_sync_complete(
+                bot_token=telegram_bot_token,
+                chat_id=telegram_chat_id,
+                owner_name=owner_name,
+                synced=synced_count,
+                failed=failed_count,
+                skipped=skipped_count,
+                excluded=excluded_count,
             )
-            _mark_processed(conn, event)
-            conn.commit()
+            if not sent:
+                log.warning("notify_sync_complete: Telegram message not sent (no credentials or request failed)")
 
-        _backup_csv(owner_name=owner_name, events=new_events)
         return 0
     finally:
         conn.close()

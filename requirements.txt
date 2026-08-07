@@ -1,2 +1,2 @@
-pytr>=0.3.0
+pytr @ git+https://github.com/pytr-org/pytr.git@v0.4.10
 requests>=2.31.0
