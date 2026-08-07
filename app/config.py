@@ -12,6 +12,17 @@ def _required_env(name: str) -> str:
     return value
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be an integer, got: {raw!r}")
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer, got: {value}")
+    return value
+
+
 @dataclass(frozen=True)
 class Config:
     owner_name: str
@@ -36,6 +47,6 @@ class Config:
             wallet_portfolio_account_id=_required_env("WALLET_PORTFOLIO_ACCOUNT_ID"),
             telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID"),
-            lookback_days=int(os.getenv("LOOKBACK_DAYS", "7")),
+            lookback_days=_positive_int_env("LOOKBACK_DAYS", default=7),
             data_dir=Path(os.getenv("DATA_DIR", "/app/data")),
         )

@@ -73,6 +73,7 @@ class TRClient:
                 log.info("Waiting for push notification approval in Trade Republic app...")
                 print("Waiting for you to approve the login in the Trade Republic app...")
                 client.complete_weblogin()
+                client.save_websession()
 
             log.info("Login completed, session saved")
         except LoginFailedError:

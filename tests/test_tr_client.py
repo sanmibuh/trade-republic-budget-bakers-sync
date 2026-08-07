@@ -124,6 +124,7 @@ def test_connect_app_approval_flow(tmp_path):
     pytr.initiate_weblogin.assert_called_once()
     pytr.complete_weblogin.assert_called_once_with()
     pytr._await_weblogin_confirmation.assert_not_called()
+    pytr.save_websession.assert_called_once()
     assert client._api is pytr
 
 

@@ -209,9 +209,12 @@ _HANDLERS: dict[str, _EventHandler] = {
     "SPARE_CHANGE_AGGREGATE":       _handle_transfer_to_portfolio,
     "SAVEBACK":                     _handle_saveback,
     "CARD_TRANSACTION":             _handle_card,
+    "CARD_VERIFICATION":            _handle_cash,   # always zero-amount; handler never reached
     "BANK_TRANSACTION_INCOMING":    _handle_bank_transaction,
     "BANK_TRANSACTION_OUTGOING":    _handle_bank_transaction,
 }
+
+KNOWN_EVENT_TYPES: frozenset[str] = frozenset(_HANDLERS)
 
 
 # ---------------------------------------------------------------------------
@@ -239,5 +242,8 @@ def build_records_for_event(
 
     record_date = normalize_event_time(event)
     note = _event_note(event, event_type)
-    handler = _HANDLERS.get(event_type, _handle_cash)
+    handler = _HANDLERS.get(event_type)
+    if handler is None:
+        log.warning("Unknown TR event type %r — falling back to cash handler", event_type)
+        handler = _handle_cash
     return handler(event, amount, note, record_date, cash_account_id, portfolio_account_id)

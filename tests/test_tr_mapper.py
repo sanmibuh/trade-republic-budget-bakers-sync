@@ -13,6 +13,7 @@ from app.tr_mapper import (
     normalize_event_time,
     build_records_for_event,
     filter_by_lookback,
+    KNOWN_EVENT_TYPES,
 )
 
 
@@ -281,6 +282,29 @@ def test_build_unknown_event_type_posts_to_cash():
     assert len(records) == 1
     assert records[0]["accountId"] == "cash"
     assert records[0]["note"] == "Something"
+
+
+def test_build_unknown_event_type_logs_warning():
+    event = {"eventType": "MYSTERY_TYPE", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00"}
+    import logging
+    with patch.object(logging.getLogger("app.tr_mapper"), "warning") as mock_warn:
+        build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    mock_warn.assert_called_once()
+    assert "MYSTERY_TYPE" in mock_warn.call_args.args[1]
+
+
+def test_known_event_types_contains_expected_types():
+    for t in ("BUY_ORDER", "SELL_ORDER", "CARD_TRANSACTION", "INTEREST_PAYMENT",
+              "BANK_TRANSACTION_INCOMING", "BANK_TRANSACTION_OUTGOING"):
+        assert t in KNOWN_EVENT_TYPES
+
+
+def test_known_event_type_does_not_log_warning():
+    event = {"eventType": "BUY_ORDER", "timestamp": "2024-01-01T00:00:00Z", "amount": "100.00"}
+    import logging
+    with patch.object(logging.getLogger("app.tr_mapper"), "warning") as mock_warn:
+        build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    mock_warn.assert_not_called()
 
 
 def test_build_zero_amount_returns_empty():

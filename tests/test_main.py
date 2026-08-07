@@ -4,9 +4,12 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from app.config import _required_env
+from app.config import _positive_int_env
 from app.persistence import (
     EventRepository,
     dedup_event_id,
@@ -34,6 +37,38 @@ def test_required_env_blank(monkeypatch):
     monkeypatch.setenv("MY_VAR", "   ")
     with pytest.raises(ValueError, match="MY_VAR"):
         _required_env("MY_VAR")
+
+
+# ---------------------------------------------------------------------------
+# _positive_int_env
+# ---------------------------------------------------------------------------
+
+def test_positive_int_env_uses_default(monkeypatch):
+    monkeypatch.delenv("LOOKBACK_DAYS", raising=False)
+    assert _positive_int_env("LOOKBACK_DAYS", default=7) == 7
+
+
+def test_positive_int_env_reads_env(monkeypatch):
+    monkeypatch.setenv("LOOKBACK_DAYS", "14")
+    assert _positive_int_env("LOOKBACK_DAYS", default=7) == 14
+
+
+def test_positive_int_env_rejects_non_integer(monkeypatch):
+    monkeypatch.setenv("LOOKBACK_DAYS", "abc")
+    with pytest.raises(ValueError, match="integer"):
+        _positive_int_env("LOOKBACK_DAYS", default=7)
+
+
+def test_positive_int_env_rejects_zero(monkeypatch):
+    monkeypatch.setenv("LOOKBACK_DAYS", "0")
+    with pytest.raises(ValueError, match="positive"):
+        _positive_int_env("LOOKBACK_DAYS", default=7)
+
+
+def test_positive_int_env_rejects_negative(monkeypatch):
+    monkeypatch.setenv("LOOKBACK_DAYS", "-5")
+    with pytest.raises(ValueError, match="positive"):
+        _positive_int_env("LOOKBACK_DAYS", default=7)
 
 
 # ---------------------------------------------------------------------------
@@ -293,3 +328,43 @@ def test_filter_by_lookback_multiple_events():
         _make_event("2024-01-12T00:00:00Z"),
     ]
     assert len(filter_by_lookback(events, since)) == 2
+
+
+# ---------------------------------------------------------------------------
+# _build_batch — unknown event type triggers notifier
+# ---------------------------------------------------------------------------
+
+def test_build_batch_notifies_on_unknown_event_type(tmp_path):
+    from app.main import _build_batch
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+
+    notifier = MagicMock(spec=Notifier)
+
+    event = {"eventType": "TOTALLY_NEW_TYPE", "timestamp": "2024-01-01T00:00:00Z", "amount": "5.00"}
+    with EventRepository(tmp_path / "test.db") as repo:
+        _build_batch([event], cfg, repo, notifier)
+
+    notifier.unknown_event_type.assert_called_once_with("TOTALLY_NEW_TYPE")
+
+
+def test_build_batch_no_notification_for_known_event_type(tmp_path):
+    from app.main import _build_batch
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+
+    notifier = MagicMock(spec=Notifier)
+
+    event = {"eventType": "BUY_ORDER", "timestamp": "2024-01-01T00:00:00Z", "amount": "100.00"}
+    with EventRepository(tmp_path / "test.db") as repo:
+        _build_batch([event], cfg, repo, notifier)
+
+    notifier.unknown_event_type.assert_not_called()
