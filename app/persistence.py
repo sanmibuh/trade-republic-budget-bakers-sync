@@ -13,14 +13,9 @@ from app.tr_mapper import normalize_event_time
 log = logging.getLogger(__name__)
 
 
-def init_db(path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS processed_events (event_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL)"
-    )
-    conn.commit()
-    return conn
-
+# ---------------------------------------------------------------------------
+# Pure helpers (no state)
+# ---------------------------------------------------------------------------
 
 def event_id(event: dict[str, Any]) -> str:
     for key in ("id", "eventId", "event_id"):
@@ -47,29 +42,67 @@ def dedup_event_id(event: dict[str, Any]) -> str:
     return f"hash:{digest}"
 
 
-def filter_unprocessed(events: list[dict[str, Any]], conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    events_with_ids = [(event, dedup_event_id(event)) for event in events]
-    ids = [dedup_id for _, dedup_id in events_with_ids]
-    if not ids:
-        return []
+# ---------------------------------------------------------------------------
+# EventRepository
+# ---------------------------------------------------------------------------
 
-    placeholders = ",".join("?" for _ in ids)
-    rows = conn.execute(
-        f"SELECT event_id FROM processed_events WHERE event_id IN ({placeholders})", ids
-    ).fetchall()
-    processed = {row[0] for row in rows}
+class EventRepository:
+    """Manages the SQLite dedup database.
 
-    return [event for event, dedup_id in events_with_ids if dedup_id not in processed]
+    Usage::
+
+        with EventRepository(db_path) as repo:
+            new_events = repo.filter_unprocessed(events)
+            repo.mark_processed(event)
+            repo.commit()
+    """
+
+    def __init__(self, db_path: Path) -> None:
+        self._conn = sqlite3.connect(db_path)
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS processed_events "
+            "(event_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL)"
+        )
+        self._conn.commit()
+
+    def filter_unprocessed(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        events_with_ids = [(event, dedup_event_id(event)) for event in events]
+        ids = [dedup_id for _, dedup_id in events_with_ids]
+        if not ids:
+            return []
+
+        placeholders = ",".join("?" for _ in ids)
+        rows = self._conn.execute(
+            f"SELECT event_id FROM processed_events WHERE event_id IN ({placeholders})", ids
+        ).fetchall()
+        processed = {row[0] for row in rows}
+
+        return [event for event, dedup_id in events_with_ids if dedup_id not in processed]
+
+    def mark_processed(self, event: dict[str, Any]) -> None:
+        eid = dedup_event_id(event)
+        event_time = normalize_event_time(event)
+        self._conn.execute(
+            "INSERT OR IGNORE INTO processed_events (event_id, timestamp) VALUES (?, ?)",
+            (eid, event_time),
+        )
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()
+
+    def __enter__(self) -> "EventRepository":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
 
 
-def mark_processed(conn: sqlite3.Connection, event: dict[str, Any]) -> None:
-    eid = dedup_event_id(event)
-    event_time = normalize_event_time(event)
-    conn.execute(
-        "INSERT OR IGNORE INTO processed_events (event_id, timestamp) VALUES (?, ?)",
-        (eid, event_time),
-    )
-
+# ---------------------------------------------------------------------------
+# CSV backup (stateless helper)
+# ---------------------------------------------------------------------------
 
 def backup_csv(output_dir: Path, owner_name: str, events: list[dict[str, Any]]) -> Path:
     month = datetime.now(timezone.utc).strftime("%Y-%m")

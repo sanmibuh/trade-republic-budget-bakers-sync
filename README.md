@@ -7,14 +7,21 @@ Dockerized Python service that runs a one-shot sync from Trade Republic (`pytr`)
 ```
 app/
   config.py         # Config dataclass — reads all env vars in one place
-  persistence.py    # SQLite dedup DB + monthly CSV backup
-  tr_mapper.py      # Trade Republic event → BudgetBakers record conversion
-  tr_client.py      # pytr wrapper: login, 2FA, timeline fetch
-  wallet_client.py  # BudgetBakers HTTP client (POST /v1/api/records)
-  notifier.py       # Telegram notifications (transversal)
+  persistence.py    # EventRepository (SQLite dedup) + backup_csv helper
+  tr_mapper.py      # TR event → BudgetBakers record mapping; filter_by_lookback
+  tr_client.py      # TRClient class — pytr wrapper: login, 2FA, timeline fetch
+  wallet_client.py  # WalletClient class — BudgetBakers HTTP (POST /v1/api/records)
+  notifier.py       # Notifier class — Telegram notifications (transversal)
   logging_setup.py  # Rotating file + console logging (transversal)
-  main.py           # Orchestrator: wires all modules together
+  main.py           # Orchestrator: wires all modules together, minimal logic
 ```
+
+Key design decisions:
+
+- **`Notifier`** holds `bot_token`, `chat_id`, `owner_name` — methods have no repetitive parameters
+- **`EventRepository`** encapsulates the SQLite connection as a context manager (`with EventRepository(...) as repo`)
+- **`TRClient`** keeps the pytr client as internal state — callers never touch it directly
+- **`tr_mapper` registry** — adding a new TR event type requires only a handler function + one line in `_HANDLERS`; no existing logic changes (Open/Closed)
 
 **Data volumes (mounted from host):**
 
