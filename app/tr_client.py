@@ -35,6 +35,8 @@ def connect_trade_republic(
         client.initiate_weblogin()
         verify_code = input("Enter the 2FA code sent by Trade Republic: ").strip()
         client.complete_weblogin(verify_code=verify_code)
+        # v1 login calls save_websession() internally; call explicitly as safety net
+        client.save_websession()
     except Exception as exc:
         raise LoginFailedError("2FA login failed") from exc
 
@@ -79,7 +81,7 @@ def _resolve(client: Any, coroutine_or_result: Any) -> Any:
     """Run a coroutine via run_blocking if needed, otherwise return as-is."""
     run_blocking = getattr(client, "run_blocking", None)
     if run_blocking is not None and hasattr(coroutine_or_result, "__await__"):
-        return run_blocking(coroutine_or_result)
+        return run_blocking(coroutine_or_result, timeout=30.0)
     return coroutine_or_result
 
 

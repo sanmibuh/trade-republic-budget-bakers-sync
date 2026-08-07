@@ -37,6 +37,8 @@ def test_connect_initiates_login_when_no_session(tmp_path):
 
     mock_client.initiate_weblogin.assert_called_once()
     mock_client.complete_weblogin.assert_called_once_with(verify_code="123456")
+    mock_client.save_websession.assert_called_once()
+    mock_client.resume_websession.assert_called_once()  # only the initial check
     assert result is mock_client
 
 
@@ -98,6 +100,7 @@ def test_connect_passes_correct_files_to_api(tmp_path):
     assert call_kwargs["credentials_file"] == str(tmp_path / "credentials.json")
     assert call_kwargs["cookies_file"] == str(tmp_path / "cookies.txt")
     assert call_kwargs["use_v2_login"] is True
+    assert "waf_token" not in call_kwargs or call_kwargs.get("waf_token") is None
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +186,7 @@ def test_fetch_timeline_handles_async_coroutine():
 
     client = MagicMock()
     client.timeline.return_value = _coro()
-    client.run_blocking.side_effect = lambda coro: asyncio.run(coro)
+    client.run_blocking.side_effect = lambda coro, timeout=5.0: asyncio.run(coro)
 
     result = fetch_timeline_events(client, since=SINCE)
     assert result == [{"id": "async-event"}]
