@@ -10,7 +10,7 @@ from requests import HTTPError
 from app.config import Config
 from app.logging_setup import setup_logging
 from app.notifier import Notifier
-from app.persistence import EventRepository, backup_csv, dedup_event_id
+from app.persistence import EventRepository, dedup_event_id
 from app.tr_client import LoginFailedError, TRClient
 from app.tr_mapper import build_records_for_event, filter_by_lookback
 from app.wallet_client import WalletClient
@@ -154,7 +154,6 @@ def _process_results(
 def run() -> int:
     cfg = Config.from_env()
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
-    cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
     setup_logging(cfg.data_dir)
     log.info("Starting sync for owner: %s", cfg.owner_name)
@@ -162,7 +161,8 @@ def run() -> int:
     notifier = Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)
     since = datetime.now(timezone.utc) - timedelta(days=cfg.lookback_days)
 
-    with EventRepository(cfg.data_dir / "processed_events.db") as repo:
+    with EventRepository(cfg.data_dir / "sync.db") as repo:
+        repo.purge_old_records()
         events = _fetch_events(cfg, notifier, since)
 
         recent_events = filter_by_lookback(events, since)
@@ -189,7 +189,6 @@ def run() -> int:
                 counts = _process_results(results, new_events, batch.event_record_indices, repo)
                 counts.excluded = batch.excluded_count
 
-            backup_csv(output_dir=cfg.output_dir, owner_name=cfg.owner_name, events=new_events)
             log.info("Sync complete. synced=%d excluded=%d failed=%d", counts.synced, counts.excluded, counts.failed)
         except Exception as exc:
             log.exception("Error syncing events to wallet")

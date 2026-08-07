@@ -24,7 +24,6 @@ class Config:
     telegram_chat_id: str | None
     lookback_days: int
     data_dir: Path
-    output_dir: Path
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -39,5 +38,4 @@ class Config:
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID"),
             lookback_days=int(os.getenv("LOOKBACK_DAYS", "7")),
             data_dir=Path(os.getenv("DATA_DIR", "/app/data")),
-            output_dir=Path(os.getenv("OUTPUT_DIR", "/app/output")),
         )

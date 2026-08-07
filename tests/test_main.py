@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,6 @@ import pytest
 from app.config import _required_env
 from app.persistence import (
     EventRepository,
-    backup_csv,
     dedup_event_id,
     event_id,
 )
@@ -87,7 +87,7 @@ def test_dedup_event_id_different_events_produce_different_hashes():
 
 
 # ---------------------------------------------------------------------------
-# EventRepository
+# EventRepository — schema
 # ---------------------------------------------------------------------------
 
 def test_repo_creates_table(tmp_path):
@@ -98,26 +98,37 @@ def test_repo_creates_table(tmp_path):
         assert rows
 
 
+def test_repo_creates_index(tmp_path):
+    with EventRepository(tmp_path / "test.db") as repo:
+        rows = repo._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_synced_at'"
+        ).fetchall()
+        assert rows
+
+
 def test_repo_idempotent_init(tmp_path):
     db = tmp_path / "test.db"
     with EventRepository(db):
         pass
     with EventRepository(db):
-        pass  # second open should not raise
+        pass
 
+
+# ---------------------------------------------------------------------------
+# EventRepository — filter_unprocessed
+# ---------------------------------------------------------------------------
 
 def test_repo_filter_unprocessed_all_new(tmp_path):
     with EventRepository(tmp_path / "db") as repo:
-        events = [{"id": "a"}, {"id": "b"}]
-        assert len(repo.filter_unprocessed(events)) == 2
+        assert len(repo.filter_unprocessed([{"id": "a"}, {"id": "b"}])) == 2
 
 
 def test_repo_filter_unprocessed_skips_already_processed(tmp_path):
     with EventRepository(tmp_path / "db") as repo:
-        repo._conn.execute("INSERT INTO processed_events VALUES ('already', '2024-01-01')")
-        repo._conn.commit()
-        events = [{"id": "already"}, {"id": "new"}]
-        result = repo.filter_unprocessed(events)
+        event = {"id": "already", "timestamp": "2024-01-01T00:00:00Z"}
+        repo.mark_processed(event)
+        repo.commit()
+        result = repo.filter_unprocessed([{"id": "already"}, {"id": "new"}])
         assert len(result) == 1
         assert result[0]["id"] == "new"
 
@@ -127,15 +138,46 @@ def test_repo_filter_unprocessed_empty_input(tmp_path):
         assert repo.filter_unprocessed([]) == []
 
 
-def test_repo_mark_processed_inserts_row(tmp_path):
+# ---------------------------------------------------------------------------
+# EventRepository — mark_processed
+# ---------------------------------------------------------------------------
+
+def test_repo_mark_processed_stores_all_fields(tmp_path):
+    event = {
+        "id": "evt-1",
+        "eventType": "BUY_ORDER",
+        "timestamp": "2024-01-15T10:00:00Z",
+        "amount": {"value": 100.0, "currency": "EUR"},
+    }
     with EventRepository(tmp_path / "db") as repo:
-        event = {"id": "evt-1", "timestamp": "2024-01-15T10:00:00Z"}
         repo.mark_processed(event)
         repo.commit()
         row = repo._conn.execute(
-            "SELECT event_id FROM processed_events WHERE event_id='evt-1'"
+            "SELECT event_id, event_type, event_timestamp, amount, raw, synced_at "
+            "FROM processed_events WHERE event_id='evt-1'"
         ).fetchone()
-        assert row is not None
+
+    assert row is not None
+    event_id_val, event_type, event_timestamp, amount, raw, synced_at = row
+    assert event_id_val == "evt-1"
+    assert event_type == "BUY_ORDER"
+    assert event_timestamp == "2024-01-15T10:00:00Z"
+    assert "100" in amount or "100.0" in amount
+    assert "BUY_ORDER" in raw
+    assert synced_at  # non-empty ISO timestamp
+
+
+def test_repo_mark_processed_raw_is_valid_json(tmp_path):
+    event = {"id": "evt-json", "eventType": "SELL_ORDER", "timestamp": "2024-01-01T00:00:00Z"}
+    with EventRepository(tmp_path / "db") as repo:
+        repo.mark_processed(event)
+        repo.commit()
+        raw = repo._conn.execute(
+            "SELECT raw FROM processed_events WHERE event_id='evt-json'"
+        ).fetchone()[0]
+
+    parsed = json.loads(raw)
+    assert parsed["eventType"] == "SELL_ORDER"
 
 
 def test_repo_mark_processed_is_idempotent(tmp_path):
@@ -150,10 +192,57 @@ def test_repo_mark_processed_is_idempotent(tmp_path):
         assert count == 1
 
 
+# ---------------------------------------------------------------------------
+# EventRepository — purge_old_records
+# ---------------------------------------------------------------------------
+
+def _insert_record(repo: EventRepository, event_id: str, synced_at: str) -> None:
+    repo._conn.execute(
+        "INSERT OR IGNORE INTO processed_events "
+        "(event_id, event_type, event_timestamp, amount, raw, synced_at) "
+        "VALUES (?, '', '', '', '', ?)",
+        (event_id, synced_at),
+    )
+    repo._conn.commit()
+
+
+def test_purge_removes_old_records(tmp_path):
+    with EventRepository(tmp_path / "db") as repo:
+        old = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+        recent = datetime.now(timezone.utc).isoformat()
+        _insert_record(repo, "old-evt", old)
+        _insert_record(repo, "recent-evt", recent)
+
+        deleted = repo.purge_old_records(ttl_days=60)
+
+        assert deleted == 1
+        remaining = repo._conn.execute(
+            "SELECT event_id FROM processed_events"
+        ).fetchall()
+        ids = {r[0] for r in remaining}
+        assert "recent-evt" in ids
+        assert "old-evt" not in ids
+
+
+def test_purge_returns_zero_when_nothing_to_delete(tmp_path):
+    with EventRepository(tmp_path / "db") as repo:
+        recent = datetime.now(timezone.utc).isoformat()
+        _insert_record(repo, "recent-evt", recent)
+        assert repo.purge_old_records(ttl_days=60) == 0
+
+
+def test_purge_empty_db_returns_zero(tmp_path):
+    with EventRepository(tmp_path / "db") as repo:
+        assert repo.purge_old_records() == 0
+
+
+# ---------------------------------------------------------------------------
+# EventRepository — context manager
+# ---------------------------------------------------------------------------
+
 def test_repo_context_manager_closes_connection(tmp_path):
     with EventRepository(tmp_path / "db") as repo:
         conn = repo._conn
-    # After __exit__ the connection is closed; any operation should raise
     with pytest.raises(Exception):
         conn.execute("SELECT 1")
 
@@ -204,29 +293,3 @@ def test_filter_by_lookback_multiple_events():
         _make_event("2024-01-12T00:00:00Z"),
     ]
     assert len(filter_by_lookback(events, since)) == 2
-
-
-# ---------------------------------------------------------------------------
-# backup_csv
-# ---------------------------------------------------------------------------
-
-def test_backup_csv_creates_file(tmp_path):
-    events = [
-        {"id": "e1", "eventType": "BUY_ORDER", "timestamp": "2024-01-15T10:00:00Z", "amount": "100"},
-        {"id": "e2", "eventType": "SELL_ORDER", "timestamp": "2024-01-16T10:00:00Z", "amount": "200"},
-    ]
-    path = backup_csv(tmp_path, "TestUser", events)
-    assert path.exists()
-    content = path.read_text(encoding="utf-8")
-    assert "event_id" in content
-    assert "e1" in content
-    assert "e2" in content
-
-
-def test_backup_csv_appends_on_second_call(tmp_path):
-    backup_csv(tmp_path, "TestUser", [{"id": "e1", "eventType": "BUY_ORDER", "timestamp": "2024-01-15T10:00:00Z", "amount": "100"}])
-    backup_csv(tmp_path, "TestUser", [{"id": "e2", "eventType": "SELL_ORDER", "timestamp": "2024-01-16T10:00:00Z", "amount": "200"}])
-    content = next(tmp_path.glob("*.csv")).read_text(encoding="utf-8")
-    assert content.count("event_id") == 1
-    assert "e1" in content
-    assert "e2" in content

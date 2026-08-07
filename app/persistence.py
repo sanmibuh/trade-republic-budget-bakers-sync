@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import csv
 import hashlib
+import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
@@ -11,6 +11,8 @@ from typing import Any
 from app.tr_mapper import normalize_event_time
 
 log = logging.getLogger(__name__)
+
+_TTL_DAYS = 60
 
 
 # ---------------------------------------------------------------------------
@@ -46,12 +48,32 @@ def dedup_event_id(event: dict[str, Any]) -> str:
 # EventRepository
 # ---------------------------------------------------------------------------
 
+_CREATE_TABLE = """
+    CREATE TABLE IF NOT EXISTS processed_events (
+        event_id        TEXT PRIMARY KEY,
+        event_type      TEXT NOT NULL DEFAULT '',
+        event_timestamp TEXT NOT NULL DEFAULT '',
+        amount          TEXT NOT NULL DEFAULT '',
+        raw             TEXT NOT NULL DEFAULT '',
+        synced_at       TEXT NOT NULL
+    )
+"""
+
+_CREATE_INDEX = """
+    CREATE INDEX IF NOT EXISTS idx_synced_at ON processed_events (synced_at)
+"""
+
+
 class EventRepository:
     """Manages the SQLite dedup database.
+
+    Stores full event data for auditing. Records older than _TTL_DAYS are
+    purged automatically on each open to keep the DB small.
 
     Usage::
 
         with EventRepository(db_path) as repo:
+            repo.purge_old_records()
             new_events = repo.filter_unprocessed(events)
             repo.mark_processed(event)
             repo.commit()
@@ -59,10 +81,8 @@ class EventRepository:
 
     def __init__(self, db_path: Path) -> None:
         self._conn = sqlite3.connect(db_path)
-        self._conn.execute(
-            "CREATE TABLE IF NOT EXISTS processed_events "
-            "(event_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL)"
-        )
+        self._conn.execute(_CREATE_TABLE)
+        self._conn.execute(_CREATE_INDEX)
         self._conn.commit()
 
     def filter_unprocessed(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -81,11 +101,40 @@ class EventRepository:
 
     def mark_processed(self, event: dict[str, Any]) -> None:
         eid = dedup_event_id(event)
-        event_time = normalize_event_time(event)
-        self._conn.execute(
-            "INSERT OR IGNORE INTO processed_events (event_id, timestamp) VALUES (?, ?)",
-            (eid, event_time),
+        event_type = str(
+            event.get("eventType") or event.get("type") or event.get("event_type") or ""
         )
+        event_timestamp = normalize_event_time(event)
+        amount = str(event.get("amount") or event.get("value") or "")
+        try:
+            raw = json.dumps(event, ensure_ascii=False, default=str)
+        except Exception:
+            raw = str(event)
+        synced_at = datetime.now(timezone.utc).isoformat()
+
+        self._conn.execute(
+            "INSERT OR IGNORE INTO processed_events "
+            "(event_id, event_type, event_timestamp, amount, raw, synced_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (eid, event_type, event_timestamp, amount, raw, synced_at),
+        )
+
+    def purge_old_records(self, ttl_days: int = _TTL_DAYS) -> int:
+        """Delete records synced more than ttl_days ago. Returns number of rows deleted."""
+        cutoff = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        from datetime import timedelta
+        cutoff -= timedelta(days=ttl_days)
+        cursor = self._conn.execute(
+            "DELETE FROM processed_events WHERE synced_at < ?",
+            (cutoff.isoformat(),),
+        )
+        deleted = cursor.rowcount
+        if deleted:
+            log.info("Purged %d processed_events records older than %d days", deleted, ttl_days)
+        self._conn.commit()
+        return deleted
 
     def commit(self) -> None:
         self._conn.commit()
@@ -98,30 +147,3 @@ class EventRepository:
 
     def __exit__(self, *_: object) -> None:
         self.close()
-
-
-# ---------------------------------------------------------------------------
-# CSV backup (stateless helper)
-# ---------------------------------------------------------------------------
-
-def backup_csv(output_dir: Path, owner_name: str, events: list[dict[str, Any]]) -> Path:
-    month = datetime.now(timezone.utc).strftime("%Y-%m")
-    backup_file = output_dir / f"TradeRepublic_{owner_name}_{month}.csv"
-    headers = ["event_id", "event_type", "timestamp", "raw"]
-
-    file_has_data = backup_file.exists() and backup_file.stat().st_size > 0
-    with backup_file.open("a", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=headers)
-        if not file_has_data:
-            writer.writeheader()
-
-        for event in events:
-            writer.writerow(
-                {
-                    "event_id": dedup_event_id(event),
-                    "event_type": event.get("eventType") or event.get("type") or event.get("event_type") or "",
-                    "timestamp": normalize_event_time(event),
-                    "raw": str(event),
-                }
-            )
-    return backup_file

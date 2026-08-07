@@ -7,7 +7,7 @@ Dockerized Python service that runs a one-shot sync from Trade Republic (`pytr`)
 ```
 app/
   config.py         # Config dataclass — reads all env vars in one place
-  persistence.py    # EventRepository (SQLite dedup) + backup_csv helper
+  persistence.py    # EventRepository (SQLite dedup)
   tr_mapper.py      # TR event → BudgetBakers record mapping; filter_by_lookback
   tr_client.py      # TRClient class — pytr wrapper: login, 2FA, timeline fetch
   wallet_client.py  # WalletClient class — BudgetBakers HTTP (POST /v1/api/records)
@@ -25,8 +25,7 @@ Key design decisions:
 
 **Data volumes (mounted from host):**
 
-- `/app/data` — pytr session/cookies + SQLite dedup DB (`processed_events.db`) + `sync.log`
-- `/app/output` — monthly append-only CSV backups (`TradeRepublic_<OWNER_NAME>_<YYYY-MM>.csv`)
+- `/app/data` — pytr session/cookies + SQLite DB (`sync.db`) + `sync.log`
 
 **Docker images:**
 
@@ -74,7 +73,6 @@ services:
       TELEGRAM_CHAT_ID: "<telegram_chat_id>"
     volumes:
       - ./username1/data:/app/data
-      - ./username1/output:/app/output
 ```
 
 ### 2. First-time login (interactive 2FA)
@@ -135,7 +133,6 @@ Or with plain Docker if you prefer not to use Make:
 ```cron
 0 6 * * * docker run --rm --env-file /path/to/username1.env \
   -v /path/to/username1/data:/app/data \
-  -v /path/to/username1/output:/app/output \
   ghcr.io/sanmibuh/tr-wallet-sync:latest >> /var/log/tr-sync-username1.log 2>&1
 ```
 
@@ -156,7 +153,6 @@ services:
       WALLET_PORTFOLIO_ACCOUNT_ID: "${USERNAME1_PORTFOLIO_ID:?required}"
     volumes:
       - ./username1/data:/app/data
-      - ./username1/output:/app/output
 
   username2:
     image: ghcr.io/sanmibuh/tr-wallet-sync:latest
@@ -169,7 +165,6 @@ services:
       WALLET_PORTFOLIO_ACCOUNT_ID: "${USERNAME2_PORTFOLIO_ID:?required}"
     volumes:
       - ./username2/data:/app/data
-      - ./username2/output:/app/output
 ```
 
 Then bootstrap and sync each independently:
