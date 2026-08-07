@@ -1,0 +1,27 @@
+app/config.py
+  s_6528bf9ff01d96::t_c272326eecf25b 40
+app/notifier.py
+  s_6528bf9ff01d96::t_2c64559b0d1d06 4,6
+app/tr_mapper.py
+  s_6528bf9ff01d96::t_d00a015baeef1d 5,8,52,60,64-65
+app/wallet_client.py
+  s_6528bf9ff01d96::t_355bc9b927ff4a 7
+tests/test_tr_mapper.py
+  s_6528bf9ff01d96::t_7c495b2c262cf5 4-5,10,12,14,16,24-26,32-34,42-43,76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "1a1c063958bc1b1583f293c8e7d39eefb309895a",
+  "prompts": {},
+  "sessions": {
+    "s_6528bf9ff01d96": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_024fbcdfaffeFJnZ4aEFKfZu7K",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
