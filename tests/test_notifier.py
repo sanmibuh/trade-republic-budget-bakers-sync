@@ -8,6 +8,10 @@ from app.notifier import (
     _escape_markdown,
     send_telegram_message,
     notify_authentication_required,
+    notify_login_required,
+    notify_login_failed,
+    notify_login_success,
+    notify_error,
 )
 
 
@@ -70,7 +74,17 @@ def test_send_telegram_message_returns_true_on_success():
     assert call_args.kwargs["json"]["text"] == "Test message"
 
 
-def test_send_telegram_message_returns_false_on_http_error():
+def test_send_telegram_message_disables_ssl_verify():
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("app.notifier.requests.post", return_value=mock_response) as mock_post:
+        send_telegram_message("tok", "chat", "msg")
+
+    assert mock_post.call_args.kwargs["verify"] is False
+
+
+
     mock_response = MagicMock()
     mock_response.raise_for_status.side_effect = requests.RequestException("fail")
 
@@ -98,4 +112,49 @@ def test_notify_authentication_required_calls_send():
 def test_notify_authentication_required_no_credentials():
     with patch("app.notifier.send_telegram_message", return_value=False) as mock_send:
         result = notify_authentication_required(None, None, "owner")
+    assert result is False
+
+
+# ---------------------------------------------------------------------------
+# notify_login_required / notify_login_success
+# ---------------------------------------------------------------------------
+
+def test_notify_login_required_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = notify_login_required("tok", "chat", "myuser")
+    assert result is True
+    mock_send.assert_called_once()
+
+
+def test_notify_login_failed_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = notify_login_failed("tok", "chat", "myuser")
+    assert result is True
+    mock_send.assert_called_once()
+
+
+def test_notify_login_success_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = notify_login_success("tok", "chat", "myuser")
+    assert result is True
+    mock_send.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# notify_error
+# ---------------------------------------------------------------------------
+
+def test_notify_error_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = notify_error("tok", "chat", "myuser", ValueError("something went wrong"))
+
+    assert result is True
+    mock_send.assert_called_once()
+    message = mock_send.call_args.kwargs["message"]
+    assert "ValueError" in message
+    assert "something went wrong" in message
+
+
+def test_notify_error_returns_false_without_credentials():
+    result = notify_error(None, None, "owner", RuntimeError("boom"))
     assert result is False

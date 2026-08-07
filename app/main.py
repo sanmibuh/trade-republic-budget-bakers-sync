@@ -10,8 +10,8 @@ from typing import Any
 
 from requests import HTTPError
 
-from app.notifier import notify_authentication_required
-from app.tr_client import connect_trade_republic, fetch_timeline_events
+from app.notifier import notify_authentication_required, notify_error, notify_login_failed, notify_login_required, notify_login_success
+from app.tr_client import connect_trade_republic, fetch_timeline_events, LoginFailedError
 from app.wallet_client import WalletClient, normalize_event_time, sync_event_to_wallet
 
 try:
@@ -132,6 +132,7 @@ def _backup_csv(owner_name: str, events: list[dict[str, Any]]) -> Path:
 def run() -> int:
     owner_name = _required_env("OWNER_NAME")
     phone_number = _required_env("PHONE_NUMBER")
+    pin = _required_env("PIN")
     wallet_api_key = _required_env("WALLET_API_KEY")
     wallet_cash_account_id = _required_env("WALLET_CASH_ACCOUNT_ID")
     wallet_portfolio_account_id = _required_env("WALLET_PORTFOLIO_ACCOUNT_ID")
@@ -150,8 +151,29 @@ def run() -> int:
         since = datetime.now(timezone.utc) - timedelta(days=lookback_days)
 
         try:
-            tr_client = connect_trade_republic(phone_number=phone_number, data_dir=DATA_DIR)
+            tr_client = connect_trade_republic(
+                phone_number=phone_number,
+                pin=pin,
+                data_dir=DATA_DIR,
+                on_login_required=lambda: notify_login_required(
+                    bot_token=telegram_bot_token,
+                    chat_id=telegram_chat_id,
+                    owner_name=owner_name,
+                ),
+                on_login_success=lambda: notify_login_success(
+                    bot_token=telegram_bot_token,
+                    chat_id=telegram_chat_id,
+                    owner_name=owner_name,
+                ),
+            )
             events = fetch_timeline_events(tr_client, since=since)
+        except LoginFailedError:
+            notify_login_failed(
+                bot_token=telegram_bot_token,
+                chat_id=telegram_chat_id,
+                owner_name=owner_name,
+            )
+            return 1
         except AuthenticationError:
             notify_authentication_required(
                 bot_token=telegram_bot_token,
@@ -168,22 +190,31 @@ def run() -> int:
                     owner_name=owner_name,
                 )
                 return 1
+            notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
+            raise
+        except Exception as exc:
+            notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
             raise
 
         recent_events = _filter_by_lookback(events, since)
         new_events = _filter_unprocessed_events(recent_events, conn)
 
-        for event in new_events:
-            sync_event_to_wallet(
-                wallet_client,
-                event,
-                cash_account_id=wallet_cash_account_id,
-                portfolio_account_id=wallet_portfolio_account_id,
-            )
-            _mark_processed(conn, event)
-            conn.commit()
+        try:
+            for event in new_events:
+                sync_event_to_wallet(
+                    wallet_client,
+                    event,
+                    cash_account_id=wallet_cash_account_id,
+                    portfolio_account_id=wallet_portfolio_account_id,
+                )
+                _mark_processed(conn, event)
+                conn.commit()
 
-        _backup_csv(owner_name=owner_name, events=new_events)
+            _backup_csv(owner_name=owner_name, events=new_events)
+        except Exception as exc:
+            notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
+            raise
+
         return 0
     finally:
         conn.close()
