@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import urllib3
 import requests
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+log = logging.getLogger(__name__)
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 
@@ -32,7 +35,16 @@ def send_telegram_message(bot_token: str | None, chat_id: str | None, message: s
             verify=False,
         )
         response.raise_for_status()
-    except requests.RequestException:
+    except requests.HTTPError as exc:
+        log.warning(
+            "Telegram rejected message (HTTP %s): %s — message was: %r",
+            exc.response.status_code if exc.response is not None else "?",
+            exc.response.text if exc.response is not None else "",
+            message,
+        )
+        return False
+    except requests.RequestException as exc:
+        log.warning("Telegram request failed: %s", exc)
         return False
     return True
 
@@ -134,7 +146,7 @@ def notify_sync_complete(
         status = "Partial"
     lines = [
         f"{icon} *Trade Republic Sync: {safe_owner} — {_escape_markdown(status)}*\n",
-        f"Saved: *{synced}* · Failed: *{failed}* · Skipped: *{skipped}*",
+        f"Saved: *{synced}* · Failed: *{_escape_markdown(str(failed))}* · Skipped: *{skipped}*",
     ]
     if excluded:
         lines.append(f"Excluded \\(zero amount\\): *{excluded}*")

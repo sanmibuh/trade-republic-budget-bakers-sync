@@ -224,11 +224,12 @@ def run() -> int:
             skipped=skipped_count,
         )
 
+        synced_count = 0
+        excluded_count = 0
         try:
             # Build all record payloads in one pass, tracking which event each belongs to.
             all_records: list[dict] = []
             event_record_indices: list[list[int]] = [[] for _ in new_events]
-            excluded_count = 0
 
             for event_idx, event in enumerate(new_events):
                 recs = build_records_for_event(
@@ -247,7 +248,6 @@ def run() -> int:
                     event_record_indices[event_idx].append(len(all_records))
                     all_records.append(r)
 
-            synced_count = 0
             if all_records:
                 results = wallet_client.post_records(all_records)
                 log.debug("API results: %s", results)
@@ -261,6 +261,9 @@ def run() -> int:
 
                 for event_idx, event in enumerate(new_events):
                     record_indices = event_record_indices[event_idx]
+                    if not record_indices:
+                        # Zero-amount event — already marked processed above, skip.
+                        continue
                     failures = [failed_by_index[i] for i in record_indices if i in failed_by_index]
                     if not failures:
                         _mark_processed(conn, event)
@@ -278,9 +281,13 @@ def run() -> int:
 
             _backup_csv(owner_name=owner_name, events=new_events)
             log.info("Sync complete. %d/%d events synced. %d excluded.", synced_count, len(new_events), excluded_count)
-
+        except Exception as exc:
+            log.exception("Error syncing events to wallet")
+            notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
+            raise
+        finally:
             failed_count = len(new_events) - synced_count - excluded_count
-            notify_sync_complete(
+            sent = notify_sync_complete(
                 bot_token=telegram_bot_token,
                 chat_id=telegram_chat_id,
                 owner_name=owner_name,
@@ -289,10 +296,8 @@ def run() -> int:
                 skipped=skipped_count,
                 excluded=excluded_count,
             )
-        except Exception as exc:
-            log.exception("Error syncing events to wallet")
-            notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
-            raise
+            if not sent:
+                log.warning("notify_sync_complete: Telegram message not sent (no credentials or request failed)")
 
         return 0
     finally:

@@ -138,6 +138,35 @@ def normalize_event_time(event: dict[str, Any]) -> str:
 # Event → record payload builder (pure, no HTTP)
 # ---------------------------------------------------------------------------
 
+_EVENT_TITLES: dict[str, str] = {
+    "INTEREST_PAYOUT": "Interest Payout",
+    "INTEREST_PAYMENT": "Interest Payment",
+    "SAVEBACK": "Saveback",
+    "BUY_ORDER": "Buy Order",
+    "SELL_ORDER": "Sell Order",
+    "SAVINGS_PLAN": "Savings Plan",
+    "CARD_TRANSACTION": "Card Transaction",
+    "CARD_VERIFICATION": "Card Verification",
+    "PAYMENT_INBOUND": "Payment Inbound",
+    "PAYMENT_OUTBOUND": "Payment Outbound",
+}
+
+
+_INTEREST_TYPES = {"INTEREST_PAYOUT", "INTEREST_PAYMENT"}
+
+
+def _event_note(event: dict[str, Any], event_type: str) -> str:
+    """Return a human-readable note for the event.
+
+    Default: TR's own title (fallback to mapped title, then event_type).
+    INTEREST_PAYOUT / INTEREST_PAYMENT: "<MappedTitle>: <TR title>".
+    """
+    tr_title = str(_get_first_match(event, "title", "name", "description") or "").strip()
+    mapped = _EVENT_TITLES.get(event_type, "")
+    if event_type in _INTEREST_TYPES and mapped and tr_title:
+        return f"{mapped}: {tr_title}"
+    return tr_title or mapped or event_type or "Trade Republic event"
+
 def build_records_for_event(
     event: dict[str, Any],
     *,
@@ -151,15 +180,11 @@ def build_records_for_event(
     """
     event_type = str(_get_first_match(event, "eventType", "type", "event_type") or "").upper()
     record_date = normalize_event_time(event)
-    note = str(
-        _get_first_match(event, "title", "name", "description")
-        or event_type
-        or "Trade Republic event"
-    )
+    note = _event_note(event, event_type)
     amount = extract_amount(event, "amount", "value", "grossAmount", "gross", "total")
     tax = extract_amount(event, "tax", "taxAmount", "withholdingTax")
 
-    log.debug("Building record(s) for event type=%s amount=%s date=%s", event_type, amount, record_date)
+    log.debug("Building record(s) for event type=%s amount=%s date=%s — raw: %s", event_type, amount, record_date, event)
     if amount == 0:
         log.debug("Skipping zero-amount event (type=%s) — raw event: %s", event_type, event)
         return []
@@ -169,32 +194,33 @@ def build_records_for_event(
         amt: Decimal,
         note_: str,
         transfer_account_id: str | None = None,
+        payment_type: str | None = None,
     ) -> dict[str, Any]:
         r: dict[str, Any] = {
             "accountId": account_id,
             "amount": {"value": float(amt)},
             "recordDate": record_date,
             "note": note_,
-            "paymentType": "transfer" if transfer_account_id else "web_payment",
+            "paymentType": payment_type or ("transfer" if transfer_account_id else "web_payment"),
         }
         if transfer_account_id:
             r["transfer"] = {"pairingMode": "new", "accountId": transfer_account_id}
         return r
 
     if event_type == "INTEREST_PAYMENT":
-        records = [_rec(cash_account_id, amount, note)]
-        if tax > 0:
-            records.append(_rec(cash_account_id, -abs(tax), f"{note} tax"))
-        return records
+        return [_rec(cash_account_id, amount, note)]
+
+    if event_type == "INTEREST_PAYOUT":
+        return [_rec(cash_account_id, amount, note)]
 
     if event_type in {"BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER"}:
         return [_rec(cash_account_id, amount, note, transfer_account_id=portfolio_account_id)]
 
     if event_type == "SAVEBACK":
-        records = [_rec(portfolio_account_id, amount, note)]
-        if tax > 0:
-            records.append(_rec(portfolio_account_id, -abs(tax), f"{note} tax"))
-        return records
+        return [_rec(portfolio_account_id, amount, note)]
+
+    if event_type == "CARD_TRANSACTION":
+        return [_rec(cash_account_id, amount, note, payment_type="debit_card")]
 
     # Default: cash account
     return [_rec(cash_account_id, amount, note)]

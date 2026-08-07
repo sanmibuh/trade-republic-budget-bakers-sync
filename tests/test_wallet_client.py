@@ -132,7 +132,7 @@ def test_build_interest_payment_no_tax():
         "eventType": "INTEREST_PAYMENT",
         "timestamp": "2024-01-01T00:00:00Z",
         "amount": "10.00",
-        "title": "Interest",
+        "title": "Zinsen",
     }
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
 
@@ -140,26 +140,9 @@ def test_build_interest_payment_no_tax():
     r = records[0]
     assert r["accountId"] == "cash"
     assert r["amount"] == {"value": 10.0}
-    assert r["note"] == "Interest"
+    assert r["note"] == "Interest Payment: Zinsen"
     assert r["paymentType"] == "web_payment"
     assert "transfer" not in r
-
-
-def test_build_interest_payment_with_tax():
-    event = {
-        "eventType": "INTEREST_PAYMENT",
-        "timestamp": "2024-01-01T00:00:00Z",
-        "amount": "10.00",
-        "tax": "2.50",
-        "title": "Interest",
-    }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
-
-    assert len(records) == 2
-    assert records[0]["amount"] == {"value": 10.0}
-    assert records[1]["amount"]["value"] == pytest.approx(-2.5)
-    assert records[1]["note"] == "Interest tax"
-    assert records[1]["accountId"] == "cash"
 
 
 @pytest.mark.parametrize("event_type", ["BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER"])
@@ -175,12 +158,7 @@ def test_build_order_events_use_transfer(event_type):
 
 
 def test_build_saveback_no_tax():
-    event = {
-        "eventType": "SAVEBACK",
-        "timestamp": "2024-01-01T00:00:00Z",
-        "amount": "5.00",
-        "title": "Saveback",
-    }
+    event = {"eventType": "SAVEBACK", "timestamp": "2024-01-01T00:00:00Z", "amount": "5.00", "title": "Saveback"}
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
 
     assert len(records) == 1
@@ -188,27 +166,23 @@ def test_build_saveback_no_tax():
     assert records[0]["amount"] == {"value": 5.0}
 
 
-def test_build_saveback_with_tax():
-    event = {
-        "eventType": "SAVEBACK",
-        "timestamp": "2024-01-01T00:00:00Z",
-        "amount": "5.00",
-        "tax": "1.00",
-        "title": "Saveback",
-    }
+def test_build_card_transaction_uses_debit_card():
+    event = {"eventType": "CARD_TRANSACTION", "timestamp": "2024-01-01T00:00:00Z", "amount": "-20.00", "title": "Supermarket"}
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
 
-    assert len(records) == 2
-    assert records[1]["amount"]["value"] == pytest.approx(-1.0)
-    assert records[1]["accountId"] == "port"
+    assert len(records) == 1
+    assert records[0]["paymentType"] == "debit_card"
+    assert records[0]["accountId"] == "cash"
+    assert records[0]["note"] == "Supermarket"  # TR title, not mapped
 
 
 def test_build_unknown_event_type_posts_to_cash():
-    event = {"eventType": "UNKNOWN_EVENT", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00"}
+    event = {"eventType": "UNKNOWN_EVENT", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00", "title": "Something"}
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
 
     assert len(records) == 1
     assert records[0]["accountId"] == "cash"
+    assert records[0]["note"] == "Something"  # TR title used as default
 
 
 def test_build_zero_amount_returns_empty():
