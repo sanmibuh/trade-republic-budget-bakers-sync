@@ -1,0 +1,10 @@
+app/wallet_client.py
+  82624fe8bc6b0547 11
+  82624fe8bc6b0547 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "d7bd0f1ce1f5327ba098ec9c7f9c57103bb3265b",
+  "prompts": {}
+}
