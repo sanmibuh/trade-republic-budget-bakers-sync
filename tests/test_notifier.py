@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import requests
 
 from app.notifier import (
+    Notifier,
     _escape_markdown,
     send_telegram_message,
     notify_authentication_required,
@@ -256,3 +257,80 @@ def test_send_telegram_message_http_error_no_response_returns_false():
         result = send_telegram_message(bot_token="tok", chat_id="chat", message="hello")
 
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Notifier class
+# ---------------------------------------------------------------------------
+
+def _make_notifier() -> Notifier:
+    return Notifier(bot_token="tok", chat_id="chat", owner_name="David")
+
+
+def test_notifier_login_required_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = _make_notifier().login_required()
+    assert result is True
+    mock_send.assert_called_once()
+
+
+def test_notifier_login_success_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = _make_notifier().login_success()
+    assert result is True
+    mock_send.assert_called_once()
+
+
+def test_notifier_login_failed_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = _make_notifier().login_failed()
+    assert result is True
+    mock_send.assert_called_once()
+
+
+def test_notifier_authentication_required_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = _make_notifier().authentication_required()
+    assert result is True
+    mock_send.assert_called_once()
+
+
+def test_notifier_error_includes_exception_info():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().error(ValueError("something broke"))
+    msg = mock_send.call_args.kwargs["message"]
+    assert "ValueError" in msg
+    assert "something broke" in msg
+
+
+def test_notifier_fetch_summary_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = _make_notifier().fetch_summary(since="2024-01-01", until="2024-01-07", fetched=10, new=5, skipped=5)
+    assert result is True
+    msg = mock_send.call_args.kwargs["message"]
+    assert "10" in msg
+    assert "5" in msg
+
+
+def test_notifier_sync_complete_success():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().sync_complete(synced=10, failed=0, skipped=2)
+    assert "✅" in mock_send.call_args.kwargs["message"]
+
+
+def test_notifier_sync_complete_all_failed():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().sync_complete(synced=0, failed=5, skipped=0)
+    assert "❌" in mock_send.call_args.kwargs["message"]
+
+
+def test_notifier_sync_complete_partial():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().sync_complete(synced=3, failed=2, skipped=0)
+    assert "⚠" in mock_send.call_args.kwargs["message"]
+
+
+def test_notifier_no_credentials_returns_false():
+    notifier = Notifier(bot_token=None, chat_id=None, owner_name="David")
+    assert notifier.login_required() is False
+    assert notifier.sync_complete(synced=1, failed=0, skipped=0) is False

@@ -1,222 +1,176 @@
 from __future__ import annotations
 
-import csv
-import hashlib
 import logging
-import os
-import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 from requests import HTTPError
 
+from app.config import Config
 from app.logging_setup import setup_logging
-from app.notifier import notify_authentication_required, notify_error, notify_fetch_summary, notify_login_failed, notify_login_required, notify_login_success, notify_sync_complete
-from app.tr_client import connect_trade_republic, fetch_timeline_events, LoginFailedError
-from app.wallet_client import WalletClient, normalize_event_time, build_records_for_event
+from app.notifier import Notifier
+from app.persistence import EventRepository, dedup_event_id
+from app.tr_client import LoginFailedError, TRClient
+from app.tr_mapper import build_records_for_event, filter_by_lookback
+from app.wallet_client import WalletClient
 
 try:
     from pytr.exceptions import AuthenticationError
 except Exception:  # pragma: no cover
     AuthenticationError = Exception
 
-
-DATA_DIR = Path("/app/data")
-OUTPUT_DIR = Path("/app/output")
-DB_PATH = DATA_DIR / "processed_events.db"
+log = logging.getLogger(__name__)
 
 
-def _required_env(name: str) -> str:
-    value = os.getenv(name)
-    if value is None or value.strip() == "":
-        raise ValueError(f"Missing required environment variable: {name}")
-    return value
+# ---------------------------------------------------------------------------
+# Result value objects
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _SyncCounts:
+    synced: int = 0
+    excluded: int = 0
+    failed: int = 0
 
 
-def _init_db(path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS processed_events (event_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL)"
-    )
-    conn.commit()
-    return conn
+@dataclass
+class _Batch:
+    records: list[dict]
+    event_record_indices: list[list[int]]
+    excluded_count: int
 
 
-def _event_id(event: dict[str, Any]) -> str:
-    for key in ("id", "eventId", "event_id"):
-        value = event.get(key)
-        if value:
-            return str(value)
-    return ""
+# ---------------------------------------------------------------------------
+# Private steps
+# ---------------------------------------------------------------------------
+
+def _fetch_events(
+    cfg: Config,
+    notifier: Notifier,
+    since: datetime,
+) -> list[dict[str, Any]]:
+    """Connect to Trade Republic and return filtered timeline events.
+
+    Raises SystemExit(1) on recoverable auth errors; re-raises on unexpected ones.
+    """
+    try:
+        tr_client = TRClient(cfg.phone_number, cfg.pin, cfg.data_dir)
+        tr_client.connect(
+            on_login_required=notifier.login_required,
+            on_login_success=notifier.login_success,
+        )
+        log.info("Trade Republic session established")
+        events = tr_client.fetch_timeline_events(since=since)
+        log.info("Fetched %d timeline events", len(events))
+        return events
+    except LoginFailedError:
+        log.exception("Login failed")
+        notifier.login_failed()
+        raise SystemExit(1)
+    except AuthenticationError:
+        log.exception("Authentication error")
+        notifier.authentication_required()
+        raise SystemExit(1)
+    except HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        log.exception("HTTP error (status=%s)", status)
+        if status == 401:
+            notifier.authentication_required()
+            raise SystemExit(1)
+        notifier.error(exc)
+        raise
+    except Exception as exc:
+        log.exception("Unexpected error during TR connection/fetch")
+        notifier.error(exc)
+        raise
 
 
-def _dedup_event_id(event: dict[str, Any]) -> str:
-    event_id = _event_id(event)
-    if event_id:
-        return event_id
+def _build_batch(
+    new_events: list[dict[str, Any]],
+    cfg: Config,
+    repo: EventRepository,
+) -> _Batch:
+    """Convert new events into API records, marking zero-amount ones as excluded."""
+    all_records: list[dict] = []
+    event_record_indices: list[list[int]] = [[] for _ in new_events]
+    excluded_count = 0
 
-    seed = "|".join(
-        [
-            str(event.get("eventType") or event.get("type") or event.get("event_type") or ""),
-            normalize_event_time(event),
-            str(event.get("amount") or event.get("value") or ""),
-            str(event.get("title") or event.get("name") or event.get("description") or ""),
-        ]
-    )
-    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
-    return f"hash:{digest}"
+    for event_idx, event in enumerate(new_events):
+        recs = build_records_for_event(
+            event,
+            cash_account_id=cfg.wallet_cash_account_id,
+            portfolio_account_id=cfg.wallet_portfolio_account_id,
+        )
+        if not recs:
+            repo.mark_processed(event)
+            excluded_count += 1
+            log.info("Excluded zero-amount event %s", dedup_event_id(event))
+            continue
+        for r in recs:
+            event_record_indices[event_idx].append(len(all_records))
+            all_records.append(r)
 
-
-def _filter_unprocessed_events(events: list[dict[str, Any]], conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    events_with_ids = [(event, _dedup_event_id(event)) for event in events]
-    ids = [dedup_id for _, dedup_id in events_with_ids]
-    if not ids:
-        return []
-
-    placeholders = ",".join("?" for _ in ids)
-    rows = conn.execute(
-        f"SELECT event_id FROM processed_events WHERE event_id IN ({placeholders})", ids
-    ).fetchall()
-    processed = {row[0] for row in rows}
-
-    return [event for event, dedup_id in events_with_ids if dedup_id not in processed]
+    return _Batch(all_records, event_record_indices, excluded_count)
 
 
-def _filter_by_lookback(events: list[dict[str, Any]], since: datetime) -> list[dict[str, Any]]:
-    filtered: list[dict[str, Any]] = []
-    for event in events:
-        event_time = normalize_event_time(event)
-        parsed: datetime | None = None
-        try:
-            parsed = datetime.fromisoformat(event_time.replace("Z", "+00:00"))
-        except ValueError:
-            parsed = None
-        if parsed is not None and parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        if parsed is None or parsed >= since:
-            filtered.append(event)
-    return filtered
+def _process_results(
+    results: list[dict[str, Any]],
+    new_events: list[dict[str, Any]],
+    event_record_indices: list[list[int]],
+    repo: EventRepository,
+) -> _SyncCounts:
+    """Interpret API results, mark successful events as processed, log failures."""
+    failed_by_index = {
+        r.get("inputIndex", i): r
+        for i, r in enumerate(results)
+        if r.get("error")
+    }
+
+    synced = 0
+    failed = 0
+    for event_idx, event in enumerate(new_events):
+        record_indices = event_record_indices[event_idx]
+        if not record_indices:
+            continue
+        failures = [failed_by_index[i] for i in record_indices if i in failed_by_index]
+        if not failures:
+            repo.mark_processed(event)
+            synced += 1
+        else:
+            failed += len(failures)
+            eid = dedup_event_id(event)
+            for f in failures:
+                log.error("Event %s record %d failed: %s", eid, f.get("inputIndex"), f.get("error"))
+
+    repo.commit()
+    return _SyncCounts(synced=synced, failed=failed)
 
 
-def _mark_processed(conn: sqlite3.Connection, event: dict[str, Any]) -> None:
-    event_id = _dedup_event_id(event)
-    event_time = normalize_event_time(event)
-    conn.execute(
-        "INSERT OR IGNORE INTO processed_events (event_id, timestamp) VALUES (?, ?)",
-        (event_id, event_time),
-    )
-
-
-def _backup_csv(owner_name: str, events: list[dict[str, Any]]) -> Path:
-    month = datetime.now(timezone.utc).strftime("%Y-%m")
-    backup_file = OUTPUT_DIR / f"TradeRepublic_{owner_name}_{month}.csv"
-    headers = ["event_id", "event_type", "timestamp", "raw"]
-
-    file_has_data = backup_file.exists() and backup_file.stat().st_size > 0
-    with backup_file.open("a", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=headers)
-        if not file_has_data:
-            writer.writeheader()
-
-        for event in events:
-            writer.writerow(
-                {
-                    "event_id": _dedup_event_id(event),
-                    "event_type": event.get("eventType") or event.get("type") or event.get("event_type") or "",
-                    "timestamp": normalize_event_time(event),
-                    "raw": str(event),
-                }
-            )
-    return backup_file
-
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
 
 def run() -> int:
-    owner_name = _required_env("OWNER_NAME")
-    phone_number = _required_env("PHONE_NUMBER")
-    pin = _required_env("PIN")
-    wallet_api_key = _required_env("WALLET_API_KEY")
-    wallet_cash_account_id = _required_env("WALLET_CASH_ACCOUNT_ID")
-    wallet_portfolio_account_id = _required_env("WALLET_PORTFOLIO_ACCOUNT_ID")
+    cfg = Config.from_env()
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
 
-    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    lookback_days = int(os.getenv("LOOKBACK_DAYS", "7"))
+    setup_logging(cfg.data_dir)
+    log.info("Starting sync for owner: %s", cfg.owner_name)
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    notifier = Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)
+    since = datetime.now(timezone.utc) - timedelta(days=cfg.lookback_days)
 
-    log = setup_logging(DATA_DIR)
-    log.info("Starting sync for owner: %s", owner_name)
+    with EventRepository(cfg.data_dir / "sync.db") as repo:
+        repo.purge_old_records()
+        events = _fetch_events(cfg, notifier, since)
 
-    conn = _init_db(DB_PATH)
-    try:
-        wallet_client = WalletClient(api_key=wallet_api_key)
-
-        since = datetime.now(timezone.utc) - timedelta(days=lookback_days)
-        log.info("Fetching events since %s", since.isoformat())
-
-        try:
-            tr_client = connect_trade_republic(
-                phone_number=phone_number,
-                pin=pin,
-                data_dir=DATA_DIR,
-                on_login_required=lambda: notify_login_required(
-                    bot_token=telegram_bot_token,
-                    chat_id=telegram_chat_id,
-                    owner_name=owner_name,
-                ),
-                on_login_success=lambda: notify_login_success(
-                    bot_token=telegram_bot_token,
-                    chat_id=telegram_chat_id,
-                    owner_name=owner_name,
-                ),
-            )
-            log.info("Trade Republic session established")
-            events = fetch_timeline_events(tr_client, since=since)
-            log.info("Fetched %d timeline events", len(events))
-        except LoginFailedError:
-            log.exception("Login failed")
-            notify_login_failed(
-                bot_token=telegram_bot_token,
-                chat_id=telegram_chat_id,
-                owner_name=owner_name,
-            )
-            return 1
-        except AuthenticationError:
-            log.exception("Authentication error")
-            notify_authentication_required(
-                bot_token=telegram_bot_token,
-                chat_id=telegram_chat_id,
-                owner_name=owner_name,
-            )
-            return 1
-        except HTTPError as exc:
-            status = exc.response.status_code if exc.response is not None else None
-            log.exception("HTTP error (status=%s)", status)
-            if status == 401:
-                notify_authentication_required(
-                    bot_token=telegram_bot_token,
-                    chat_id=telegram_chat_id,
-                    owner_name=owner_name,
-                )
-                return 1
-            notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
-            raise
-        except Exception as exc:
-            log.exception("Unexpected error during TR connection/fetch")
-            notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
-            raise
-
-        recent_events = _filter_by_lookback(events, since)
-        new_events = _filter_unprocessed_events(recent_events, conn)
+        recent_events = filter_by_lookback(events, since)
+        new_events = repo.filter_unprocessed(recent_events)
         skipped_count = len(recent_events) - len(new_events)
         log.info("%d new events to sync (after dedup)", len(new_events))
 
-        notify_fetch_summary(
-            bot_token=telegram_bot_token,
-            chat_id=telegram_chat_id,
-            owner_name=owner_name,
+        notifier.fetch_summary(
             since=since.strftime("%Y-%m-%d"),
             until=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             fetched=len(recent_events),
@@ -224,84 +178,33 @@ def run() -> int:
             skipped=skipped_count,
         )
 
-        synced_count = 0
-        excluded_count = 0
+        counts = _SyncCounts()
         try:
-            # Build all record payloads in one pass, tracking which event each belongs to.
-            all_records: list[dict] = []
-            event_record_indices: list[list[int]] = [[] for _ in new_events]
+            batch = _build_batch(new_events, cfg, repo)
+            counts.excluded = batch.excluded_count
 
-            for event_idx, event in enumerate(new_events):
-                recs = build_records_for_event(
-                    event,
-                    cash_account_id=wallet_cash_account_id,
-                    portfolio_account_id=wallet_portfolio_account_id,
-                )
-                if not recs:
-                    # Zero-amount event (e.g. CARD_VERIFICATION) — mark processed so
-                    # it won't reappear on the next run, but don't send to the API.
-                    _mark_processed(conn, event)
-                    excluded_count += 1
-                    log.info("Excluded zero-amount event %s", _dedup_event_id(event))
-                    continue
-                for r in recs:
-                    event_record_indices[event_idx].append(len(all_records))
-                    all_records.append(r)
-
-            if all_records:
-                results = wallet_client.post_records(all_records)
+            if batch.records:
+                results = WalletClient(api_key=cfg.wallet_api_key).post_records(batch.records)
                 log.debug("API results: %s", results)
-                # Key by inputIndex. Items absent from results are treated as
-                # succeeded (API may omit successful items when returnData=false).
-                failed_by_index = {
-                    r.get("inputIndex", i): r
-                    for i, r in enumerate(results)
-                    if r.get("error")
-                }
+                counts = _process_results(results, new_events, batch.event_record_indices, repo)
+                counts.excluded = batch.excluded_count
 
-                for event_idx, event in enumerate(new_events):
-                    record_indices = event_record_indices[event_idx]
-                    if not record_indices:
-                        # Zero-amount event — already marked processed above, skip.
-                        continue
-                    failures = [failed_by_index[i] for i in record_indices if i in failed_by_index]
-                    if not failures:
-                        _mark_processed(conn, event)
-                        synced_count += 1
-                    else:
-                        event_id = _dedup_event_id(event)
-                        for f in failures:
-                            log.error(
-                                "Event %s record %d failed: %s",
-                                event_id,
-                                f.get("inputIndex"),
-                                f.get("error"),
-                            )
-                conn.commit()
-
-            _backup_csv(owner_name=owner_name, events=new_events)
-            log.info("Sync complete. %d/%d events synced. %d excluded.", synced_count, len(new_events), excluded_count)
+            log.info("Sync complete. synced=%d excluded=%d failed=%d", counts.synced, counts.excluded, counts.failed)
         except Exception as exc:
             log.exception("Error syncing events to wallet")
-            notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)
+            notifier.error(exc)
             raise
         finally:
-            failed_count = len(new_events) - synced_count - excluded_count
-            sent = notify_sync_complete(
-                bot_token=telegram_bot_token,
-                chat_id=telegram_chat_id,
-                owner_name=owner_name,
-                synced=synced_count,
-                failed=failed_count,
+            sent = notifier.sync_complete(
+                synced=counts.synced,
+                failed=counts.failed,
                 skipped=skipped_count,
-                excluded=excluded_count,
+                excluded=counts.excluded,
             )
             if not sent:
-                log.warning("notify_sync_complete: Telegram message not sent (no credentials or request failed)")
+                log.warning("sync_complete notification not sent (no credentials or request failed)")
 
-        return 0
-    finally:
-        conn.close()
+    return 0
 
 
 if __name__ == "__main__":
