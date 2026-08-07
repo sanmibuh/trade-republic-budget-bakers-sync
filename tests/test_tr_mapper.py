@@ -214,8 +214,8 @@ def test_build_bank_transaction_incoming_uses_transfer():
         "eventType": "BANK_TRANSACTION_INCOMING",
         "timestamp": "2024-01-01T00:00:00Z",
         "amount": "500.00",
-        "title": "Salary",
-        "subtitle": "DE89370400440532013000",
+        "title": "Salary Corp",
+        "subtitle": "Erhalten",
     }
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
 
@@ -223,9 +223,9 @@ def test_build_bank_transaction_incoming_uses_transfer():
     r = records[0]
     assert r["paymentType"] == "transfer"
     assert r["accountId"] == "cash"
-    assert r["note"] == "From: Salary"
+    assert r["note"] == "From: Salary Corp"
     assert r["transfer"] == {"pairingMode": "unpaired"}
-    assert r["counterParty"] == "DE89370400440532013000"
+    assert r["counterParty"] == "Salary Corp"
 
 
 def test_build_bank_transaction_outgoing_uses_to():
@@ -234,7 +234,7 @@ def test_build_bank_transaction_outgoing_uses_to():
         "timestamp": "2024-01-01T00:00:00Z",
         "amount": "-200.00",
         "title": "Landlord",
-        "subtitle": "DE12345678901234567890",
+        "subtitle": "Gesendet",
     }
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
 
@@ -243,35 +243,33 @@ def test_build_bank_transaction_outgoing_uses_to():
     assert r["paymentType"] == "transfer"
     assert r["note"] == "To: Landlord"
     assert r["transfer"] == {"pairingMode": "unpaired"}
-    assert r["counterParty"] == "DE12345678901234567890"
+    assert r["counterParty"] == "Landlord"
 
 
 def test_build_bank_transaction_counter_party_truncated():
-    long_subtitle = "X" * 300
+    long_title = "X" * 300
     event = {
         "eventType": "BANK_TRANSACTION_INCOMING",
         "timestamp": "2024-01-01T00:00:00Z",
         "amount": "100.00",
-        "title": "Test",
-        "subtitle": long_subtitle,
+        "title": long_title,
+        "subtitle": "Erhalten",
     }
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
     assert len(records[0]["counterParty"]) == 255
 
 
-def test_build_bank_transaction_incoming_no_subtitle():
+def test_build_bank_transaction_incoming_no_title():
     event = {
         "eventType": "BANK_TRANSACTION_INCOMING",
         "timestamp": "2024-01-01T00:00:00Z",
         "amount": "500.00",
-        "title": "Salary",
-        "subtitle": None,
+        "subtitle": "Erhalten",
     }
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
 
     assert "counterParty" not in records[0]
     assert records[0]["transfer"] == {"pairingMode": "unpaired"}
-    assert records[0]["note"] == "From: Salary"
 
 
 def test_build_unknown_event_type_posts_to_cash():

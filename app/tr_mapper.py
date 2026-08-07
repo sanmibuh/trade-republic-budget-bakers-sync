@@ -176,8 +176,8 @@ def _handle_bank_transaction(
     cash_account_id: str, portfolio_account_id: str,
 ) -> list[dict[str, Any]]:
     event_type = str(_get_first_match(event, "eventType", "type", "event_type") or "").upper()
-    counter_party = str(event.get("subtitle") or "").strip() or None
     tr_title = str(_get_first_match(event, "title", "name", "description") or "").strip()
+    counter_party = tr_title or None
     direction = "From" if event_type == "BANK_TRANSACTION_INCOMING" else "To"
     transfer_note = f"{direction}: {tr_title}" if tr_title else note
     return [_make_record(
