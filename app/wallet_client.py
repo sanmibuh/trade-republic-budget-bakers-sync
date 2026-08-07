@@ -160,6 +160,9 @@ def build_records_for_event(
     tax = extract_amount(event, "tax", "taxAmount", "withholdingTax")
 
     log.debug("Building record(s) for event type=%s amount=%s date=%s", event_type, amount, record_date)
+    if amount == 0:
+        log.debug("Skipping zero-amount event (type=%s) — raw event: %s", event_type, event)
+        return []
 
     def _rec(
         account_id: str,

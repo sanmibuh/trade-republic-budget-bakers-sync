@@ -211,6 +211,21 @@ def test_build_unknown_event_type_posts_to_cash():
     assert records[0]["accountId"] == "cash"
 
 
+def test_build_zero_amount_returns_empty():
+    """Events like CARD_VERIFICATION with amount=0 must be excluded (return empty list)."""
+    event = {"eventType": "CARD_VERIFICATION", "timestamp": "2024-01-01T00:00:00Z", "amount": "0.00"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records == []
+
+
+def test_build_zero_amount_tr_dict_format():
+    """Same exclusion when amount comes as TR dict {"value": 0, "currency": "EUR"}."""
+    event = {"eventType": "CARD_VERIFICATION", "timestamp": "2024-01-01T00:00:00Z",
+             "amount": {"value": 0.0, "currency": "EUR"}}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records == []
+
+
 def test_build_uses_lowercase_type_field():
     """Lowercase 'type' key is uppercased internally — INTEREST_PAYMENT branch fires."""
     event = {"type": "interest_payment", "timestamp": "2024-01-01T00:00:00Z", "amount": "3.00"}

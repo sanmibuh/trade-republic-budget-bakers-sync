@@ -5,7 +5,7 @@ IMAGE          ?= tr-wallet-sync
 DATA_DIR       ?= ./data/david
 OUTPUT_DIR     ?= ./output/david
 
-.PHONY: help build-base build rebuild bootstrap sync \
+.PHONY: help build-base build build-all bootstrap sync \
         docker-build docker-rebuild docker-bootstrap docker-sync \
         test clean
 
@@ -16,9 +16,9 @@ help:
 	@echo "Usage: make <target> [VARIABLE=value]"
 	@echo ""
 	@echo "Docker Compose targets  (uses COMPOSE_FILE=$(COMPOSE_FILE), SERVICE=$(SERVICE))"
-	@echo "  build-base      Build the base image (python + git + pip install) -- rebuild when requirements.txt or Python version changes"
-	@echo "  build           Build the service image (uses cache)"
-	@echo "  rebuild         Build the service image (no cache)"
+	@echo "  build-base      Build the base image (python + git + pip install) -- run when requirements.txt or Python version changes"
+	@echo "  build           Build the app image only (assumes base exists) -- run after code changes"
+	@echo "  build-all       Rebuild base + app both from scratch (no cache) -- full clean build"
 	@echo "  bootstrap       Run interactively to complete first-time 2FA login"
 	@echo "  sync            Run a one-shot sync"
 	@echo ""
@@ -38,10 +38,11 @@ help:
 build-base:
 	docker build -f Dockerfile.base -t $(BASE_IMAGE):latest .
 
-build: build-base
+build:
 	docker compose -f $(COMPOSE_FILE) build $(SERVICE)
 
-rebuild:
+build-all:
+	docker build --no-cache -f Dockerfile.base -t $(BASE_IMAGE):latest .
 	docker compose -f $(COMPOSE_FILE) build --no-cache $(SERVICE)
 
 bootstrap:

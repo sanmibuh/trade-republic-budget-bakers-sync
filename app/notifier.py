@@ -120,6 +120,7 @@ def notify_sync_complete(
     synced: int,
     failed: int,
     skipped: int,
+    excluded: int = 0,
 ) -> bool:
     safe_owner = _escape_markdown(owner_name)
     if failed == 0:
@@ -131,8 +132,10 @@ def notify_sync_complete(
     else:
         icon = "⚠️"
         status = "Partial"
-    message = (
-        f"{icon} *Trade Republic Sync: {safe_owner} — {_escape_markdown(status)}*\n\n"
-        f"Saved: *{synced}* · Failed: *{failed}* · Skipped: *{skipped}*"
-    )
-    return send_telegram_message(bot_token=bot_token, chat_id=chat_id, message=message)
+    lines = [
+        f"{icon} *Trade Republic Sync: {safe_owner} — {_escape_markdown(status)}*\n",
+        f"Saved: *{synced}* · Failed: *{failed}* · Skipped: *{skipped}*",
+    ]
+    if excluded:
+        lines.append(f"Excluded \\(zero amount\\): *{excluded}*")
+    return send_telegram_message(bot_token=bot_token, chat_id=chat_id, message="\n".join(lines))

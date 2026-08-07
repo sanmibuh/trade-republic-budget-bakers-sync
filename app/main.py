@@ -228,6 +228,7 @@ def run() -> int:
             # Build all record payloads in one pass, tracking which event each belongs to.
             all_records: list[dict] = []
             event_record_indices: list[list[int]] = [[] for _ in new_events]
+            excluded_count = 0
 
             for event_idx, event in enumerate(new_events):
                 recs = build_records_for_event(
@@ -235,6 +236,13 @@ def run() -> int:
                     cash_account_id=wallet_cash_account_id,
                     portfolio_account_id=wallet_portfolio_account_id,
                 )
+                if not recs:
+                    # Zero-amount event (e.g. CARD_VERIFICATION) — mark processed so
+                    # it won't reappear on the next run, but don't send to the API.
+                    _mark_processed(conn, event)
+                    excluded_count += 1
+                    log.info("Excluded zero-amount event %s", _dedup_event_id(event))
+                    continue
                 for r in recs:
                     event_record_indices[event_idx].append(len(all_records))
                     all_records.append(r)
@@ -242,15 +250,18 @@ def run() -> int:
             synced_count = 0
             if all_records:
                 results = wallet_client.post_records(all_records)
-                result_by_index = {r.get("inputIndex", i): r for i, r in enumerate(results)}
+                log.debug("API results: %s", results)
+                # Key by inputIndex. Items absent from results are treated as
+                # succeeded (API may omit successful items when returnData=false).
+                failed_by_index = {
+                    r.get("inputIndex", i): r
+                    for i, r in enumerate(results)
+                    if r.get("error")
+                }
 
                 for event_idx, event in enumerate(new_events):
                     record_indices = event_record_indices[event_idx]
-                    failures = [
-                        result_by_index.get(i, {})
-                        for i in record_indices
-                        if not result_by_index.get(i, {}).get("success")
-                    ]
+                    failures = [failed_by_index[i] for i in record_indices if i in failed_by_index]
                     if not failures:
                         _mark_processed(conn, event)
                         synced_count += 1
@@ -266,9 +277,9 @@ def run() -> int:
                 conn.commit()
 
             _backup_csv(owner_name=owner_name, events=new_events)
-            log.info("Sync complete. %d/%d events synced.", synced_count, len(new_events))
+            log.info("Sync complete. %d/%d events synced. %d excluded.", synced_count, len(new_events), excluded_count)
 
-            failed_count = len(new_events) - synced_count
+            failed_count = len(new_events) - synced_count - excluded_count
             notify_sync_complete(
                 bot_token=telegram_bot_token,
                 chat_id=telegram_chat_id,
@@ -276,6 +287,7 @@ def run() -> int:
                 synced=synced_count,
                 failed=failed_count,
                 skipped=skipped_count,
+                excluded=excluded_count,
             )
         except Exception as exc:
             log.exception("Error syncing events to wallet")

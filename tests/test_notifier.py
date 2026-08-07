@@ -202,6 +202,15 @@ def test_notify_sync_complete_all_ok():
     assert "✅" in msg
 
 
+def test_notify_sync_complete_with_excluded():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        notify_sync_complete("tok", "chat", "David", synced=22, failed=0, skipped=0, excluded=2)
+    msg = mock_send.call_args.kwargs["message"]
+    assert "22" in msg
+    assert "2" in msg
+    assert "zero amount" in msg.lower() or "Excluded" in msg
+
+
 def test_notify_sync_complete_all_failed():
     with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
         notify_sync_complete("tok", "chat", "David", synced=0, failed=24, skipped=0)
