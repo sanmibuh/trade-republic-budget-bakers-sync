@@ -51,11 +51,11 @@ class LoginFailedError(Exception):
 def fetch_timeline_events(client: Any, since: datetime) -> list[dict[str, Any]]:
     providers = [
         ("timeline", (since,)),
-        ("timeline", tuple()),
+        ("timeline", ()),
         ("get_timeline", (since,)),
-        ("get_timeline", tuple()),
+        ("get_timeline", ()),
         ("timeline_transactions", (since,)),
-        ("timeline_transactions", tuple()),
+        ("timeline_transactions", ()),
     ]
 
     last_error: Exception | None = None
@@ -64,21 +64,8 @@ def fetch_timeline_events(client: Any, since: datetime) -> list[dict[str, Any]]:
         if method is None:
             continue
         try:
-            coroutine_or_result = method(*args)
-            # pytr methods are async — use run_blocking if available
-            run_blocking = getattr(client, "run_blocking", None)
-            if run_blocking is not None and hasattr(coroutine_or_result, "__await__"):
-                result = run_blocking(coroutine_or_result)
-            else:
-                result = coroutine_or_result
-            if result is None:
-                return []
-            if isinstance(result, list):
-                return [item for item in result if isinstance(item, dict)]
-            if isinstance(result, dict):
-                items = result.get("items") or result.get("data") or []
-                return [item for item in items if isinstance(item, dict)]
-            return []
+            result = _resolve(client, method(*args))
+            return _parse_result(result)
         except TypeError as exc:
             last_error = exc
             continue
@@ -86,3 +73,23 @@ def fetch_timeline_events(client: Any, since: datetime) -> list[dict[str, Any]]:
     if last_error:
         raise RuntimeError("Unable to fetch timeline events with known pytr methods") from last_error
     raise RuntimeError("No supported timeline method found on pytr client")
+
+
+def _resolve(client: Any, coroutine_or_result: Any) -> Any:
+    """Run a coroutine via run_blocking if needed, otherwise return as-is."""
+    run_blocking = getattr(client, "run_blocking", None)
+    if run_blocking is not None and hasattr(coroutine_or_result, "__await__"):
+        return run_blocking(coroutine_or_result)
+    return coroutine_or_result
+
+
+def _parse_result(result: Any) -> list[dict[str, Any]]:
+    """Normalise a pytr timeline response into a flat list of event dicts."""
+    if result is None:
+        return []
+    if isinstance(result, list):
+        return [item for item in result if isinstance(item, dict)]
+    if isinstance(result, dict):
+        items = result.get("items") or result.get("data") or []
+        return [item for item in items if isinstance(item, dict)]
+    return []
