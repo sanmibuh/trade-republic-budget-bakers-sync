@@ -228,3 +228,31 @@ def test_notify_sync_complete_partial():
 def test_notify_sync_complete_no_credentials():
     result = notify_sync_complete(None, None, "David", synced=5, failed=0, skipped=0)
     assert result is False
+
+
+def test_send_telegram_message_http_error_returns_false():
+    """HTTPError from Telegram API should be caught and return False."""
+    mock_response = MagicMock()
+    mock_response.status_code = 400
+    mock_response.text = "Bad Request: can't parse entities"
+
+    http_error = requests.HTTPError(response=mock_response)
+
+    with patch("requests.post") as mock_post:
+        mock_post.return_value.raise_for_status.side_effect = http_error
+        from app.notifier import send_telegram_message
+        result = send_telegram_message(bot_token="tok", chat_id="chat", message="hello")
+
+    assert result is False
+
+
+def test_send_telegram_message_http_error_no_response_returns_false():
+    """HTTPError with no response object should still be caught and return False."""
+    http_error = requests.HTTPError(response=None)
+
+    with patch("requests.post") as mock_post:
+        mock_post.return_value.raise_for_status.side_effect = http_error
+        from app.notifier import send_telegram_message
+        result = send_telegram_message(bot_token="tok", chat_id="chat", message="hello")
+
+    assert result is False

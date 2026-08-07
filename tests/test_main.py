@@ -15,6 +15,7 @@ from app.main import (
     _filter_unprocessed_events,
     _init_db,
     _mark_processed,
+    _backup_csv,
     _required_env,
 )
 
@@ -152,7 +153,18 @@ def test_filter_by_lookback_keeps_event_without_timestamp():
     assert len(_filter_by_lookback(events, since)) == 1
 
 
-def test_filter_by_lookback_mixed():
+def test_filter_by_lookback_naive_timestamp_treated_as_utc():
+    """Timestamps without tzinfo are assumed UTC — must still be compared correctly."""
+    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
+    events = [_make_event("2024-01-11T00:00:00")]  # no Z, no offset
+    assert len(_filter_by_lookback(events, since)) == 1
+
+
+def test_filter_by_lookback_naive_timestamp_gets_utc():
+    """Timestamps without tzinfo are treated as UTC and compared correctly."""
+    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
+    events = [_make_event("2024-01-11T00:00:00")]  # no Z, no offset
+    assert len(_filter_by_lookback(events, since)) == 1
     since = datetime(2024, 1, 10, tzinfo=timezone.utc)
     events = [
         _make_event("2024-01-09T00:00:00Z"),
@@ -224,3 +236,34 @@ def test_mark_processed_is_idempotent():
     count = conn.execute("SELECT COUNT(*) FROM processed_events WHERE event_id='evt-2'").fetchone()[0]
     assert count == 1
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# _backup_csv
+# ---------------------------------------------------------------------------
+
+def test_backup_csv_creates_file(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.main.OUTPUT_DIR", tmp_path)
+    events = [
+        {"id": "e1", "eventType": "BUY_ORDER", "timestamp": "2024-01-15T10:00:00Z", "amount": "100"},
+        {"id": "e2", "eventType": "SELL_ORDER", "timestamp": "2024-01-16T10:00:00Z", "amount": "200"},
+    ]
+    path = _backup_csv("TestUser", events)
+    assert path.exists()
+    content = path.read_text(encoding="utf-8")
+    assert "event_id" in content  # header written
+    assert "e1" in content
+    assert "e2" in content
+
+
+def test_backup_csv_appends_on_second_call(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.main.OUTPUT_DIR", tmp_path)
+    event1 = [{"id": "e1", "eventType": "BUY_ORDER", "timestamp": "2024-01-15T10:00:00Z", "amount": "100"}]
+    event2 = [{"id": "e2", "eventType": "SELL_ORDER", "timestamp": "2024-01-16T10:00:00Z", "amount": "200"}]
+    _backup_csv("TestUser", event1)
+    _backup_csv("TestUser", event2)
+    csv_file = next(tmp_path.glob("*.csv"))
+    content = csv_file.read_text(encoding="utf-8")
+    assert content.count("event_id") == 1  # header written only once
+    assert "e1" in content
+    assert "e2" in content

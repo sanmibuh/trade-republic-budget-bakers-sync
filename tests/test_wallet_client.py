@@ -401,3 +401,9 @@ def test_post_records_chunks_at_20():
     assert len(results) == 21
     # inputIndex must be rebased: second chunk item 0 → global index 20
     assert results[20]["inputIndex"] == 20
+
+
+def test_to_decimal_unsupported_type_returns_zero():
+    """An unsupported type (e.g. list) should fall through to the final return Decimal('0')."""
+    assert _to_decimal([1, 2, 3]) == Decimal("0")
+    assert _to_decimal({"value": 5}) == Decimal("0")
