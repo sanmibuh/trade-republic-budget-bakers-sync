@@ -89,3 +89,50 @@ def notify_error(bot_token: str | None, chat_id: str | None, owner_name: str, er
         f"Error: `{safe_error}`"
     )
     return send_telegram_message(bot_token=bot_token, chat_id=chat_id, message=message)
+
+
+def notify_fetch_summary(
+    bot_token: str | None,
+    chat_id: str | None,
+    owner_name: str,
+    since: str,
+    until: str,
+    fetched: int,
+    new: int,
+    skipped: int,
+) -> bool:
+    safe_owner = _escape_markdown(owner_name)
+    safe_since = _escape_markdown(since)
+    safe_until = _escape_markdown(until)
+    message = (
+        f"📥 *Trade Republic Sync: {safe_owner}*\n\n"
+        f"Period: `{safe_since}` → `{safe_until}`\n"
+        f"Fetched: *{fetched}* events\n"
+        f"New: *{new}* · Skipped \\(already synced\\): *{skipped}*"
+    )
+    return send_telegram_message(bot_token=bot_token, chat_id=chat_id, message=message)
+
+
+def notify_sync_complete(
+    bot_token: str | None,
+    chat_id: str | None,
+    owner_name: str,
+    synced: int,
+    failed: int,
+    skipped: int,
+) -> bool:
+    safe_owner = _escape_markdown(owner_name)
+    if failed == 0:
+        icon = "✅"
+        status = "Success"
+    elif synced == 0:
+        icon = "❌"
+        status = "All Failed"
+    else:
+        icon = "⚠️"
+        status = "Partial"
+    message = (
+        f"{icon} *Trade Republic Sync: {safe_owner} — {_escape_markdown(status)}*\n\n"
+        f"Saved: *{synced}* · Failed: *{failed}* · Skipped: *{skipped}*"
+    )
+    return send_telegram_message(bot_token=bot_token, chat_id=chat_id, message=message)

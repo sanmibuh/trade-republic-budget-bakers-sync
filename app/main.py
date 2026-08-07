@@ -12,9 +12,9 @@ from typing import Any
 from requests import HTTPError
 
 from app.logging_setup import setup_logging
-from app.notifier import notify_authentication_required, notify_error, notify_login_failed, notify_login_required, notify_login_success
+from app.notifier import notify_authentication_required, notify_error, notify_fetch_summary, notify_login_failed, notify_login_required, notify_login_success, notify_sync_complete
 from app.tr_client import connect_trade_republic, fetch_timeline_events, LoginFailedError
-from app.wallet_client import WalletClient, normalize_event_time, sync_event_to_wallet
+from app.wallet_client import WalletClient, normalize_event_time, build_records_for_event
 
 try:
     from pytr.exceptions import AuthenticationError
@@ -210,24 +210,73 @@ def run() -> int:
 
         recent_events = _filter_by_lookback(events, since)
         new_events = _filter_unprocessed_events(recent_events, conn)
+        skipped_count = len(recent_events) - len(new_events)
         log.info("%d new events to sync (after dedup)", len(new_events))
 
+        notify_fetch_summary(
+            bot_token=telegram_bot_token,
+            chat_id=telegram_chat_id,
+            owner_name=owner_name,
+            since=since.strftime("%Y-%m-%d"),
+            until=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            fetched=len(recent_events),
+            new=len(new_events),
+            skipped=skipped_count,
+        )
+
         try:
-            for event in new_events:
-                event_id = _dedup_event_id(event)
-                log.debug("Syncing event %s", event_id)
-                sync_event_to_wallet(
-                    wallet_client,
+            # Build all record payloads in one pass, tracking which event each belongs to.
+            all_records: list[dict] = []
+            event_record_indices: list[list[int]] = [[] for _ in new_events]
+
+            for event_idx, event in enumerate(new_events):
+                recs = build_records_for_event(
                     event,
                     cash_account_id=wallet_cash_account_id,
                     portfolio_account_id=wallet_portfolio_account_id,
                 )
-                _mark_processed(conn, event)
+                for r in recs:
+                    event_record_indices[event_idx].append(len(all_records))
+                    all_records.append(r)
+
+            synced_count = 0
+            if all_records:
+                results = wallet_client.post_records(all_records)
+                result_by_index = {r.get("inputIndex", i): r for i, r in enumerate(results)}
+
+                for event_idx, event in enumerate(new_events):
+                    record_indices = event_record_indices[event_idx]
+                    failures = [
+                        result_by_index.get(i, {})
+                        for i in record_indices
+                        if not result_by_index.get(i, {}).get("success")
+                    ]
+                    if not failures:
+                        _mark_processed(conn, event)
+                        synced_count += 1
+                    else:
+                        event_id = _dedup_event_id(event)
+                        for f in failures:
+                            log.error(
+                                "Event %s record %d failed: %s",
+                                event_id,
+                                f.get("inputIndex"),
+                                f.get("error"),
+                            )
                 conn.commit()
-                log.debug("Event %s synced and marked processed", event_id)
 
             _backup_csv(owner_name=owner_name, events=new_events)
-            log.info("Sync complete. %d events synced.", len(new_events))
+            log.info("Sync complete. %d/%d events synced.", synced_count, len(new_events))
+
+            failed_count = len(new_events) - synced_count
+            notify_sync_complete(
+                bot_token=telegram_bot_token,
+                chat_id=telegram_chat_id,
+                owner_name=owner_name,
+                synced=synced_count,
+                failed=failed_count,
+                skipped=skipped_count,
+            )
         except Exception as exc:
             log.exception("Error syncing events to wallet")
             notify_error(bot_token=telegram_bot_token, chat_id=telegram_chat_id, owner_name=owner_name, error=exc)

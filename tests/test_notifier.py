@@ -12,6 +12,8 @@ from app.notifier import (
     notify_login_failed,
     notify_login_success,
     notify_error,
+    notify_fetch_summary,
+    notify_sync_complete,
 )
 
 
@@ -157,4 +159,63 @@ def test_notify_error_sends_message():
 
 def test_notify_error_returns_false_without_credentials():
     result = notify_error(None, None, "owner", RuntimeError("boom"))
+    assert result is False
+
+
+# ---------------------------------------------------------------------------
+# notify_fetch_summary
+# ---------------------------------------------------------------------------
+
+def test_notify_fetch_summary_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = notify_fetch_summary(
+            "tok", "chat", "David",
+            since="2026-07-31", until="2026-08-07",
+            fetched=30, new=24, skipped=6,
+        )
+    assert result is True
+    msg = mock_send.call_args.kwargs["message"]
+    assert "30" in msg
+    assert "24" in msg
+    assert "6" in msg
+
+
+def test_notify_fetch_summary_no_credentials():
+    result = notify_fetch_summary(
+        None, None, "David",
+        since="2026-07-31", until="2026-08-07",
+        fetched=10, new=5, skipped=5,
+    )
+    assert result is False
+
+
+# ---------------------------------------------------------------------------
+# notify_sync_complete
+# ---------------------------------------------------------------------------
+
+def test_notify_sync_complete_all_ok():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = notify_sync_complete("tok", "chat", "David", synced=24, failed=0, skipped=6)
+    assert result is True
+    msg = mock_send.call_args.kwargs["message"]
+    assert "24" in msg
+    assert "✅" in msg
+
+
+def test_notify_sync_complete_all_failed():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        notify_sync_complete("tok", "chat", "David", synced=0, failed=24, skipped=0)
+    msg = mock_send.call_args.kwargs["message"]
+    assert "❌" in msg
+
+
+def test_notify_sync_complete_partial():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        notify_sync_complete("tok", "chat", "David", synced=10, failed=14, skipped=0)
+    msg = mock_send.call_args.kwargs["message"]
+    assert "⚠" in msg
+
+
+def test_notify_sync_complete_no_credentials():
+    result = notify_sync_complete(None, None, "David", synced=5, failed=0, skipped=0)
     assert result is False
