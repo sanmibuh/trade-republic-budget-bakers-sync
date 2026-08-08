@@ -22,5 +22,8 @@ printf '%s root cd /app && python -m app.main >> /proc/1/fd/1 2>> /proc/1/fd/2\n
     "$CRON_SCHEDULE" > "$CRONTAB_FILE"
 chmod 0644 "$CRONTAB_FILE"
 
+# Export environment variables so cron jobs inherit them
+env > /etc/environment
+
 # Start cron daemon in foreground
 exec cron -f
