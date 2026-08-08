@@ -124,26 +124,3 @@ class TRClient:
         return collected
 
 
-# ---------------------------------------------------------------------------
-# Module-level functions kept for backwards compatibility
-# ---------------------------------------------------------------------------
-
-def connect_trade_republic(
-    phone_number: str,
-    pin: str,
-    data_dir: Path,
-    on_login_required: Any = None,
-    on_login_success: Any = None,
-) -> Any:
-    client = TRClient(phone_number, pin, data_dir)
-    client.connect(on_login_required=on_login_required, on_login_success=on_login_success)
-    return client
-
-
-def fetch_timeline_events(client: Any, since: datetime | None = None) -> list[dict[str, Any]]:
-    if isinstance(client, TRClient):
-        return client.fetch_timeline_events(since=since)
-    # Legacy: raw pytr client passed directly
-    tr = TRClient.__new__(TRClient)
-    tr._api = client
-    return tr.fetch_timeline_events(since=since)

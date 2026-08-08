@@ -229,24 +229,25 @@ def _handle_saveback(
     return [_make_record(portfolio_account_id, amount, note, record_date)]
 
 
+def _gross_tax_note(gross: str | None, tax: str | None) -> str | None:
+    """Return a 'gross X, tax Y' fragment, or None if no gross is available."""
+    if gross and tax:
+        return f"gross {gross}, tax {tax}"
+    if gross:
+        return f"gross {gross}"
+    return None
+
+
 def _handle_saveback_aggregate(
     event: dict[str, Any], amount: Decimal, note: str, record_date: str,
     cash_account_id: str, portfolio_account_id: str,
 ) -> list[dict[str, Any]]:
     """Transfer to portfolio with Transaktion + gross + tax appended to note."""
     details = event.get("details") or {}
-    txn = _extract_detail_row(details, "Transaktion")
-    gross = _extract_detail_row(details, "Angefallen")
-    tax = _extract_detail_row(details, "Steuern")
-
-    parts = []
-    if txn:
-        parts.append(txn)
-    if gross and tax:
-        parts.append(f"gross {gross}, tax {tax}")
-    elif gross:
-        parts.append(f"gross {gross}")
-
+    parts = [p for p in [
+        _extract_detail_row(details, "Transaktion"),
+        _gross_tax_note(_extract_detail_row(details, "Angefallen"), _extract_detail_row(details, "Steuern")),
+    ] if p]
     full_note = f"{note} · {' · '.join(parts)}" if parts else note
     return [_make_record(cash_account_id, amount, full_note, record_date, transfer_account_id=portfolio_account_id)]
 
@@ -257,16 +258,8 @@ def _handle_interest(
 ) -> list[dict[str, Any]]:
     """Cash credit with gross accrued + tax withheld appended to note."""
     details = event.get("details") or {}
-    gross = _extract_detail_row(details, "Angesammelt")
-    tax = _extract_detail_row(details, "Steuern")
-
-    parts = []
-    if gross and tax:
-        parts.append(f"gross {gross}, tax {tax}")
-    elif gross:
-        parts.append(f"gross {gross}")
-
-    full_note = f"{note} · {' · '.join(parts)}" if parts else note
+    gt = _gross_tax_note(_extract_detail_row(details, "Angesammelt"), _extract_detail_row(details, "Steuern"))
+    full_note = f"{note} · {gt}" if gt else note
     return [_make_record(cash_account_id, amount, full_note, record_date)]
 
 

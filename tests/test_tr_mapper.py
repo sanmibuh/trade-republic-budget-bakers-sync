@@ -10,11 +10,9 @@ from app.tr_mapper import (
     KNOWN_EVENT_TYPES,
     _extract_detail_row,
     _extract_iban_from_details,
-    _get_first_match,
     _to_decimal,
     build_records_for_event,
     extract_amount,
-    filter_by_lookback,
     normalize_event_time,
 )
 
@@ -46,23 +44,7 @@ def test_to_decimal_unsupported_type_returns_zero():
 
 
 # ---------------------------------------------------------------------------
-# _get_first_match
-# ---------------------------------------------------------------------------
-
-def test_get_first_match_returns_first_found():
-    assert _get_first_match({"b": 2, "a": 1}, "a", "b") == 1
-
-
-def test_get_first_match_skips_missing():
-    assert _get_first_match({"b": 2}, "a", "b") == 2
-
-
-def test_get_first_match_returns_none_when_absent():
-    assert _get_first_match({"c": 3}, "a", "b") is None
-
-
-# ---------------------------------------------------------------------------
-# extract_amount
+# _extract_iban_from_details
 # ---------------------------------------------------------------------------
 
 def test_extract_amount_top_level():
@@ -354,39 +336,6 @@ def test_build_uses_lowercase_type_field():
     assert len(records) == 1
     assert records[0]["accountId"] == "cash"
     assert records[0]["amount"] == {"value": 3.0}
-
-
-# ---------------------------------------------------------------------------
-# filter_by_lookback
-# ---------------------------------------------------------------------------
-
-def _evt(ts: str) -> dict:
-    return {"timestamp": ts}
-
-
-def test_filter_by_lookback_keeps_recent():
-    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
-    assert len(filter_by_lookback([_evt("2024-01-11T00:00:00Z")], since)) == 1
-
-
-def test_filter_by_lookback_removes_old():
-    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
-    assert filter_by_lookback([_evt("2024-01-09T00:00:00Z")], since) == []
-
-
-def test_filter_by_lookback_keeps_event_on_boundary():
-    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
-    assert len(filter_by_lookback([_evt("2024-01-10T00:00:00Z")], since)) == 1
-
-
-def test_filter_by_lookback_unparseable_timestamp_kept():
-    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
-    assert len(filter_by_lookback([{"timestamp": "not-a-date"}], since)) == 1
-
-
-def test_filter_by_lookback_naive_timestamp_treated_as_utc():
-    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
-    assert len(filter_by_lookback([_evt("2024-01-11T00:00:00")], since)) == 1
 
 
 # ---------------------------------------------------------------------------

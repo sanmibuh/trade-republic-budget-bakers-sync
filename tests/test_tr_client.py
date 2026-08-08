@@ -179,10 +179,8 @@ def _patch_timeline(events=None, side_effect=None):
     def _factory(**kwargs):
         fake = _FakeTimeline(events=events, **kwargs)
         if side_effect is not None:
-            import asyncio
-
             async def _raise():
-                raise side_effect  # noqa: B023
+                raise side_effect
 
             fake.tl_loop = _raise
         return fake
