@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +23,7 @@ class TRClient:
             on_login_required=notifier.login_required,
             on_login_success=notifier.login_success,
         )
-        events = client.fetch_timeline_events()
+        events = client.fetch_timeline_events(since=since)
     """
 
     def __init__(self, phone_number: str, pin: str, data_dir: Path) -> None:
@@ -86,75 +88,39 @@ class TRClient:
 
         self._api = client
 
-    def fetch_timeline_events(self) -> list[dict[str, Any]]:
-        """Fetch all timeline events from Trade Republic."""
+    def fetch_timeline_events(self, since: datetime | None = None) -> list[dict[str, Any]]:
+        """Fetch timeline events with full details via pytr's Timeline class.
+
+        Runs pytr's async Timeline loop in a single asyncio.run() call so that
+        timeline_transactions, timeline_activity_log, and timeline_detail_v2
+        subscriptions all share the same event loop — which is required by pytr's
+        websocket architecture.
+
+        Each returned event may contain a ``details`` key with the full
+        timelineDetailV2 payload (e.g. counterparty info for bank transfers).
+        """
         if self._api is None:
             raise RuntimeError("TRClient.connect() must be called before fetch_timeline_events()")
 
-        log.debug("Calling settings() to prime the web session token")
+        from pytr.timeline import Timeline
+
+        collected: list[dict[str, Any]] = []
+        not_before = since.timestamp() if since is not None else 0.0
+
+        timeline = Timeline(
+            tr=self._api,
+            output_path=self._data_dir,
+            not_before=not_before,
+            store_event_database=False,
+            event_callback=lambda event: collected.append(event),
+        )
+
         try:
-            self._api.settings()
-            log.debug("settings() succeeded — web session token is ready")
-        except Exception as exc:  # noqa: BLE001
-            log.warning("settings() failed before websocket subscription: %s", exc)
+            asyncio.run(timeline.tl_loop())
+        except Exception as exc:
+            raise RuntimeError(f"Timeline fetch failed: {exc}") from exc
 
-        candidates = ["timeline_transactions", "timeline_activity_log"]
-
-        for method_name in candidates:
-            method = getattr(self._api, method_name, None)
-            if method is None:
-                log.debug("Method %s not found on client, skipping", method_name)
-                continue
-            log.debug("Fetching timeline via %s", method_name)
-            try:
-                result = self._resolve(method())
-                events = self._parse_result(result)
-                log.debug("Got %d raw events from %s", len(events), method_name)
-                return events
-            except Exception as exc:
-                log.warning("Method %s failed: %s — stopping", method_name, exc)
-                raise RuntimeError(f"Timeline fetch via {method_name} failed: {exc}") from exc
-
-        raise RuntimeError("No supported timeline method worked for the current pytr connection")
-
-    def _resolve(self, coroutine_or_result: Any) -> Any:
-        run_blocking = getattr(self._api, "run_blocking", None)
-        if run_blocking is not None and hasattr(coroutine_or_result, "__await__"):
-            return run_blocking(coroutine_or_result, timeout=30.0)
-        return coroutine_or_result
-
-    @staticmethod
-    def _parse_result(result: Any) -> list[dict[str, Any]]:
-        if result is None:
-            return []
-        if isinstance(result, list):
-            return [item for item in result if isinstance(item, dict)]
-        if isinstance(result, dict):
-            items = result.get("items") or result.get("data") or []
-            return [item for item in items if isinstance(item, dict)]
-        return []
+        log.debug("Got %d events from Timeline", len(collected))
+        return collected
 
 
-# ---------------------------------------------------------------------------
-# Module-level functions kept for backwards compatibility
-# ---------------------------------------------------------------------------
-
-def connect_trade_republic(
-    phone_number: str,
-    pin: str,
-    data_dir: Path,
-    on_login_required: Any = None,
-    on_login_success: Any = None,
-) -> Any:
-    client = TRClient(phone_number, pin, data_dir)
-    client.connect(on_login_required=on_login_required, on_login_success=on_login_success)
-    return client
-
-
-def fetch_timeline_events(client: Any) -> list[dict[str, Any]]:
-    if isinstance(client, TRClient):
-        return client.fetch_timeline_events()
-    # Legacy: raw pytr client passed directly
-    tr = TRClient.__new__(TRClient)
-    tr._api = client
-    return tr.fetch_timeline_events()
