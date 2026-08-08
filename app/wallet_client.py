@@ -10,6 +10,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 log = logging.getLogger(__name__)
 
+_GET_BASE = "https://rest.budgetbakers.com/wallet/v1/api"
+
 
 class WalletClient:
     def __init__(
@@ -75,3 +77,63 @@ class WalletClient:
                 response.raise_for_status()
 
         return all_results
+
+    # ------------------------------------------------------------------
+    # GET methods — Wallet backup API
+    # ------------------------------------------------------------------
+
+    def _get_all(self, resource: str, params: dict[str, Any] | None = None) -> list[dict]:
+        """Fetch all pages for a given resource, following nextOffset pagination."""
+        results: list[dict] = []
+        offset: int | None = None
+        base_params = dict(params or {})
+
+        while True:
+            req_params = dict(base_params)
+            if offset is not None:
+                req_params["offset"] = offset
+
+            log.debug("GET %s offset=%s", resource, offset)
+            response = self.session.get(
+                f"{_GET_BASE}/{resource}",
+                params=req_params,
+                timeout=30,
+            )
+            log.debug("GET %s → %s", resource, response.status_code)
+            response.raise_for_status()
+
+            data = response.json()
+            page = data if isinstance(data, list) else data.get("data", data)
+            if isinstance(page, list):
+                results.extend(page)
+            else:
+                results.append(page)
+
+            next_offset = (data.get("nextOffset") if isinstance(data, dict) else None)
+            if not next_offset:
+                break
+            offset = next_offset
+
+        return results
+
+    def get_accounts(self) -> list[dict]:
+        return self._get_all("accounts")
+
+    def get_categories(self) -> list[dict]:
+        return self._get_all("categories")
+
+    def get_budgets(self) -> list[dict]:
+        return self._get_all("budgets")
+
+    def get_labels(self) -> list[dict]:
+        return self._get_all("labels")
+
+    def get_records(self, date_from: str, date_to: str) -> list[dict]:
+        """Fetch all records within [date_from, date_to] (inclusive, YYYY-MM-DD)."""
+        return self._get_all(
+            "records",
+            params={
+                "recordDate": f"gte.{date_from}",
+                "recordDateTo": f"lte.{date_to}",
+            },
+        )

@@ -170,6 +170,37 @@ class Notifier:
             lines.append(f"Excluded \\(zero amount\\): *{excluded}*")
         return self._send("\n".join(lines))
 
+    def backup_complete(
+        self,
+        *,
+        mode: str,
+        period: str,
+        date_from: str,
+        date_to: str,
+        counts: dict,
+    ) -> bool:
+        safe = self._safe_owner()
+        safe_mode = _escape_markdown(mode.capitalize())
+        safe_period = _escape_markdown(period)
+        safe_from = _escape_markdown(date_from)
+        safe_to = _escape_markdown(date_to)
+        records = counts.get("records", 0)
+        accounts = counts.get("accounts", 0)
+        categories = counts.get("categories", 0)
+        budgets = counts.get("budgets", 0)
+        labels = counts.get("labels", 0)
+        lines = [
+            f"📆 *Wallet Backup Complete: {safe}*\n",
+            f"Mode: *{safe_mode}* · Period: `{safe_period}`",
+            f"Range: `{safe_from}` → `{safe_to}`\n",
+            f"Records: *{records}* · Accounts: *{accounts}* · Categories: *{categories}*",
+            f"Budgets: *{budgets}* · Labels: *{labels}*",
+        ]
+        if counts.get("monthly_removed"):
+            removed = _escape_markdown(str(counts["monthly_removed"]))
+            lines.append(f"Monthly files removed: *{removed}*")
+        return self._send("\n".join(lines))
+
 
 # ---------------------------------------------------------------------------
 # Module-level functions kept for backwards compatibility / standalone use

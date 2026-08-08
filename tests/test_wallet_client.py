@@ -106,3 +106,99 @@ def test_post_records_chunks_at_20():
     assert len(results) == 21
     # inputIndex must be rebased: second chunk item 0 → global index 20
     assert results[20]["inputIndex"] == 20
+
+
+# ---------------------------------------------------------------------------
+# WalletClient GET methods
+# ---------------------------------------------------------------------------
+
+def _mock_get_response(status_code: int, body):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = body
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+def test_get_accounts_returns_list():
+    client = _make_client()
+    data = [{"id": "a1", "name": "Cash"}, {"id": "a2", "name": "Portfolio"}]
+    client.session.get = MagicMock(return_value=_mock_get_response(200, data))
+
+    result = client.get_accounts()
+
+    assert result == data
+    client.session.get.assert_called_once()
+    url = client.session.get.call_args.args[0]
+    assert url.endswith("/accounts")
+
+
+def test_get_categories_returns_list():
+    client = _make_client()
+    data = [{"id": "c1", "name": "Food"}]
+    client.session.get = MagicMock(return_value=_mock_get_response(200, data))
+
+    result = client.get_categories()
+    assert result == data
+
+
+def test_get_budgets_returns_list():
+    client = _make_client()
+    data = [{"id": "b1", "name": "Monthly"}]
+    client.session.get = MagicMock(return_value=_mock_get_response(200, data))
+
+    result = client.get_budgets()
+    assert result == data
+
+
+def test_get_labels_returns_list():
+    client = _make_client()
+    data = [{"id": "l1", "name": "TR"}]
+    client.session.get = MagicMock(return_value=_mock_get_response(200, data))
+
+    result = client.get_labels()
+    assert result == data
+
+
+def test_get_records_passes_date_params():
+    client = _make_client()
+    data = [{"id": "r1", "amount": 100}]
+    client.session.get = MagicMock(return_value=_mock_get_response(200, data))
+
+    result = client.get_records("2026-07-01", "2026-07-31")
+
+    assert result == data
+    params = client.session.get.call_args.kwargs["params"]
+    assert params["recordDate"] == "gte.2026-07-01"
+    assert params["recordDateTo"] == "lte.2026-07-31"
+
+
+def test_get_pagination_follows_next_offset():
+    """_get_all should follow nextOffset until exhausted."""
+    client = _make_client()
+    page1 = {"data": [{"id": "r1"}], "nextOffset": 1}
+    page2 = [{"id": "r2"}]  # plain list, no nextOffset → stop
+
+    responses = [
+        _mock_get_response(200, page1),
+        _mock_get_response(200, page2),
+    ]
+    client.session.get = MagicMock(side_effect=responses)
+
+    result = client.get_accounts()
+
+    assert client.session.get.call_count == 2
+    assert len(result) == 2
+    assert result[0]["id"] == "r1"
+    assert result[1]["id"] == "r2"
+
+
+def test_get_raises_on_http_error():
+    client = _make_client()
+    resp = MagicMock()
+    resp.json.return_value = {}
+    resp.raise_for_status.side_effect = Exception("403 Forbidden")
+    client.session.get = MagicMock(return_value=resp)
+
+    with pytest.raises(Exception, match="403"):
+        client.get_accounts()
