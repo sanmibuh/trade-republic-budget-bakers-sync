@@ -95,5 +95,5 @@ def backup(mode: str, param: str | None) -> None:
         run_yearly(client, notifier, cfg.data_dir, year)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     cli()

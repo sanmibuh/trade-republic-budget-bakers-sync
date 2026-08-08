@@ -226,6 +226,25 @@ def test_repo_mark_processed_is_idempotent(tmp_path):
         assert count == 1
 
 
+def test_repo_mark_processed_handles_non_serializable_event(tmp_path):
+    """json.dumps raises TypeError → fallback to str(event) (lines 111-112)."""
+
+    class _Unserializable:
+        def __repr__(self):
+            return "<Unserializable>"
+
+    event = {"id": "evt-bad", "timestamp": "2024-01-01T00:00:00Z", "data": _Unserializable()}
+    with EventRepository(tmp_path / "db") as repo:
+        repo.mark_processed(event)
+        repo.commit()
+        row = repo._conn.execute(
+            "SELECT raw FROM processed_events WHERE event_id='evt-bad'"
+        ).fetchone()
+    assert row is not None
+    # raw should be the str() fallback, not valid JSON
+    assert "Unserializable" in row[0]
+
+
 # ---------------------------------------------------------------------------
 # EventRepository — purge_old_records
 # ---------------------------------------------------------------------------
@@ -619,3 +638,129 @@ def test_run_returns_zero_when_no_new_events(tmp_path):
         result = run()
 
     assert result == 0
+
+
+def test_run_authentication_error_exits(tmp_path):
+    """except AuthenticationError branch in _fetch_events — simulate via patching."""
+    from unittest.mock import patch
+
+    from app.main import _fetch_events
+
+    cfg = MagicMock()
+    notifier = MagicMock()
+    since = datetime.now(timezone.utc)
+
+    # Import the sentinel class the module uses and raise it
+    import app.main as main_module
+    AuthErr = main_module.AuthenticationError
+
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.connect.side_effect = AuthErr("auth required")
+        with pytest.raises(SystemExit) as exc_info:
+            _fetch_events(cfg, notifier, since)
+
+    assert exc_info.value.code == 1
+    notifier.authentication_required.assert_called_once()
+
+
+def test_run_wallet_error_notifies_and_reraises(tmp_path):
+    """except Exception in run() when wallet post fails."""
+    from unittest.mock import patch
+
+    from app.main import run
+
+    boom = RuntimeError("wallet down")
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.Notifier") as mock_notifier_cls,
+        patch("app.main._fetch_events", return_value=[]),
+        patch("app.main.filter_by_lookback", return_value=[]),
+        patch("app.main._build_batch") as mock_batch,
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        cfg.lookback_days = 7
+        mock_cfg_cls.return_value = cfg
+
+        batch = MagicMock()
+        batch.records = [{"amount": 10}]
+        batch.excluded_count = 0
+        batch.event_record_indices = [[0]]
+        mock_batch.side_effect = boom  # simulate error during batch build
+
+        notifier_instance = mock_notifier_cls.return_value
+
+        with pytest.raises(RuntimeError):
+            run()
+
+    notifier_instance.error.assert_called_once_with(boom)
+
+
+def test_run_logs_warning_when_sync_complete_not_sent(tmp_path):
+    """sync_complete returns False → log.warning branch."""
+    from unittest.mock import patch
+
+    from app.main import run
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.Notifier") as mock_notifier_cls,
+        patch("app.main._fetch_events", return_value=[]),
+        patch("app.main.filter_by_lookback", return_value=[]),
+        patch("app.main._build_batch") as mock_batch,
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        cfg.lookback_days = 7
+        mock_cfg_cls.return_value = cfg
+
+        batch = MagicMock()
+        batch.records = []
+        batch.excluded_count = 0
+        batch.event_record_indices = []
+        mock_batch.return_value = batch
+
+        notifier_instance = mock_notifier_cls.return_value
+        notifier_instance.sync_complete.return_value = False  # simulate not sent
+
+        result = run()
+
+    assert result == 0
+    notifier_instance.sync_complete.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _read_label_ids
+# ---------------------------------------------------------------------------
+
+def test_read_label_ids_returns_empty_when_no_env(monkeypatch):
+    from app.config import LABELABLE_EVENT_TYPES, _read_label_ids
+
+    for et in LABELABLE_EVENT_TYPES:
+        monkeypatch.delenv(f"LABEL_{et}", raising=False)
+
+    result = _read_label_ids()
+    assert result == {}
+
+
+def test_read_label_ids_picks_up_set_vars(monkeypatch):
+    from app.config import _read_label_ids
+
+    monkeypatch.setenv("LABEL_BANK_TRANSACTION_INCOMING", "label-abc-123")
+    monkeypatch.setenv("LABEL_BUY_ORDER", "label-xyz-456")
+
+    result = _read_label_ids()
+    assert result["BANK_TRANSACTION_INCOMING"] == "label-abc-123"
+    assert result["BUY_ORDER"] == "label-xyz-456"
+
+
+def test_read_label_ids_ignores_blank_values(monkeypatch):
+    from app.config import _read_label_ids
+
+    monkeypatch.setenv("LABEL_BANK_TRANSACTION_INCOMING", "   ")
+
+    result = _read_label_ids()
+    assert "BANK_TRANSACTION_INCOMING" not in result

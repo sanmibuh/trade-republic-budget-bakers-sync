@@ -202,3 +202,49 @@ def test_get_raises_on_http_error():
 
     with pytest.raises(Exception, match="403"):
         client.get_accounts()
+
+
+def test_get_all_dict_page_non_list_appended():
+    """When data["data"] is not a list, it should be appended as a single item."""
+    client = _make_client()
+    # dict response where "data" is a dict (not list) and no nextOffset
+    body = {"data": {"id": "singleton"}}
+    client.session.get = MagicMock(return_value=_mock_get_response(200, body))
+
+    result = client.get_accounts()
+
+    assert result == [{"id": "singleton"}]
+
+
+def test_get_all_unexpected_response_type_breaks():
+    """Non-list, non-dict response should log a warning and return empty."""
+    client = _make_client()
+    resp = MagicMock()
+    resp.json.return_value = "unexpected string"
+    resp.raise_for_status = MagicMock()
+    client.session.get = MagicMock(return_value=resp)
+
+    result = client.get_accounts()
+
+    assert result == []
+
+
+def test_get_all_dict_with_next_offset_paginates():
+    """Dict response with nextOffset should fetch next page."""
+    client = _make_client()
+    page1 = {"data": [{"id": "r1"}], "nextOffset": 42}
+    page2 = {"data": [{"id": "r2"}]}  # no nextOffset → stop
+
+    responses = [
+        _mock_get_response(200, page1),
+        _mock_get_response(200, page2),
+    ]
+    client.session.get = MagicMock(side_effect=responses)
+
+    result = client.get_accounts()
+
+    assert client.session.get.call_count == 2
+    assert [r["id"] for r in result] == ["r1", "r2"]
+    # Second call must include offset=42
+    second_call_params = client.session.get.call_args_list[1].kwargs["params"]
+    assert second_call_params["offset"] == 42
