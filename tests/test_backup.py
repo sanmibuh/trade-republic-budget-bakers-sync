@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from app.backup import (
     _month_range,
@@ -15,7 +12,6 @@ from app.backup import (
     run_monthly,
     run_yearly,
 )
-
 
 # ---------------------------------------------------------------------------
 # Date helpers

@@ -20,6 +20,7 @@ import logging
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
+
 from app.config import Config
 from app.notifier import Notifier
 from app.wallet_client import WalletClient
@@ -192,7 +193,7 @@ def run_auto(
       - Cleans up the covered monthly files
     """
     if today is None:
-        today = date.today()
+        today = datetime.now(timezone.utc).date()
 
     cur_year, cur_month = today.year, today.month
     prev_year, prev_month = _previous_month(today)
@@ -221,12 +222,12 @@ def run_auto(
 def _parse_monthly_param(argv: list[str]) -> tuple[int, int]:
     if len(argv) >= 2:
         try:
-            parsed = datetime.strptime(argv[1], "%Y-%m")
+            parsed = datetime.strptime(argv[1], "%Y-%m")  # noqa: DTZ007 — only year/month needed, no tz
             return parsed.year, parsed.month
         except ValueError:
             print(f"Invalid YYYY-MM param: {argv[1]!r}", file=sys.stderr)
             sys.exit(1)
-    return _previous_month(date.today())
+    return _previous_month(datetime.now(timezone.utc).date())
 
 
 def _parse_yearly_param(argv: list[str]) -> int:
@@ -236,7 +237,7 @@ def _parse_yearly_param(argv: list[str]) -> int:
         except ValueError:
             print(f"Invalid YYYY param: {argv[1]!r}", file=sys.stderr)
             sys.exit(1)
-    return date.today().year - 1
+    return datetime.now(timezone.utc).year - 1
 
 
 # ---------------------------------------------------------------------------
