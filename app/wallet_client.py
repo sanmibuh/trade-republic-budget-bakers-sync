@@ -105,22 +105,26 @@ class WalletClient:
 
             if isinstance(data, list):
                 results.extend(data)
-                break  # plain list → no pagination
+                break
             if isinstance(data, dict):
-                page = data.get("data", [])
-                if isinstance(page, list):
-                    results.extend(page)
-                else:
-                    results.append(page)
-                next_offset = data.get("nextOffset")
-                if not next_offset:
+                offset = self._collect_page(data, results)
+                if not offset:
                     break
-                offset = next_offset
             else:
                 log.warning("GET %s: unexpected response type %s", resource, type(data))
                 break
 
         return results
+
+    @staticmethod
+    def _collect_page(data: dict, results: list[dict]) -> int | None:
+        """Append items from a paginated dict response into results. Returns next offset or None."""
+        page = data.get("data", [])
+        if isinstance(page, list):
+            results.extend(page)
+        else:
+            results.append(page)
+        return data.get("nextOffset") or None
 
     def get_accounts(self) -> list[dict]:
         return self._get_all("accounts")
