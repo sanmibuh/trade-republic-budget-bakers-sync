@@ -10,8 +10,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 log = logging.getLogger(__name__)
 
-_GET_BASE = "https://rest.budgetbakers.com/wallet/v1/api"
-
 
 class WalletClient:
     def __init__(
@@ -20,6 +18,7 @@ class WalletClient:
         base_url: str = "https://rest.budgetbakers.com/wallet",
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self._get_base = f"{self.base_url}/v1/api"
         self.session = requests.Session()
         self.session.verify = False
         self.session.headers.update(
@@ -95,7 +94,7 @@ class WalletClient:
 
             log.debug("GET %s offset=%s", resource, offset)
             response = self.session.get(
-                f"{_GET_BASE}/{resource}",
+                f"{self._get_base}/{resource}",
                 params=req_params,
                 timeout=30,
             )

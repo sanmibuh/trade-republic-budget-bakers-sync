@@ -146,7 +146,6 @@ def run_yearly(
     _write_json(_yearly_path(data_dir, year), payload)
 
     # Remove monthly files covered by this year
-    monthly_dir = data_dir / "backups" / "monthly"
     removed = 0
     for month in range(1, 13):
         p = _monthly_path(data_dir, year, month)
@@ -218,6 +217,30 @@ def run_auto(
 
 
 # ---------------------------------------------------------------------------
+# CLI helpers
+# ---------------------------------------------------------------------------
+
+def _parse_monthly_param(argv: list[str]) -> tuple[int, int]:
+    if len(argv) >= 2:
+        try:
+            return int(argv[1][:4]), int(argv[1][5:7])
+        except (ValueError, IndexError):
+            print(f"Invalid YYYY-MM param: {argv[1]!r}", file=sys.stderr)
+            sys.exit(1)
+    return _previous_month(date.today())
+
+
+def _parse_yearly_param(argv: list[str]) -> int:
+    if len(argv) >= 2:
+        try:
+            return int(argv[1])
+        except ValueError:
+            print(f"Invalid YYYY param: {argv[1]!r}", file=sys.stderr)
+            sys.exit(1)
+    return date.today().year - 1
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -245,30 +268,12 @@ def main(argv: list[str] | None = None) -> None:
 
     if mode == "auto":
         run_auto(client, notifier, cfg.data_dir)
-
     elif mode == "monthly":
-        if len(argv) >= 2:
-            try:
-                year, month = int(argv[1][:4]), int(argv[1][5:7])
-            except (ValueError, IndexError):
-                print(f"Invalid YYYY-MM param: {argv[1]!r}", file=sys.stderr)
-                sys.exit(1)
-        else:
-            prev = _previous_month(date.today())
-            year, month = prev
+        year, month = _parse_monthly_param(argv)
         run_monthly(client, notifier, cfg.data_dir, year, month)
-
     elif mode == "yearly":
-        if len(argv) >= 2:
-            try:
-                year = int(argv[1])
-            except ValueError:
-                print(f"Invalid YYYY param: {argv[1]!r}", file=sys.stderr)
-                sys.exit(1)
-        else:
-            year = date.today().year - 1
+        year = _parse_yearly_param(argv)
         run_yearly(client, notifier, cfg.data_dir, year)
-
     else:
         print(f"Unknown mode: {mode!r}", file=sys.stderr)
         sys.exit(1)
