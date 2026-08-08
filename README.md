@@ -1,38 +1,65 @@
 # Trade Republic → BudgetBakers Wallet Sync
 
-Dockerized Python service that syncs Trade Republic transactions into BudgetBakers Wallet records. Supports one-shot execution or a built-in scheduled daemon via `CRON_SCHEDULE`.
+Automatically syncs your Trade Republic transactions into [BudgetBakers Wallet](https://budgetbakers.com/) as records. Runs as a Docker container — either as a one-shot command or as a scheduled daemon with a built-in cron.
 
-## Architecture
+Supports multiple accounts, Telegram notifications, and automatic deduplication so re-running never creates duplicate records.
 
+---
+
+## Quickstart
+
+### 1. Create your `docker-compose.yml`
+
+> `docker-compose.yml` is gitignored — never commit secrets.
+
+```yaml
+services:
+  myaccount:
+    image: ghcr.io/sanmibuh/tr-wallet-sync:latest
+    restart: unless-stopped
+    environment:
+      OWNER_NAME: "Alice"
+      PHONE_NUMBER: "+49123456789"
+      PIN: "<your_tr_pin>"
+      WALLET_API_KEY: "<wallet_api_key>"
+      WALLET_CASH_ACCOUNT_ID: "<cash_account_id>"
+      WALLET_PORTFOLIO_ACCOUNT_ID: "<portfolio_account_id>"
+      LOOKBACK_DAYS: "7"
+      TZ: "Europe/Berlin"
+      CRON_SCHEDULE: "0 8 * * *"         # every day at 08:00 local time
+      TELEGRAM_BOT_TOKEN: "<bot_token>"  # optional
+      TELEGRAM_CHAT_ID: "<chat_id>"      # optional
+    volumes:
+      - ./myaccount:/app/data
 ```
-app/
-  config.py         # Config dataclass — reads all env vars in one place
-  persistence.py    # EventRepository (SQLite dedup)
-  tr_mapper.py      # TR event → BudgetBakers record mapping; filter_by_lookback
-  tr_client.py      # TRClient class — pytr wrapper: login, 2FA, timeline fetch
-  wallet_client.py  # WalletClient class — BudgetBakers HTTP (POST /v1/api/records)
-  notifier.py       # Notifier class — Telegram notifications (transversal)
-  logging_setup.py  # Rotating file + console logging (transversal)
-  main.py           # Orchestrator: wires all modules together, minimal logic
+
+### 2. First-time login (interactive 2FA)
+
+`pytr` requires an interactive login the first time (or after session expiry):
+
+```bash
+make bootstrap SERVICE=myaccount
 ```
 
-Key design decisions:
+Approve the push notification in your Trade Republic app (or enter the authenticator code). The session is saved to `./myaccount/` and reused in all future runs.
 
-- **`Notifier`** holds `bot_token`, `chat_id`, `owner_name` — methods have no repetitive parameters
-- **`EventRepository`** encapsulates the SQLite connection as a context manager (`with EventRepository(...) as repo`)
-- **`TRClient`** keeps the pytr client as internal state — callers never touch it directly
-- **`tr_mapper` registry** — adding a new TR event type requires only a handler function + one line in `_HANDLERS`; no existing logic changes (Open/Closed)
+### 3. Start the daemon
 
-**Data volumes (mounted from host):**
+```bash
+make up SERVICE=myaccount
+```
 
-- `/app/data` — pytr session/cookies + SQLite DB (`sync.db`) + `sync.log`
+Or run a single sync manually:
 
-**Docker images:**
+```bash
+make sync SERVICE=myaccount
+```
 
-- `ghcr.io/sanmibuh/python-trade-republic` — base image (Python 3.11 + system deps + pip packages). Published on major releases.
-- `ghcr.io/sanmibuh/tr-wallet-sync` — app image. Published on minor/patch releases.
+---
 
-## Required environment variables
+## Environment variables
+
+### Required
 
 | Variable | Description |
 |---|---|
@@ -43,98 +70,83 @@ Key design decisions:
 | `WALLET_CASH_ACCOUNT_ID` | BudgetBakers cash account UUID |
 | `WALLET_PORTFOLIO_ACCOUNT_ID` | BudgetBakers portfolio account UUID |
 
-Optional:
+### Optional
 
 | Variable | Default | Description |
 |---|---|---|
-| `LOOKBACK_DAYS` | `7` | How many days back to fetch events |
-| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for notifications |
-| `TELEGRAM_CHAT_ID` | — | Telegram chat ID for notifications |
-| `CRON_SCHEDULE` | — | Cron expression for scheduled mode (e.g. `0 8 * * *`). If unset, runs once and exits. |
-| `LABEL_<EVENT_TYPE>` | — | BudgetBakers label UUID to apply to records of that event type (e.g. `LABEL_BANK_TRANSACTION_INCOMING`, `LABEL_CARD_TRANSACTION`). All optional. |
+| `LOOKBACK_DAYS` | `7` | How many days back to fetch and sync |
+| `TZ` | `UTC` | Container timezone — affects cron schedule interpretation (e.g. `Europe/Berlin`) |
+| `CRON_SCHEDULE` | — | 5-field cron expression. If unset, runs once and exits. |
+| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for sync notifications |
+| `TELEGRAM_CHAT_ID` | — | Telegram chat ID for sync notifications |
+| `LABEL_<EVENT_TYPE>` | — | BudgetBakers label UUID to attach to records of that event type (see below) |
 
-Supported event types for `LABEL_*`:
+### Labels per event type
+
+Set a `LABEL_` variable for any event type you want to tag automatically:
+
+```yaml
+LABEL_BANK_TRANSACTION_INCOMING: "<uuid>"
+LABEL_BANK_TRANSACTION_OUTGOING: "<uuid>"
+LABEL_CARD_TRANSACTION: "<uuid>"
+```
+
+Supported event types:
 `BANK_TRANSACTION_INCOMING`, `BANK_TRANSACTION_OUTGOING`, `CARD_TRANSACTION`,
 `INTEREST_PAYOUT`, `INTEREST_PAYMENT`, `BUY_ORDER`, `SELL_ORDER`, `SAVINGS_PLAN`,
 `TRADING_SAVINGSPLAN_EXECUTED`, `SAVEBACK_AGGREGATE`, `SPARE_CHANGE_AGGREGATE`,
 `SAVEBACK`, `PAYMENT_INBOUND`.
 
-## Execution modes
+---
 
-### One-shot
+## Multiple accounts
 
-The container runs a single sync and exits. Suitable for being triggered externally (e.g. from a host cron, CI, or manually).
-
-```bash
-make sync SERVICE=username1
-```
-
-### Scheduled daemon
-
-Set `CRON_SCHEDULE` to a standard 5-field cron expression. The container stays running and executes the sync at the configured times.
-
-```yaml
-environment:
-  CRON_SCHEDULE: "0 8 * * *"      # every day at 08:00
-  # CRON_SCHEDULE: "0 8,20 * * *" # every day at 08:00 and 20:00
-```
-
-```bash
-make up   SERVICE=username1   # start daemon
-make logs SERVICE=username1   # follow logs
-make down SERVICE=username1   # stop daemon
-```
-
-This mode is the recommended approach for NAS deployments (QNAP, Synology, etc.) where an external cron cannot easily invoke Docker.
-
-## Quickstart (Docker Compose)
-
-### 1. Create your `docker-compose.yml`
-
-> `docker-compose.yml` is gitignored — never commit secrets.
+Add one service per account in `docker-compose.yml`. Use a 5-minute offset on the cron schedule to avoid hitting the BudgetBakers API simultaneously:
 
 ```yaml
 services:
-  username1:
+  alice:
     image: ghcr.io/sanmibuh/tr-wallet-sync:latest
     restart: unless-stopped
     environment:
-      OWNER_NAME: "username1"
+      OWNER_NAME: "Alice"
       PHONE_NUMBER: "+49123456789"
-      PIN: "<your_tr_pin>"
-      WALLET_API_KEY: "<wallet_api_key>"
-      WALLET_CASH_ACCOUNT_ID: "<cash_account_id>"
-      WALLET_PORTFOLIO_ACCOUNT_ID: "<portfolio_account_id>"
-      LOOKBACK_DAYS: "7"
+      PIN: "<alice_pin>"
+      WALLET_API_KEY: "<alice_wallet_api_key>"
+      WALLET_CASH_ACCOUNT_ID: "<alice_cash_id>"
+      WALLET_PORTFOLIO_ACCOUNT_ID: "<alice_portfolio_id>"
+      TZ: "Europe/Berlin"
       CRON_SCHEDULE: "0 8 * * *"
-      TELEGRAM_BOT_TOKEN: "<telegram_bot_token>"
-      TELEGRAM_CHAT_ID: "<telegram_chat_id>"
     volumes:
-      - ./username1/data:/app/data
+      - ./alice:/app/data
+
+  bob:
+    image: ghcr.io/sanmibuh/tr-wallet-sync:latest
+    restart: unless-stopped
+    environment:
+      OWNER_NAME: "Bob"
+      PHONE_NUMBER: "+49987654321"
+      PIN: "<bob_pin>"
+      WALLET_API_KEY: "<bob_wallet_api_key>"
+      WALLET_CASH_ACCOUNT_ID: "<bob_cash_id>"
+      WALLET_PORTFOLIO_ACCOUNT_ID: "<bob_portfolio_id>"
+      TZ: "Europe/Berlin"
+      CRON_SCHEDULE: "5 8 * * *"    # 5-minute offset
+    volumes:
+      - ./bob:/app/data
 ```
 
-### 2. First-time login (interactive 2FA)
-
-`pytr` needs an interactive login the first time (or after session expiry):
+Bootstrap and manage each independently:
 
 ```bash
-make bootstrap SERVICE=username1
+make bootstrap SERVICE=alice
+make bootstrap SERVICE=bob
+
+make up SERVICE=alice
+make up SERVICE=bob
 ```
 
-Approve the push notification in your Trade Republic app (or enter the authenticator code).
-The session is saved to `./username1/data` and reused in future runs.
-
-### 3. Start the daemon
-
-```bash
-make up SERVICE=username1
-```
-
-Or for a manual one-shot run without the daemon:
-
-```bash
-make sync SERVICE=username1
-```
+---
 
 ## Makefile targets
 
@@ -151,63 +163,37 @@ make <target> SERVICE=<name>
 | `build-all` | Full rebuild — base + app, no cache |
 | `bootstrap` | Interactive first-time login |
 | `sync` | One-shot sync run (ignores `CRON_SCHEDULE`) |
-| `up` | Start as scheduled daemon (uses `CRON_SCHEDULE` from `docker-compose.yml`) |
+| `up` | Start as scheduled daemon |
 | `down` | Stop the daemon |
 | `logs` | Follow daemon logs |
 | `test` | Run the test suite |
 | `clean` | Remove `__pycache__` and `.pytest_cache` |
+
+---
 
 ## Building from source
 
 If you prefer to build locally instead of pulling from ghcr:
 
 ```bash
-make build-base          # builds python-trade-republic:latest
-make build SERVICE=username1
-make up    SERVICE=username1
+make build-base
+make build   SERVICE=myaccount
+make up      SERVICE=myaccount
 ```
 
-## Multiple accounts
+---
 
-Add one service per account in `docker-compose.yml`:
+## NAS deployment (QNAP, Synology, etc.)
 
-```yaml
-services:
-  username1:
-    image: ghcr.io/sanmibuh/tr-wallet-sync:latest
-    restart: unless-stopped
-    environment:
-      OWNER_NAME: "username1"
-      PHONE_NUMBER: "${USERNAME1_PHONE:?required}"
-      PIN: "${USERNAME1_PIN:?required}"
-      WALLET_API_KEY: "${USERNAME1_WALLET_API_KEY:?required}"
-      WALLET_CASH_ACCOUNT_ID: "${USERNAME1_CASH_ID:?required}"
-      WALLET_PORTFOLIO_ACCOUNT_ID: "${USERNAME1_PORTFOLIO_ID:?required}"
-      CRON_SCHEDULE: "0 8 * * *"
-    volumes:
-      - ./username1/data:/app/data
-
-  username2:
-    image: ghcr.io/sanmibuh/tr-wallet-sync:latest
-    restart: unless-stopped
-    environment:
-      OWNER_NAME: "username2"
-      PHONE_NUMBER: "${USERNAME2_PHONE:?required}"
-      PIN: "${USERNAME2_PIN:?required}"
-      WALLET_API_KEY: "${USERNAME2_WALLET_API_KEY:?required}"
-      WALLET_CASH_ACCOUNT_ID: "${USERNAME2_CASH_ID:?required}"
-      WALLET_PORTFOLIO_ACCOUNT_ID: "${USERNAME2_PORTFOLIO_ID:?required}"
-      CRON_SCHEDULE: "0 8 * * *"
-    volumes:
-      - ./username2/data:/app/data
-```
-
-Bootstrap and manage each independently:
+For NAS deployments where `make` is not available, use the included `tr-sync.sh` script instead:
 
 ```bash
-make bootstrap SERVICE=username1
-make bootstrap SERVICE=username2
-
-make up   SERVICE=username1
-make up   SERVICE=username2
+./tr-sync.sh pull      myaccount
+./tr-sync.sh bootstrap myaccount
+./tr-sync.sh up        myaccount
+./tr-sync.sh logs      myaccount
+./tr-sync.sh sync      myaccount   # manual one-shot
+./tr-sync.sh down      myaccount
 ```
+
+See `ARCHITECTURE.md` for full technical details.
