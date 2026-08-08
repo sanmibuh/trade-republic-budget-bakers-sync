@@ -175,6 +175,7 @@ def _make_record(
     payment_type: str | None = None,
     counter_party: str | None = None,
     unpaired_transfer: bool = False,
+    label_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     r: dict[str, Any] = {
         "accountId": account_id,
@@ -189,6 +190,8 @@ def _make_record(
         r["transfer"] = {"pairingMode": "unpaired"}
     if counter_party:
         r["counterParty"] = counter_party[:255]
+    if label_ids:
+        r["labelIds"] = label_ids
     return r
 
 
@@ -338,6 +341,7 @@ def build_records_for_event(
     *,
     cash_account_id: str,
     portfolio_account_id: str,
+    label_ids: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Convert a TR event into one or more BudgetBakers record dicts.
 
@@ -358,4 +362,12 @@ def build_records_for_event(
     if handler is None:
         log.warning("Unknown TR event type %r — falling back to cash handler", event_type)
         handler = _handle_cash
-    return handler(event, amount, note, record_date, cash_account_id, portfolio_account_id)
+
+    records = handler(event, amount, note, record_date, cash_account_id, portfolio_account_id)
+
+    label_id = (label_ids or {}).get(event_type)
+    if label_id:
+        for record in records:
+            record["labelIds"] = [label_id]
+
+    return records

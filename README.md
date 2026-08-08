@@ -51,6 +51,13 @@ Optional:
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for notifications |
 | `TELEGRAM_CHAT_ID` | — | Telegram chat ID for notifications |
 | `CRON_SCHEDULE` | — | Cron expression for scheduled mode (e.g. `0 8 * * *`). If unset, runs once and exits. |
+| `LABEL_<EVENT_TYPE>` | — | BudgetBakers label UUID to apply to records of that event type (e.g. `LABEL_BANK_TRANSACTION_INCOMING`, `LABEL_CARD_TRANSACTION`). All optional. |
+
+Supported event types for `LABEL_*`:
+`BANK_TRANSACTION_INCOMING`, `BANK_TRANSACTION_OUTGOING`, `CARD_TRANSACTION`,
+`INTEREST_PAYOUT`, `INTEREST_PAYMENT`, `BUY_ORDER`, `SELL_ORDER`, `SAVINGS_PLAN`,
+`TRADING_SAVINGSPLAN_EXECUTED`, `SAVEBACK_AGGREGATE`, `SPARE_CHANGE_AGGREGATE`,
+`SAVEBACK`, `PAYMENT_INBOUND`.
 
 ## Execution modes
 
