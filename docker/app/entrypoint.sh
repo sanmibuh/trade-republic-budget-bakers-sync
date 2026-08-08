@@ -10,38 +10,29 @@
 #                    If empty / unset → no backup cron is registered.
 #                    Only meaningful when running as a daemon (SYNC_SCHEDULE set).
 #
-#   CMD              If set to "backup [mode] [param]", run a one-shot backup and exit.
-#                    Example: CMD="backup auto"  or  CMD="backup monthly 2026-07"
+#   CMD              If set, run a one-shot command and exit.
+#                    Passed directly to `python -m app`, e.g.:
+#                      CMD="backup auto"
+#                      CMD="backup monthly 2026-07"
 #
 # Priority: CMD overrides everything. Otherwise SYNC_SCHEDULE controls daemon vs one-shot.
 
 set -e
 
 # ------------------------------------------------------------------
-# One-shot backup via CMD
+# One-shot via CMD
 # ------------------------------------------------------------------
 if [ -n "$CMD" ]; then
-    case "$CMD" in
-        backup*)
-            # Strip leading "backup " prefix and pass rest as args
-            args="${CMD#backup}"
-            args="${args# }"
-            echo "Running one-shot backup: python -m app.backup $args"
-            # shellcheck disable=SC2086
-            exec python -m app.backup $args
-            ;;
-        *)
-            echo "Unknown CMD: $CMD" >&2
-            exit 1
-            ;;
-    esac
+    echo "Running: python -m app $CMD"
+    # shellcheck disable=SC2086
+    exec python -m app $CMD
 fi
 
 # ------------------------------------------------------------------
 # One-shot sync (no schedule)
 # ------------------------------------------------------------------
 if [ -z "$SYNC_SCHEDULE" ]; then
-    exec python -m app.main
+    exec python -m app sync
 fi
 
 # ------------------------------------------------------------------
@@ -52,13 +43,13 @@ echo "Starting in scheduled mode: SYNC_SCHEDULE='$SYNC_SCHEDULE'"
 CRONTAB_FILE=/etc/cron.d/tr-sync
 
 # Sync job
-printf '%s root cd /app && python -m app.main >> /proc/1/fd/1 2>> /proc/1/fd/2\n' \
+printf '%s root cd /app && python -m app sync >> /proc/1/fd/1 2>> /proc/1/fd/2\n' \
     "$SYNC_SCHEDULE" > "$CRONTAB_FILE"
 
 # Backup job (optional)
 if [ -n "$BACKUP_SCHEDULE" ]; then
     echo "Registering backup cron: BACKUP_SCHEDULE='$BACKUP_SCHEDULE'"
-    printf '%s root cd /app && python -m app.backup auto >> /proc/1/fd/1 2>> /proc/1/fd/2\n' \
+    printf '%s root cd /app && python -m app backup auto >> /proc/1/fd/1 2>> /proc/1/fd/2\n' \
         "$BACKUP_SCHEDULE" >> "$CRONTAB_FILE"
 fi
 

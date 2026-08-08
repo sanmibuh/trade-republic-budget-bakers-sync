@@ -134,7 +134,15 @@ make backup SERVICE=myaccount MODE=yearly         # previous year
 make backup SERVICE=myaccount MODE=yearly PARAM=2025
 ```
 
-Manual `monthly` and `yearly` always execute, regardless of existing files.
+The container exposes a unified CLI via `python -m app`:
+
+```
+python -m app --help
+python -m app sync
+python -m app backup auto
+python -m app backup monthly [YYYY-MM]
+python -m app backup yearly  [YYYY]
+```
 
 ---
 
@@ -240,5 +248,7 @@ For NAS deployments where `make` is not available, use the included `tr-sync.sh`
 ./tr-sync.sh backup    myaccount yearly 2025
 ./tr-sync.sh down      myaccount
 ```
+
+Internally these run `python -m app <subcommand>` inside the container.
 
 See `ARCHITECTURE.md` for full technical details.

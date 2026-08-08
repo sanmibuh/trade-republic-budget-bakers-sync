@@ -8,12 +8,13 @@ Technical reference for developers and AI assistants. Covers module design, data
 
 ```
 app/
+  __main__.py       # CLI entry point — click group with `sync` and `backup` subcommands
   config.py         # Config dataclass — reads all env vars in one place
   persistence.py    # EventRepository (SQLite dedup)
   tr_mapper.py      # TR event → BudgetBakers record mapping
   tr_client.py      # TRClient — pytr wrapper: login, 2FA, timeline fetch
   wallet_client.py  # WalletClient — BudgetBakers HTTP API (POST records + GET backup)
-  backup.py         # Backup logic: auto / monthly / yearly modes + CLI entry point
+  backup.py         # Backup logic: auto / monthly / yearly modes
   notifier.py       # Notifier — Telegram notifications (transversal)
   logging_setup.py  # Rotating file + console logging; configure_logging() for CLIs
   main.py           # Sync orchestrator: wires all modules, minimal logic
@@ -99,6 +100,14 @@ Notifier.backup_complete()  # Telegram summary (optional)
 - Labels are applied generically in `build_records_for_event` post-handler — individual handlers don't know about labels.
 - `_make_record` accepts `label_ids: list[str] | None`; BudgetBakers API expects `labelIds` as a list.
 
+### CLI entry point (`app/__main__.py`)
+- Single entry point via `python -m app` using **click** with two subcommands:
+  - `python -m app sync` — runs `main.run()`
+  - `python -m app backup <mode> [param]` — dispatches to `backup.run_auto/run_monthly/run_yearly`
+- All imports inside command functions are deferred — startup is fast and dependencies are only loaded when needed.
+- `click.Choice(["auto", "monthly", "yearly"])` provides free input validation and help text.
+- `entrypoint.sh` and `tr-sync.sh` both use `python -m app <subcommand>` — single consistent interface.
+
 ### Scheduled daemon
 - `docker/app/entrypoint.sh`: supports two independent cron jobs:
   - `SYNC_SCHEDULE` — registers the sync job (`python -m app.main`)
@@ -158,7 +167,7 @@ make build SERVICE=<name>
 
 ## Test suite
 
-210 tests across 7 files — all passing.
+224 tests across 8 files — all passing.
 
 ```
 tests/test_config.py         # Config dataclass, _read_label_ids, LABELABLE_EVENT_TYPES
@@ -168,6 +177,7 @@ tests/test_wallet_client.py  # post_records batching; GET methods + pagination
 tests/test_main.py           # filter_by_lookback, _build_batch; cfg mocks use label_ids={}
 tests/test_backup.py         # date helpers, run_monthly, run_yearly, run_auto (all cases)
 tests/test_notifier.py       # all notification types including backup_complete
+tests/test_cli.py            # click CLI: help, sync, backup subcommands via CliRunner
 ```
 
 Run:
@@ -181,6 +191,7 @@ make test
 
 | File | Role |
 |---|---|
+| `app/__main__.py` | click CLI: `sync` and `backup` subcommands; single entry point |
 | `app/main.py` | Sync orchestrator; passes `cfg.label_ids` to `build_records_for_event` |
 | `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; CLI entry point |
 | `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions |
