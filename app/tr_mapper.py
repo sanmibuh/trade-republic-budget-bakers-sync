@@ -85,6 +85,25 @@ def extract_amount(event: dict[str, Any], *keys: str) -> Decimal:
 # Details extraction helpers
 # ---------------------------------------------------------------------------
 
+def _extract_detail_row(details: dict[str, Any], row_title: str) -> str | None:
+    """Return the display text of the first table row matching row_title in a details payload."""
+    for section in details.get("sections", []):
+        data = section.get("data")
+        if not isinstance(data, list):
+            continue
+        for item in data:
+            if not isinstance(item, dict) or item.get("title") != row_title:
+                continue
+            detail = item.get("detail")
+            if isinstance(detail, dict):
+                # prefer displayValue.text (clean, localised), fall back to text
+                dv = detail.get("displayValue")
+                if isinstance(dv, dict) and dv.get("text"):
+                    return dv["text"]
+                return detail.get("text") or None
+    return None
+
+
 def _extract_iban_from_details(details: dict[str, Any]) -> str | None:
     """Return the full IBAN of the counterparty from a timeline detail payload.
 
@@ -136,7 +155,7 @@ _EVENT_TITLES: dict[str, str] = {
 }
 
 _INTEREST_TYPES = {"INTEREST_PAYOUT", "INTEREST_PAYMENT"}
-_PREFIXED_TYPES = _INTEREST_TYPES | {"SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE"}
+_PREFIXED_TYPES = _INTEREST_TYPES | {"SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE", "TRADING_SAVINGSPLAN_EXECUTED"}
 
 
 def _event_note(event: dict[str, Any], event_type: str) -> str:
@@ -192,11 +211,63 @@ def _handle_transfer_to_portfolio(
     return [_make_record(cash_account_id, amount, note, record_date, transfer_account_id=portfolio_account_id)]
 
 
+def _handle_investment(
+    event: dict[str, Any], amount: Decimal, note: str, record_date: str,
+    cash_account_id: str, portfolio_account_id: str,
+) -> list[dict[str, Any]]:
+    """Transfer to portfolio with Transaktion (units × price) appended to note."""
+    details = event.get("details") or {}
+    txn = _extract_detail_row(details, "Transaktion")
+    full_note = f"{note} · {txn}" if txn else note
+    return [_make_record(cash_account_id, amount, full_note, record_date, transfer_account_id=portfolio_account_id)]
+
+
 def _handle_saveback(
     event: dict[str, Any], amount: Decimal, note: str, record_date: str,
     cash_account_id: str, portfolio_account_id: str,
 ) -> list[dict[str, Any]]:
     return [_make_record(portfolio_account_id, amount, note, record_date)]
+
+
+def _handle_saveback_aggregate(
+    event: dict[str, Any], amount: Decimal, note: str, record_date: str,
+    cash_account_id: str, portfolio_account_id: str,
+) -> list[dict[str, Any]]:
+    """Transfer to portfolio with Transaktion + gross + tax appended to note."""
+    details = event.get("details") or {}
+    txn = _extract_detail_row(details, "Transaktion")
+    gross = _extract_detail_row(details, "Angefallen")
+    tax = _extract_detail_row(details, "Steuern")
+
+    parts = []
+    if txn:
+        parts.append(txn)
+    if gross and tax:
+        parts.append(f"gross {gross}, tax {tax}")
+    elif gross:
+        parts.append(f"gross {gross}")
+
+    full_note = f"{note} · {' · '.join(parts)}" if parts else note
+    return [_make_record(cash_account_id, amount, full_note, record_date, transfer_account_id=portfolio_account_id)]
+
+
+def _handle_interest(
+    event: dict[str, Any], amount: Decimal, note: str, record_date: str,
+    cash_account_id: str, portfolio_account_id: str,
+) -> list[dict[str, Any]]:
+    """Cash credit with gross accrued + tax withheld appended to note."""
+    details = event.get("details") or {}
+    gross = _extract_detail_row(details, "Angesammelt")
+    tax = _extract_detail_row(details, "Steuern")
+
+    parts = []
+    if gross and tax:
+        parts.append(f"gross {gross}, tax {tax}")
+    elif gross:
+        parts.append(f"gross {gross}")
+
+    full_note = f"{note} · {' · '.join(parts)}" if parts else note
+    return [_make_record(cash_account_id, amount, full_note, record_date)]
 
 
 def _handle_card(
@@ -239,17 +310,17 @@ _EventHandler = Callable[
 ]
 
 _HANDLERS: dict[str, _EventHandler] = {
-    "INTEREST_PAYMENT":             _handle_cash,
-    "INTEREST_PAYOUT":              _handle_cash,
-    "PAYMENT_INBOUND":              _handle_cash,
-    "BUY_ORDER":                    _handle_transfer_to_portfolio,
-    "SELL_ORDER":                   _handle_transfer_to_portfolio,
-    "SAVINGS_PLAN":                 _handle_transfer_to_portfolio,
-    "TRADING_SAVINGSPLAN_EXECUTED": _handle_transfer_to_portfolio,
-    "SAVEBACK_AGGREGATE":           _handle_transfer_to_portfolio,
-    "SPARE_CHANGE_AGGREGATE":       _handle_transfer_to_portfolio,
-    "SAVEBACK":                     _handle_saveback,
-    "CARD_TRANSACTION":             _handle_card,
+    "INTEREST_PAYMENT":                         _handle_interest,
+    "INTEREST_PAYOUT":                          _handle_interest,
+    "PAYMENT_INBOUND":                          _handle_cash,
+    "BUY_ORDER":                                _handle_transfer_to_portfolio,
+    "SELL_ORDER":                               _handle_transfer_to_portfolio,
+    "SAVINGS_PLAN":                             _handle_transfer_to_portfolio,
+    "TRADING_SAVINGSPLAN_EXECUTED":             _handle_investment,
+    "SAVEBACK_AGGREGATE":                       _handle_saveback_aggregate,
+    "SPARE_CHANGE_AGGREGATE":                   _handle_investment,
+    "SAVEBACK":                                 _handle_saveback,
+    "CARD_TRANSACTION":                         _handle_card,
     "CARD_VERIFICATION":                        _handle_cash,   # always zero-amount; handler never reached
     "BANK_TRANSACTION_INCOMING":                _handle_bank_transaction,
     "BANK_TRANSACTION_OUTGOING":                _handle_bank_transaction,
