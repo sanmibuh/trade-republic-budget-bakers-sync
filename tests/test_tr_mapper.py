@@ -635,3 +635,66 @@ def test_build_saveback_aggregate_note_without_details():
     }
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
     assert records[0]["note"] == "Saveback: Core MSCI World USD (Acc)"
+
+
+# ---------------------------------------------------------------------------
+# build_records_for_event — label_ids
+# ---------------------------------------------------------------------------
+
+def test_build_bank_transaction_with_label_id():
+    event = {
+        "eventType": "BANK_TRANSACTION_OUTGOING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "-200.00",
+        "title": "Landlord",
+    }
+    records = build_records_for_event(
+        event,
+        cash_account_id="cash",
+        portfolio_account_id="port",
+        label_ids={"BANK_TRANSACTION_OUTGOING": "uuid-abc"},
+    )
+    assert records[0]["labelIds"] == ["uuid-abc"]
+
+
+def test_build_bank_transaction_without_label_id():
+    event = {
+        "eventType": "BANK_TRANSACTION_OUTGOING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "-200.00",
+        "title": "Landlord",
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert "labelIds" not in records[0]
+
+
+def test_build_card_transaction_with_label_id():
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "-20.00",
+        "title": "Supermarket",
+    }
+    records = build_records_for_event(
+        event,
+        cash_account_id="cash",
+        portfolio_account_id="port",
+        label_ids={"CARD_TRANSACTION": "uuid-card"},
+    )
+    assert records[0]["labelIds"] == ["uuid-card"]
+
+
+def test_build_event_label_not_applied_to_other_types():
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "-20.00",
+        "title": "Supermarket",
+    }
+    records = build_records_for_event(
+        event,
+        cash_account_id="cash",
+        portfolio_account_id="port",
+        label_ids={"BANK_TRANSACTION_OUTGOING": "uuid-abc"},
+    )
+    assert "labelIds" not in records[0]

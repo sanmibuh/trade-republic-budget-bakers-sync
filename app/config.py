@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -23,6 +23,33 @@ def _positive_int_env(name: str, default: int) -> int:
     return value
 
 
+# Event types that support optional label assignment via LABEL_<EVENT_TYPE> env vars.
+LABELABLE_EVENT_TYPES: tuple[str, ...] = (
+    "BANK_TRANSACTION_INCOMING",
+    "BANK_TRANSACTION_OUTGOING",
+    "CARD_TRANSACTION",
+    "INTEREST_PAYOUT",
+    "INTEREST_PAYMENT",
+    "BUY_ORDER",
+    "SELL_ORDER",
+    "SAVINGS_PLAN",
+    "TRADING_SAVINGSPLAN_EXECUTED",
+    "SAVEBACK_AGGREGATE",
+    "SPARE_CHANGE_AGGREGATE",
+    "SAVEBACK",
+    "PAYMENT_INBOUND",
+)
+
+
+def _read_label_ids() -> dict[str, str]:
+    """Read LABEL_<EVENT_TYPE> env vars and return a mapping of event_type → label_id."""
+    return {
+        event_type: label_id
+        for event_type in LABELABLE_EVENT_TYPES
+        if (label_id := os.getenv(f"LABEL_{event_type}", "").strip())
+    }
+
+
 @dataclass(frozen=True)
 class Config:
     owner_name: str
@@ -35,6 +62,7 @@ class Config:
     telegram_chat_id: str | None
     lookback_days: int
     data_dir: Path
+    label_ids: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_env(cls) -> Config:
@@ -49,4 +77,5 @@ class Config:
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID"),
             lookback_days=_positive_int_env("LOOKBACK_DAYS", default=7),
             data_dir=Path(os.getenv("DATA_DIR", "/app/data")),
+            label_ids=_read_label_ids(),
         )

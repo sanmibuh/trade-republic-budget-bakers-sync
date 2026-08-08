@@ -341,6 +341,7 @@ def test_build_batch_notifies_on_unknown_event_type(tmp_path):
     cfg = MagicMock(spec=Config)
     cfg.wallet_cash_account_id = "cash"
     cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
 
     notifier = MagicMock(spec=Notifier)
 
@@ -359,6 +360,7 @@ def test_build_batch_no_notification_for_known_event_type(tmp_path):
     cfg = MagicMock(spec=Config)
     cfg.wallet_cash_account_id = "cash"
     cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
 
     notifier = MagicMock(spec=Notifier)
 

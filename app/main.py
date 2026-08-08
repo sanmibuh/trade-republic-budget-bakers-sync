@@ -109,6 +109,7 @@ def _build_batch(
             event,
             cash_account_id=cfg.wallet_cash_account_id,
             portfolio_account_id=cfg.wallet_portfolio_account_id,
+            label_ids=cfg.label_ids,
         )
         if not recs:
             repo.mark_processed(event)
