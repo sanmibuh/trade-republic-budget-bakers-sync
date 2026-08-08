@@ -369,3 +369,253 @@ def test_build_batch_no_notification_for_known_event_type(tmp_path):
         _build_batch([event], cfg, repo, notifier)
 
     notifier.unknown_event_type.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _build_batch — zero-amount events are excluded
+# ---------------------------------------------------------------------------
+
+def test_build_batch_excludes_zero_amount_event(tmp_path):
+    from app.config import Config
+    from app.main import _build_batch
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+
+    notifier = MagicMock(spec=Notifier)
+
+    # A zero-amount event produces no records → should be excluded
+    event = {"eventType": "SAVINGS_PLAN_EXECUTED", "id": "ev-zero", "timestamp": "2024-01-01T00:00:00Z", "amount": "0.00"}
+    with EventRepository(tmp_path / "test.db") as repo:
+        batch = _build_batch([event], cfg, repo, notifier)
+
+    assert batch.excluded_count == 1
+    assert batch.records == []
+
+
+# ---------------------------------------------------------------------------
+# _fetch_events — error branches
+# ---------------------------------------------------------------------------
+
+def test_fetch_events_login_failed_exits():
+    from unittest.mock import patch
+
+    from app.main import _fetch_events
+    from app.tr_client import LoginFailedError
+
+    cfg = MagicMock()
+    notifier = MagicMock()
+    since = datetime.now(timezone.utc)
+
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.connect.side_effect = LoginFailedError("bad pin")
+        with pytest.raises(SystemExit) as exc_info:
+            _fetch_events(cfg, notifier, since)
+
+    assert exc_info.value.code == 1
+    notifier.login_failed.assert_called_once()
+
+
+def test_fetch_events_http_401_exits():
+    from unittest.mock import patch
+
+    from requests import HTTPError
+
+    from app.main import _fetch_events
+
+    cfg = MagicMock()
+    notifier = MagicMock()
+    since = datetime.now(timezone.utc)
+
+    err = HTTPError()
+    err.response = MagicMock()
+    err.response.status_code = 401
+
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.connect.side_effect = err
+        with pytest.raises(SystemExit) as exc_info:
+            _fetch_events(cfg, notifier, since)
+
+    assert exc_info.value.code == 1
+    notifier.authentication_required.assert_called_once()
+
+
+def test_fetch_events_http_non_401_reraises():
+    from unittest.mock import patch
+
+    from requests import HTTPError
+
+    from app.main import _fetch_events
+
+    cfg = MagicMock()
+    notifier = MagicMock()
+    since = datetime.now(timezone.utc)
+
+    err = HTTPError()
+    err.response = MagicMock()
+    err.response.status_code = 500
+
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.connect.side_effect = err
+        with pytest.raises(HTTPError):
+            _fetch_events(cfg, notifier, since)
+
+    notifier.error.assert_called_once_with(err)
+
+
+def test_fetch_events_unexpected_exception_reraises():
+    from unittest.mock import patch
+
+    from app.main import _fetch_events
+
+    cfg = MagicMock()
+    notifier = MagicMock()
+    since = datetime.now(timezone.utc)
+
+    boom = RuntimeError("unexpected")
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.connect.side_effect = boom
+        with pytest.raises(RuntimeError):
+            _fetch_events(cfg, notifier, since)
+
+    notifier.error.assert_called_once_with(boom)
+
+
+def test_fetch_events_success_returns_events():
+    from unittest.mock import patch
+
+    from app.main import _fetch_events
+
+    cfg = MagicMock()
+    notifier = MagicMock()
+    since = datetime.now(timezone.utc)
+    fake_events = [{"id": "e1"}, {"id": "e2"}]
+
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.fetch_timeline_events.return_value = fake_events
+        result = _fetch_events(cfg, notifier, since)
+
+    assert result == fake_events
+
+
+# ---------------------------------------------------------------------------
+# _process_results
+# ---------------------------------------------------------------------------
+
+def test_process_results_marks_successful_events(tmp_path):
+    from app.main import _process_results
+
+    event = {"id": "ev1", "timestamp": "2024-01-01T00:00:00Z"}
+    results = [{"inputIndex": 0}]  # no "error" key → success
+    event_record_indices = [[0]]
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        counts = _process_results(results, [event], event_record_indices, repo)
+        unprocessed = repo.filter_unprocessed([event])
+
+    assert counts.synced == 1
+    assert counts.failed == 0
+    assert unprocessed == []  # was marked processed
+
+
+def test_process_results_counts_failures(tmp_path):
+    from app.main import _process_results
+
+    event = {"id": "ev1", "timestamp": "2024-01-01T00:00:00Z"}
+    results = [{"inputIndex": 0, "error": "bad record"}]
+    event_record_indices = [[0]]
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        counts = _process_results(results, [event], event_record_indices, repo)
+        unprocessed = repo.filter_unprocessed([event])
+
+    assert counts.synced == 0
+    assert counts.failed == 1
+    assert unprocessed == [event]  # NOT marked processed
+
+
+def test_process_results_skips_events_with_no_records(tmp_path):
+    from app.main import _process_results
+
+    event = {"id": "ev1", "timestamp": "2024-01-01T00:00:00Z"}
+    results = []
+    event_record_indices = [[]]  # event produced no records
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        counts = _process_results(results, [event], event_record_indices, repo)
+
+    assert counts.synced == 0
+    assert counts.failed == 0
+
+
+# ---------------------------------------------------------------------------
+# run() — orchestrator
+# ---------------------------------------------------------------------------
+
+def test_run_returns_zero_on_success(tmp_path):
+    from unittest.mock import patch
+
+    from app.main import run
+
+    fake_events = [{"id": "e1", "timestamp": "2024-01-01T00:00:00Z", "amount": "10.00", "eventType": "PAYMENT"}]
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.Notifier"),
+        patch("app.main._fetch_events", return_value=fake_events),
+        patch("app.main.filter_by_lookback", return_value=fake_events),
+        patch("app.main._build_batch") as mock_batch,
+        patch("app.main.WalletClient") as mock_wallet,
+        patch("app.main._process_results") as mock_results,
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        cfg.lookback_days = 7
+        mock_cfg_cls.return_value = cfg
+
+        batch = MagicMock()
+        batch.records = [{"amount": 10}]
+        batch.excluded_count = 0
+        batch.event_record_indices = [[0]]
+        mock_batch.return_value = batch
+
+        from app.main import _SyncCounts
+        mock_results.return_value = _SyncCounts(synced=1, failed=0)
+        mock_wallet.return_value.post_records.return_value = [{}]
+
+        result = run()
+
+    assert result == 0
+
+
+def test_run_returns_zero_when_no_new_events(tmp_path):
+    from unittest.mock import patch
+
+    from app.main import run
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.Notifier"),
+        patch("app.main._fetch_events", return_value=[]),
+        patch("app.main.filter_by_lookback", return_value=[]),
+        patch("app.main._build_batch") as mock_batch,
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        cfg.lookback_days = 7
+        mock_cfg_cls.return_value = cfg
+
+        batch = MagicMock()
+        batch.records = []
+        batch.excluded_count = 0
+        batch.event_record_indices = []
+        mock_batch.return_value = batch
+
+        result = run()
+
+    assert result == 0

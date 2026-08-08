@@ -4,8 +4,12 @@ import json
 from datetime import date
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.backup import (
     _month_range,
+    _parse_monthly_param,
+    _parse_yearly_param,
     _previous_month,
     _year_range,
     run_auto,
@@ -39,6 +43,49 @@ def test_previous_month_mid_year():
 
 def test_previous_month_january_wraps():
     assert _previous_month(date(2026, 1, 10)) == (2025, 12)
+
+
+# ---------------------------------------------------------------------------
+# _parse_monthly_param
+# ---------------------------------------------------------------------------
+
+def test_parse_monthly_param_none_returns_previous_month():
+    year, month = _parse_monthly_param(None)
+    assert isinstance(year, int)
+    assert 1 <= month <= 12
+
+
+def test_parse_monthly_param_valid_string():
+    assert _parse_monthly_param("2026-03") == (2026, 3)
+
+
+def test_parse_monthly_param_invalid_raises():
+    with pytest.raises(ValueError):
+        _parse_monthly_param("not-a-date")
+
+
+def test_parse_monthly_param_wrong_format_raises():
+    with pytest.raises(ValueError):
+        _parse_monthly_param("2026/03")
+
+
+# ---------------------------------------------------------------------------
+# _parse_yearly_param
+# ---------------------------------------------------------------------------
+
+def test_parse_yearly_param_none_returns_previous_year():
+    from datetime import datetime, timezone
+    year = _parse_yearly_param(None)
+    assert year == datetime.now(timezone.utc).year - 1
+
+
+def test_parse_yearly_param_valid_string():
+    assert _parse_yearly_param("2025") == 2025
+
+
+def test_parse_yearly_param_invalid_raises():
+    with pytest.raises(ValueError):
+        _parse_yearly_param("not-a-year")
 
 
 # ---------------------------------------------------------------------------

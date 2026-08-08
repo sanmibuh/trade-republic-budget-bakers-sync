@@ -18,7 +18,8 @@ from app.wallet_client import WalletClient
 try:
     from pytr.exceptions import AuthenticationError
 except Exception:  # pragma: no cover  # noqa: BLE001
-    AuthenticationError = Exception
+    class AuthenticationError(Exception):  # type: ignore[no-redef]  # pragma: no cover
+        """Sentinel: raised only by pytr when it IS installed."""
 
 log = logging.getLogger(__name__)
 
