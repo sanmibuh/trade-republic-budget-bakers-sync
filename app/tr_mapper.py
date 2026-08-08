@@ -82,6 +82,40 @@ def extract_amount(event: dict[str, Any], *keys: str) -> Decimal:
 
 
 # ---------------------------------------------------------------------------
+# Details extraction helpers
+# ---------------------------------------------------------------------------
+
+def _extract_iban_from_details(details: dict[str, Any]) -> str | None:
+    """Return the full IBAN of the counterparty from a timeline detail payload.
+
+    TR buries the full IBAN inside a nested infoPage action:
+        sections[N].data[M].title == "IBAN"
+        sections[N].data[M].detail.action.payload.sections[0].data[0].title
+            == "ES86 0182 5297 2402 0031 7648"
+
+    Falls back to the masked text (e.g. "..7648") if the deep path is absent.
+    Returns None if no IBAN row is found.
+    """
+    for section in details.get("sections", []):
+        data = section.get("data")
+        if not isinstance(data, list):
+            continue
+        for item in data:
+            if not isinstance(item, dict) or item.get("title") != "IBAN":
+                continue
+            try:
+                full_iban: str = (
+                    item["detail"]["action"]["payload"]
+                    ["sections"][0]["data"][0]["title"]
+                )
+                return full_iban.replace(" ", "")
+            except (KeyError, IndexError, TypeError):
+                masked = (item.get("detail") or {}).get("text")
+                return masked or None
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Record builder helpers
 # ---------------------------------------------------------------------------
 
@@ -102,12 +136,13 @@ _EVENT_TITLES: dict[str, str] = {
 }
 
 _INTEREST_TYPES = {"INTEREST_PAYOUT", "INTEREST_PAYMENT"}
+_PREFIXED_TYPES = _INTEREST_TYPES | {"SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE"}
 
 
 def _event_note(event: dict[str, Any], event_type: str) -> str:
     tr_title = str(_get_first_match(event, "title", "name", "description") or "").strip()
     mapped = _EVENT_TITLES.get(event_type, "")
-    if event_type in _INTEREST_TYPES and mapped and tr_title:
+    if event_type in _PREFIXED_TYPES and mapped and tr_title:
         return f"{mapped}: {tr_title}"
     return tr_title or mapped or event_type or "Trade Republic event"
 
@@ -177,9 +212,14 @@ def _handle_bank_transaction(
 ) -> list[dict[str, Any]]:
     event_type = str(_get_first_match(event, "eventType", "type", "event_type") or "").upper()
     tr_title = str(_get_first_match(event, "title", "name", "description") or "").strip()
-    counter_party = tr_title or None
     direction = "From" if event_type == "BANK_TRANSACTION_INCOMING" else "To"
     transfer_note = f"{direction}: {tr_title}" if tr_title else note
+
+    # Prefer full IBAN from details; fall back to counterparty name
+    details = event.get("details") or {}
+    iban = _extract_iban_from_details(details)
+    counter_party = iban or tr_title or None
+
     return [_make_record(
         cash_account_id, amount, transfer_note, record_date,
         payment_type="transfer",
@@ -210,9 +250,11 @@ _HANDLERS: dict[str, _EventHandler] = {
     "SPARE_CHANGE_AGGREGATE":       _handle_transfer_to_portfolio,
     "SAVEBACK":                     _handle_saveback,
     "CARD_TRANSACTION":             _handle_card,
-    "CARD_VERIFICATION":            _handle_cash,   # always zero-amount; handler never reached
-    "BANK_TRANSACTION_INCOMING":    _handle_bank_transaction,
-    "BANK_TRANSACTION_OUTGOING":    _handle_bank_transaction,
+    "CARD_VERIFICATION":                        _handle_cash,   # always zero-amount; handler never reached
+    "BANK_TRANSACTION_INCOMING":                _handle_bank_transaction,
+    "BANK_TRANSACTION_OUTGOING":                _handle_bank_transaction,
+    "QUARTERLY_NET_WORTH_STATEMENT_CREATED":    _handle_cash,   # document-only; always zero-amount
+    "EX_POST_COST_REPORT_CREATED":              _handle_cash,   # document-only; always zero-amount
 }
 
 KNOWN_EVENT_TYPES: frozenset[str] = frozenset(_HANDLERS)

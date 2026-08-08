@@ -151,134 +151,128 @@ def test_fetch_raises_if_not_connected(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# TRClient.fetch_timeline_events — settings() warm-up
+# TRClient.fetch_timeline_events — Timeline-based fetch
 # ---------------------------------------------------------------------------
 
-def test_fetch_calls_settings_before_subscription(tmp_path):
-    pytr = MagicMock()
-    pytr.timeline_transactions.return_value = []
-    client = _make_tr_client(tmp_path)
-    client._api = pytr
-    client.fetch_timeline_events()
-    pytr.settings.assert_called_once()
+class _FakeTimeline:
+    """Test double for pytr.timeline.Timeline.
+
+    Calls ``event_callback`` with each event in ``events`` when ``tl_loop``
+    is awaited, then returns.
+    """
+
+    def __init__(self, *, tr, output_path, not_before, store_event_database, event_callback, events=None):
+        self.tr = tr
+        self.output_path = output_path
+        self.not_before = not_before
+        self.store_event_database = store_event_database
+        self.event_callback = event_callback
+        self._events = events or []
+
+    async def tl_loop(self):
+        for event in self._events:
+            self.event_callback(event)
 
 
-def test_fetch_continues_if_settings_raises(tmp_path):
-    pytr = MagicMock()
-    pytr.settings.side_effect = Exception("401")
-    pytr.timeline_transactions.return_value = []
+def _patch_timeline(events=None, side_effect=None):
+    """Return a patch context manager for pytr.timeline.Timeline."""
+    def _factory(**kwargs):
+        fake = _FakeTimeline(events=events, **kwargs)
+        if side_effect is not None:
+            import asyncio
+
+            async def _raise():
+                raise side_effect  # noqa: B023
+
+            fake.tl_loop = _raise
+        return fake
+
+    return patch("pytr.timeline.Timeline", side_effect=_factory)
+
+
+def test_fetch_returns_events_from_timeline(tmp_path):
+    events = [{"id": "e1"}, {"id": "e2"}]
     client = _make_tr_client(tmp_path)
-    client._api = pytr
-    result = client.fetch_timeline_events()
+    client._api = MagicMock()
+    with _patch_timeline(events=events):
+        result = client.fetch_timeline_events()
+    assert result == events
+
+
+def test_fetch_returns_empty_when_no_events(tmp_path):
+    client = _make_tr_client(tmp_path)
+    client._api = MagicMock()
+    with _patch_timeline(events=[]):
+        result = client.fetch_timeline_events()
     assert result == []
 
 
-# ---------------------------------------------------------------------------
-# TRClient.fetch_timeline_events — method selection
-# ---------------------------------------------------------------------------
+def test_fetch_passes_zero_not_before_when_since_is_none(tmp_path):
+    captured = {}
 
-def test_fetch_uses_timeline_transactions(tmp_path):
-    pytr = MagicMock()
-    pytr.timeline_transactions.return_value = [{"id": "1"}]
+    def _factory(**kwargs):
+        captured.update(kwargs)
+        return _FakeTimeline(**kwargs)
+
     client = _make_tr_client(tmp_path)
-    client._api = pytr
-    result = client.fetch_timeline_events()
-    pytr.timeline_transactions.assert_called_once_with()
-    assert result == [{"id": "1"}]
+    client._api = MagicMock()
+    with patch("pytr.timeline.Timeline", side_effect=_factory):
+        client.fetch_timeline_events(since=None)
+
+    assert captured["not_before"] == 0.0
 
 
-def test_fetch_falls_back_to_timeline_activity_log(tmp_path):
-    pytr = MagicMock(spec=["settings", "timeline_activity_log", "run_blocking"])
-    pytr.timeline_activity_log.return_value = [{"id": "2"}]
+def test_fetch_passes_since_as_not_before(tmp_path):
+    from datetime import datetime, timezone
+
+    since = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    captured = {}
+
+    def _factory(**kwargs):
+        captured.update(kwargs)
+        return _FakeTimeline(**kwargs)
+
     client = _make_tr_client(tmp_path)
-    client._api = pytr
-    result = client.fetch_timeline_events()
-    pytr.timeline_activity_log.assert_called_once_with()
-    assert result == [{"id": "2"}]
+    client._api = MagicMock()
+    with patch("pytr.timeline.Timeline", side_effect=_factory):
+        client.fetch_timeline_events(since=since)
+
+    assert captured["not_before"] == since.timestamp()
 
 
-def test_fetch_raises_when_no_method_found(tmp_path):
-    pytr = MagicMock(spec=["settings"])
+def test_fetch_passes_store_event_database_false(tmp_path):
+    captured = {}
+
+    def _factory(**kwargs):
+        captured.update(kwargs)
+        return _FakeTimeline(**kwargs)
+
     client = _make_tr_client(tmp_path)
-    client._api = pytr
-    with pytest.raises(RuntimeError, match="No supported timeline method"):
+    client._api = MagicMock()
+    with patch("pytr.timeline.Timeline", side_effect=_factory):
         client.fetch_timeline_events()
 
+    assert captured["store_event_database"] is False
 
-def test_fetch_raises_on_trade_republic_error(tmp_path):
-    from pytr.api import TradeRepublicError
-    pytr = MagicMock()
-    pytr.timeline_transactions.return_value = MagicMock(__await__=None)
-    pytr.run_blocking.side_effect = TradeRepublicError("1", {}, {"errors": []})
+
+def test_fetch_passes_data_dir_as_output_path(tmp_path):
+    captured = {}
+
+    def _factory(**kwargs):
+        captured.update(kwargs)
+        return _FakeTimeline(**kwargs)
+
     client = _make_tr_client(tmp_path)
-    client._api = pytr
-    with pytest.raises(RuntimeError):
+    client._api = MagicMock()
+    with patch("pytr.timeline.Timeline", side_effect=_factory):
         client.fetch_timeline_events()
 
+    assert captured["output_path"] == tmp_path
 
-# ---------------------------------------------------------------------------
-# TRClient.fetch_timeline_events — result parsing
-# ---------------------------------------------------------------------------
 
-def test_fetch_parses_list_directly(tmp_path):
-    pytr = MagicMock()
-    pytr.timeline_transactions.return_value = [{"id": "1"}, {"id": "2"}]
+def test_fetch_raises_runtime_error_on_timeline_exception(tmp_path):
     client = _make_tr_client(tmp_path)
-    client._api = pytr
-    assert client.fetch_timeline_events() == [{"id": "1"}, {"id": "2"}]
-
-
-def test_fetch_parses_dict_with_items(tmp_path):
-    pytr = MagicMock()
-    pytr.timeline_transactions.return_value = {"items": [{"id": "1"}]}
-    client = _make_tr_client(tmp_path)
-    client._api = pytr
-    assert client.fetch_timeline_events() == [{"id": "1"}]
-
-
-def test_fetch_parses_dict_with_data(tmp_path):
-    pytr = MagicMock()
-    pytr.timeline_transactions.return_value = {"data": [{"id": "2"}]}
-    client = _make_tr_client(tmp_path)
-    client._api = pytr
-    assert client.fetch_timeline_events() == [{"id": "2"}]
-
-
-def test_fetch_filters_non_dict_items(tmp_path):
-    pytr = MagicMock()
-    pytr.timeline_transactions.return_value = [{"id": "ok"}, "string", 42, None]
-    client = _make_tr_client(tmp_path)
-    client._api = pytr
-    assert client.fetch_timeline_events() == [{"id": "ok"}]
-
-
-def test_fetch_returns_empty_on_none(tmp_path):
-    pytr = MagicMock()
-    pytr.timeline_transactions.return_value = None
-    client = _make_tr_client(tmp_path)
-    client._api = pytr
-    assert client.fetch_timeline_events() == []
-
-
-def test_fetch_returns_empty_on_unexpected_type(tmp_path):
-    pytr = MagicMock()
-    pytr.timeline_transactions.return_value = "unexpected"
-    client = _make_tr_client(tmp_path)
-    client._api = pytr
-    assert client.fetch_timeline_events() == []
-
-
-def test_fetch_handles_async_coroutine(tmp_path):
-    import asyncio
-
-    async def _coro():
-        return [{"id": "async-event"}]
-
-    pytr = MagicMock()
-    pytr.timeline_transactions.return_value = _coro()
-    pytr.run_blocking.side_effect = lambda coro, timeout=5.0: asyncio.run(coro)
-    client = _make_tr_client(tmp_path)
-    client._api = pytr
-    result = client.fetch_timeline_events()
-    assert result == [{"id": "async-event"}]
-    pytr.run_blocking.assert_called_once()
+    client._api = MagicMock()
+    with _patch_timeline(side_effect=Exception("websocket failed")):  # noqa: SIM117 — nested with required by S5778
+        with pytest.raises(RuntimeError, match="Timeline fetch failed"):
+            client.fetch_timeline_events()

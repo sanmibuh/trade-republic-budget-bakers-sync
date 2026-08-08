@@ -61,7 +61,7 @@ def _fetch_events(
             on_login_success=notifier.login_success,
         )
         log.info("Trade Republic session established")
-        events = tr_client.fetch_timeline_events()
+        events = tr_client.fetch_timeline_events(since=since)
         log.info("Fetched %d timeline events", len(events))
         return events
     except LoginFailedError:

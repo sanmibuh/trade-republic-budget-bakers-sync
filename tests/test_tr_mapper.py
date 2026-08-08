@@ -8,6 +8,7 @@ import pytest
 
 from app.tr_mapper import (
     KNOWN_EVENT_TYPES,
+    _extract_iban_from_details,
     _get_first_match,
     _to_decimal,
     build_records_for_event,
@@ -199,6 +200,34 @@ def test_build_saveback_no_tax():
     assert records[0]["amount"] == {"value": 5.0}
 
 
+def test_build_saveback_aggregate_note_prefixed():
+    event = {
+        "eventType": "SAVEBACK_AGGREGATE",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "12.15",
+        "title": "Core MSCI World USD (Acc)",
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["note"] == "Saveback: Core MSCI World USD (Acc)"
+
+
+def test_build_spare_change_aggregate_note_prefixed():
+    event = {
+        "eventType": "SPARE_CHANGE_AGGREGATE",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "6.21",
+        "title": "Core MSCI World USD (Acc)",
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["note"] == "Round-up Investment: Core MSCI World USD (Acc)"
+
+
+def test_build_saveback_aggregate_no_title_uses_mapped():
+    event = {"eventType": "SAVEBACK_AGGREGATE", "timestamp": "2024-01-01T00:00:00Z", "amount": "5.00"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["note"] == "Saveback"
+
+
 def test_build_card_transaction_uses_debit_card():
     event = {"eventType": "CARD_TRANSACTION", "timestamp": "2024-01-01T00:00:00Z", "amount": "-20.00", "title": "Supermarket"}
     records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
@@ -357,3 +386,149 @@ def test_filter_by_lookback_unparseable_timestamp_kept():
 def test_filter_by_lookback_naive_timestamp_treated_as_utc():
     since = datetime(2024, 1, 10, tzinfo=timezone.utc)
     assert len(filter_by_lookback([_evt("2024-01-11T00:00:00")], since)) == 1
+
+
+# ---------------------------------------------------------------------------
+# _extract_iban_from_details
+# ---------------------------------------------------------------------------
+
+def _make_iban_details(full_iban: str, event_id: str = "abc") -> dict:
+    """Build a minimal TR details payload containing a full IBAN in the nested structure."""
+    return {
+        "id": event_id,
+        "sections": [
+            {"type": "header", "title": "Du hast 100 € gesendet", "data": {}},
+            {
+                "title": "Übersicht",
+                "data": [
+                    {
+                        "title": "IBAN",
+                        "detail": {
+                            "text": f"..{full_iban[-4:]}",
+                            "action": {
+                                "type": "infoPage",
+                                "payload": {
+                                    "sections": [
+                                        {
+                                            "data": [
+                                                {
+                                                    "title": full_iban,
+                                                    "detail": {"type": "listItemAvatarDefault"},
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                },
+                            },
+                        },
+                        "style": "plain",
+                    }
+                ],
+            },
+        ],
+    }
+
+
+def test_extract_iban_full_iban_no_spaces():
+    details = _make_iban_details("ES86 0182 5297 2402 0031 7648")
+    assert _extract_iban_from_details(details) == "ES860182529724020031 7648".replace(" ", "")
+
+
+def test_extract_iban_returns_none_when_no_iban_section():
+    details = {"sections": [{"type": "header", "data": {}}]}
+    assert _extract_iban_from_details(details) is None
+
+
+def test_extract_iban_falls_back_to_masked_when_payload_missing():
+    details = {
+        "sections": [
+            {
+                "data": [
+                    {
+                        "title": "IBAN",
+                        "detail": {"text": "..7648"},
+                    }
+                ]
+            }
+        ]
+    }
+    assert _extract_iban_from_details(details) == "..7648"
+
+
+def test_extract_iban_returns_none_on_empty_details():
+    assert _extract_iban_from_details({}) is None
+
+
+def test_extract_iban_ignores_non_iban_rows():
+    details = {
+        "sections": [
+            {
+                "data": [
+                    {"title": "Status", "detail": {"text": "Abgeschlossen"}},
+                    {"title": "Empfänger", "detail": {"text": "DAVID BELMEZ"}},
+                ]
+            }
+        ]
+    }
+    assert _extract_iban_from_details(details) is None
+
+
+# ---------------------------------------------------------------------------
+# build_records_for_event — IBAN extraction in bank transactions
+# ---------------------------------------------------------------------------
+
+def test_build_bank_transaction_uses_iban_as_counter_party():
+    event = {
+        "eventType": "BANK_TRANSACTION_OUTGOING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "-200.00",
+        "title": "Landlord",
+        "details": _make_iban_details("ES86 0182 5297 2402 0031 7648"),
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+
+    assert records[0]["counterParty"] == "ES860182529724020031 7648".replace(" ", "")
+    assert records[0]["note"] == "To: Landlord"
+
+
+def test_build_bank_transaction_falls_back_to_title_when_no_details():
+    event = {
+        "eventType": "BANK_TRANSACTION_INCOMING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "500.00",
+        "title": "Salary Corp",
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["counterParty"] == "Salary Corp"
+
+
+def test_build_bank_transaction_falls_back_to_title_when_iban_absent_in_details():
+    details_without_iban = {
+        "id": "x",
+        "sections": [{"type": "header", "data": {}}],
+    }
+    event = {
+        "eventType": "BANK_TRANSACTION_INCOMING",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "500.00",
+        "title": "Salary Corp",
+        "details": details_without_iban,
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["counterParty"] == "Salary Corp"
+
+
+# ---------------------------------------------------------------------------
+# KNOWN_EVENT_TYPES — document-only types
+# ---------------------------------------------------------------------------
+
+def test_known_event_types_includes_document_types():
+    assert "QUARTERLY_NET_WORTH_STATEMENT_CREATED" in KNOWN_EVENT_TYPES
+    assert "EX_POST_COST_REPORT_CREATED" in KNOWN_EVENT_TYPES
+
+
+def test_document_event_types_are_zero_amount_excluded():
+    """Document-only events always have zero amount and should produce no records."""
+    for event_type in ("QUARTERLY_NET_WORTH_STATEMENT_CREATED", "EX_POST_COST_REPORT_CREATED"):
+        event = {"eventType": event_type, "timestamp": "2024-01-01T00:00:00Z", "amount": "0.00"}
+        assert build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port") == []
