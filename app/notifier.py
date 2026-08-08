@@ -178,6 +178,7 @@ class Notifier:
         date_from: str,
         date_to: str,
         counts: dict[str, int],
+        filename: str | None = None,
     ) -> bool:
         safe = self._safe_owner()
         safe_mode = _escape_markdown(mode.capitalize())
@@ -199,6 +200,8 @@ class Notifier:
         if counts.get("monthly_removed"):
             removed = _escape_markdown(str(counts["monthly_removed"]))
             lines.append(f"Monthly files removed: *{removed}*")
+        if filename:
+            lines.append(f"File: `{_escape_markdown(filename)}`")
         return self._send("\n".join(lines))
 
 

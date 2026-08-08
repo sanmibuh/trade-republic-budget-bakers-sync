@@ -120,9 +120,10 @@ def run_monthly(
     month: int,
 ) -> dict:
     """Generate (or overwrite) a monthly backup. Returns counts dict."""
+    path = _monthly_path(data_dir, year, month)
     date_from, date_to = _month_range(year, month)
     payload = _fetch_snapshot(client, date_from, date_to, "monthly")
-    _write_json(_monthly_path(data_dir, year, month), payload)
+    _write_json(path, payload)
 
     counts = _payload_counts(payload)
     notifier.backup_complete(
@@ -131,6 +132,7 @@ def run_monthly(
         date_from=date_from,
         date_to=date_to,
         counts=counts,
+        filename=path.name,
     )
     return counts
 
@@ -142,9 +144,10 @@ def run_yearly(
     year: int,
 ) -> dict:
     """Generate (or overwrite) a yearly backup and clean up covered monthly files."""
+    path = _yearly_path(data_dir, year)
     date_from, date_to = _year_range(year)
     payload = _fetch_snapshot(client, date_from, date_to, "yearly")
-    _write_json(_yearly_path(data_dir, year), payload)
+    _write_json(path, payload)
 
     # Remove monthly files covered by this year
     removed = 0
@@ -163,6 +166,7 @@ def run_yearly(
         date_from=date_from,
         date_to=date_to,
         counts=counts,
+        filename=path.name,
     )
     return counts
 

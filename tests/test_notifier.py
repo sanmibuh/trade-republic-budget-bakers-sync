@@ -418,3 +418,29 @@ def test_notifier_backup_complete_no_monthly_removed_field():
         )
     msg = mock_send.call_args.kwargs["message"]
     assert "removed" not in msg.lower()
+
+
+def test_notifier_backup_complete_includes_filename():
+    """filename kwarg → appears in notification message."""
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().backup_complete(
+            mode="monthly", period="2026-07",
+            date_from="2026-07-01", date_to="2026-07-31",
+            counts={"records": 10, "accounts": 2, "categories": 5, "budgets": 1, "labels": 2},
+            filename="wallet-monthly-2026-07.json",
+        )
+    msg = mock_send.call_args.kwargs["message"]
+    assert "wallet" in msg
+    assert "2026" in msg
+
+
+def test_notifier_backup_complete_filename_optional():
+    """filename defaults to None → no File line in message."""
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().backup_complete(
+            mode="monthly", period="2026-07",
+            date_from="2026-07-01", date_to="2026-07-31",
+            counts={"records": 10, "accounts": 2, "categories": 5, "budgets": 1, "labels": 2},
+        )
+    msg = mock_send.call_args.kwargs["message"]
+    assert "File" not in msg
