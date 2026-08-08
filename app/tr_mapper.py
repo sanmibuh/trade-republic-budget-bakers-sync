@@ -154,8 +154,7 @@ _EVENT_TITLES: dict[str, str] = {
     "BANK_TRANSACTION_OUTGOING": "Bank Transfer Out",
 }
 
-_INTEREST_TYPES = {"INTEREST_PAYOUT", "INTEREST_PAYMENT"}
-_PREFIXED_TYPES = _INTEREST_TYPES | {"SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE", "TRADING_SAVINGSPLAN_EXECUTED"}
+_PREFIXED_TYPES = {"INTEREST_PAYOUT", "INTEREST_PAYMENT", "SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE", "TRADING_SAVINGSPLAN_EXECUTED"}
 
 
 def _event_note(event: dict[str, Any], event_type: str) -> str:
@@ -314,14 +313,20 @@ _HANDLERS: dict[str, _EventHandler] = {
     "SPARE_CHANGE_AGGREGATE":                   _handle_investment,
     "SAVEBACK":                                 _handle_saveback,
     "CARD_TRANSACTION":                         _handle_card,
-    "CARD_VERIFICATION":                        _handle_cash,   # always zero-amount; handler never reached
     "BANK_TRANSACTION_INCOMING":                _handle_bank_transaction,
     "BANK_TRANSACTION_OUTGOING":                _handle_bank_transaction,
-    "QUARTERLY_NET_WORTH_STATEMENT_CREATED":    _handle_cash,   # document-only; always zero-amount
-    "EX_POST_COST_REPORT_CREATED":              _handle_cash,   # document-only; always zero-amount
 }
 
-KNOWN_EVENT_TYPES: frozenset[str] = frozenset(_HANDLERS)
+# These event types are always zero-amount (document-only or verification events).
+# They are excluded from KNOWN_EVENT_TYPES so they don't trigger unknown-type warnings,
+# but no handler is needed since build_records_for_event short-circuits on zero amount.
+_ZERO_AMOUNT_TYPES: frozenset[str] = frozenset({
+    "CARD_VERIFICATION",
+    "QUARTERLY_NET_WORTH_STATEMENT_CREATED",
+    "EX_POST_COST_REPORT_CREATED",
+})
+
+KNOWN_EVENT_TYPES: frozenset[str] = frozenset(_HANDLERS) | _ZERO_AMOUNT_TYPES
 
 
 # ---------------------------------------------------------------------------

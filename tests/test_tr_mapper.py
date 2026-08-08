@@ -44,7 +44,7 @@ def test_to_decimal_unsupported_type_returns_zero():
 
 
 # ---------------------------------------------------------------------------
-# _extract_iban_from_details
+# extract_amount
 # ---------------------------------------------------------------------------
 
 def test_extract_amount_top_level():
