@@ -1,6 +1,6 @@
 # Trade Republic → BudgetBakers Wallet Sync
 
-Dockerized Python service that runs a one-shot sync from Trade Republic (`pytr`) into BudgetBakers Wallet records.
+Dockerized Python service that syncs Trade Republic transactions into BudgetBakers Wallet records. Supports one-shot execution or a built-in scheduled daemon via `CRON_SCHEDULE`.
 
 ## Architecture
 
@@ -50,6 +50,35 @@ Optional:
 | `LOOKBACK_DAYS` | `7` | How many days back to fetch events |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for notifications |
 | `TELEGRAM_CHAT_ID` | — | Telegram chat ID for notifications |
+| `CRON_SCHEDULE` | — | Cron expression for scheduled mode (e.g. `0 8 * * *`). If unset, runs once and exits. |
+
+## Execution modes
+
+### One-shot
+
+The container runs a single sync and exits. Suitable for being triggered externally (e.g. from a host cron, CI, or manually).
+
+```bash
+make sync SERVICE=username1
+```
+
+### Scheduled daemon
+
+Set `CRON_SCHEDULE` to a standard 5-field cron expression. The container stays running and executes the sync at the configured times.
+
+```yaml
+environment:
+  CRON_SCHEDULE: "0 8 * * *"      # every day at 08:00
+  # CRON_SCHEDULE: "0 8,20 * * *" # every day at 08:00 and 20:00
+```
+
+```bash
+make up   SERVICE=username1   # start daemon
+make logs SERVICE=username1   # follow logs
+make down SERVICE=username1   # stop daemon
+```
+
+This mode is the recommended approach for NAS deployments (QNAP, Synology, etc.) where an external cron cannot easily invoke Docker.
 
 ## Quickstart (Docker Compose)
 
@@ -61,6 +90,7 @@ Optional:
 services:
   username1:
     image: ghcr.io/sanmibuh/tr-wallet-sync:latest
+    restart: unless-stopped
     environment:
       OWNER_NAME: "username1"
       PHONE_NUMBER: "+49123456789"
@@ -69,6 +99,7 @@ services:
       WALLET_CASH_ACCOUNT_ID: "<cash_account_id>"
       WALLET_PORTFOLIO_ACCOUNT_ID: "<portfolio_account_id>"
       LOOKBACK_DAYS: "7"
+      CRON_SCHEDULE: "0 8 * * *"
       TELEGRAM_BOT_TOKEN: "<telegram_bot_token>"
       TELEGRAM_CHAT_ID: "<telegram_chat_id>"
     volumes:
@@ -86,7 +117,13 @@ make bootstrap SERVICE=username1
 Approve the push notification in your Trade Republic app (or enter the authenticator code).
 The session is saved to `./username1/data` and reused in future runs.
 
-### 3. Run a sync
+### 3. Start the daemon
+
+```bash
+make up SERVICE=username1
+```
+
+Or for a manual one-shot run without the daemon:
 
 ```bash
 make sync SERVICE=username1
@@ -106,7 +143,10 @@ make <target> SERVICE=<name>
 | `build` | Build the app image (assumes base exists) |
 | `build-all` | Full rebuild — base + app, no cache |
 | `bootstrap` | Interactive first-time login |
-| `sync` | One-shot sync run |
+| `sync` | One-shot sync run (ignores `CRON_SCHEDULE`) |
+| `up` | Start as scheduled daemon (uses `CRON_SCHEDULE` from `docker-compose.yml`) |
+| `down` | Stop the daemon |
+| `logs` | Follow daemon logs |
 | `test` | Run the test suite |
 | `clean` | Remove `__pycache__` and `.pytest_cache` |
 
@@ -117,23 +157,7 @@ If you prefer to build locally instead of pulling from ghcr:
 ```bash
 make build-base          # builds python-trade-republic:latest
 make build SERVICE=username1
-make sync  SERVICE=username1
-```
-
-## Periodic execution (cron)
-
-Example crontab entry to run every day at 06:00:
-
-```cron
-0 6 * * * cd /path/to/trade-republic-budget-bakers-sync && make sync SERVICE=username1 >> /var/log/tr-sync-username1.log 2>&1
-```
-
-Or with plain Docker if you prefer not to use Make:
-
-```cron
-0 6 * * * docker run --rm --env-file /path/to/username1.env \
-  -v /path/to/username1/data:/app/data \
-  ghcr.io/sanmibuh/tr-wallet-sync:latest >> /var/log/tr-sync-username1.log 2>&1
+make up    SERVICE=username1
 ```
 
 ## Multiple accounts
@@ -144,6 +168,7 @@ Add one service per account in `docker-compose.yml`:
 services:
   username1:
     image: ghcr.io/sanmibuh/tr-wallet-sync:latest
+    restart: unless-stopped
     environment:
       OWNER_NAME: "username1"
       PHONE_NUMBER: "${USERNAME1_PHONE:?required}"
@@ -151,11 +176,13 @@ services:
       WALLET_API_KEY: "${USERNAME1_WALLET_API_KEY:?required}"
       WALLET_CASH_ACCOUNT_ID: "${USERNAME1_CASH_ID:?required}"
       WALLET_PORTFOLIO_ACCOUNT_ID: "${USERNAME1_PORTFOLIO_ID:?required}"
+      CRON_SCHEDULE: "0 8 * * *"
     volumes:
       - ./username1/data:/app/data
 
   username2:
     image: ghcr.io/sanmibuh/tr-wallet-sync:latest
+    restart: unless-stopped
     environment:
       OWNER_NAME: "username2"
       PHONE_NUMBER: "${USERNAME2_PHONE:?required}"
@@ -163,16 +190,17 @@ services:
       WALLET_API_KEY: "${USERNAME2_WALLET_API_KEY:?required}"
       WALLET_CASH_ACCOUNT_ID: "${USERNAME2_CASH_ID:?required}"
       WALLET_PORTFOLIO_ACCOUNT_ID: "${USERNAME2_PORTFOLIO_ID:?required}"
+      CRON_SCHEDULE: "0 8 * * *"
     volumes:
       - ./username2/data:/app/data
 ```
 
-Then bootstrap and sync each independently:
+Bootstrap and manage each independently:
 
 ```bash
 make bootstrap SERVICE=username1
 make bootstrap SERVICE=username2
 
-make sync SERVICE=username1
-make sync SERVICE=username2
+make up   SERVICE=username1
+make up   SERVICE=username2
 ```

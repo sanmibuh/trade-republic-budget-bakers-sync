@@ -16,6 +16,7 @@ env/
 .env
 *.env
 docker-compose.yml
+deploy/
 
 # pytest / coverage
 .pytest_cache/
