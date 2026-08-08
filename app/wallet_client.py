@@ -102,16 +102,23 @@ class WalletClient:
             response.raise_for_status()
 
             data = response.json()
-            page = data if isinstance(data, list) else data.get("data", data)
-            if isinstance(page, list):
-                results.extend(page)
-            else:
-                results.append(page)
 
-            next_offset = (data.get("nextOffset") if isinstance(data, dict) else None)
-            if not next_offset:
+            if isinstance(data, list):
+                results.extend(data)
+                break  # plain list → no pagination
+            elif isinstance(data, dict):
+                page = data.get("data", [])
+                if isinstance(page, list):
+                    results.extend(page)
+                else:
+                    results.append(page)
+                next_offset = data.get("nextOffset")
+                if not next_offset:
+                    break
+                offset = next_offset
+            else:
+                log.warning("GET %s: unexpected response type %s", resource, type(data))
                 break
-            offset = next_offset
 
         return results
 

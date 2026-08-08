@@ -177,7 +177,7 @@ class Notifier:
         period: str,
         date_from: str,
         date_to: str,
-        counts: dict,
+        counts: dict[str, int],
     ) -> bool:
         safe = self._safe_owner()
         safe_mode = _escape_markdown(mode.capitalize())

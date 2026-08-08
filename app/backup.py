@@ -20,7 +20,6 @@ import logging
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
-
 from app.config import Config
 from app.notifier import Notifier
 from app.wallet_client import WalletClient
@@ -70,6 +69,17 @@ def _write_json(path: Path, payload: dict) -> None:
     log.info("Written %s", path)
 
 
+def _payload_counts(payload: dict) -> dict[str, int]:
+    """Extract resource counts from a snapshot payload."""
+    return {
+        "records": len(payload["records"]),
+        "accounts": len(payload["accounts"]),
+        "categories": len(payload["categories"]),
+        "budgets": len(payload["budgets"]),
+        "labels": len(payload["labels"]),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Core fetch
 # ---------------------------------------------------------------------------
@@ -117,13 +127,7 @@ def run_monthly(
     payload = _fetch_snapshot(client, date_from, date_to, "monthly")
     _write_json(_monthly_path(data_dir, year, month), payload)
 
-    counts = {
-        "records": len(payload["records"]),
-        "accounts": len(payload["accounts"]),
-        "categories": len(payload["categories"]),
-        "budgets": len(payload["budgets"]),
-        "labels": len(payload["labels"]),
-    }
+    counts = _payload_counts(payload)
     notifier.backup_complete(
         mode="monthly",
         period=f"{year:04d}-{month:02d}",
@@ -154,14 +158,8 @@ def run_yearly(
             log.info("Removed covered monthly backup %s", p)
             removed += 1
 
-    counts = {
-        "records": len(payload["records"]),
-        "accounts": len(payload["accounts"]),
-        "categories": len(payload["categories"]),
-        "budgets": len(payload["budgets"]),
-        "labels": len(payload["labels"]),
-        "monthly_removed": removed,
-    }
+    counts = _payload_counts(payload)
+    counts["monthly_removed"] = removed
     notifier.backup_complete(
         mode="yearly",
         period=str(year),
@@ -223,8 +221,9 @@ def run_auto(
 def _parse_monthly_param(argv: list[str]) -> tuple[int, int]:
     if len(argv) >= 2:
         try:
-            return int(argv[1][:4]), int(argv[1][5:7])
-        except (ValueError, IndexError):
+            parsed = datetime.strptime(argv[1], "%Y-%m")
+            return parsed.year, parsed.month
+        except ValueError:
             print(f"Invalid YYYY-MM param: {argv[1]!r}", file=sys.stderr)
             sys.exit(1)
     return _previous_month(date.today())

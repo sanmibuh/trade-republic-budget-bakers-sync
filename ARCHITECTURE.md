@@ -12,15 +12,16 @@ app/
   persistence.py    # EventRepository (SQLite dedup)
   tr_mapper.py      # TR event → BudgetBakers record mapping
   tr_client.py      # TRClient — pytr wrapper: login, 2FA, timeline fetch
-  wallet_client.py  # WalletClient — BudgetBakers HTTP POST /v1/api/records
+  wallet_client.py  # WalletClient — BudgetBakers HTTP API (POST records + GET backup)
+  backup.py         # Backup logic: auto / monthly / yearly modes + CLI entry point
   notifier.py       # Notifier — Telegram notifications (transversal)
-  logging_setup.py  # Rotating file + console logging (transversal)
-  main.py           # Orchestrator: wires all modules, minimal logic
+  logging_setup.py  # Rotating file + console logging; configure_logging() for CLIs
+  main.py           # Sync orchestrator: wires all modules, minimal logic
 
 docker/
   base/Dockerfile   # python:3.11-slim + pip deps; published as python-trade-republic
   app/Dockerfile    # installs cron, copies app code + entrypoint.sh
-  app/entrypoint.sh # one-shot vs crond mode based on CRON_SCHEDULE
+  app/entrypoint.sh # one-shot vs crond mode; supports SYNC_SCHEDULE, BACKUP_SCHEDULE, CMD
 
 tests/
   test_config.py
@@ -28,11 +29,13 @@ tests/
   test_tr_mapper.py
   test_wallet_client.py
   test_main.py
+  test_backup.py
+  test_notifier.py
 ```
 
 ---
 
-## Data flow
+## Data flow — Sync
 
 ```
 TRClient.fetch_timeline_events()
@@ -50,7 +53,24 @@ WalletClient.post_records()        # POST /v1/api/records (max 20 per request)
         ↓
 EventRepository.mark_processed()   # INSERT OR IGNORE into processed_events
         ↓
-Notifier.send()                    # Telegram summary (optional)
+Notifier.sync_complete()           # Telegram summary (optional)
+```
+
+## Data flow — Backup
+
+```
+python -m app.backup <mode> [param]
+        ↓
+WalletClient.get_accounts/categories/budgets/labels/records()
+  └── _get_all() — paginates via nextOffset until exhausted
+        ↓
+_fetch_snapshot()   # assembles payload dict with all resources + metadata
+        ↓
+_write_json()       # writes to data_dir/backups/{monthly|yearly}/wallet-{mode}-{period}.json
+        ↓
+run_yearly() only: removes covered wallet-monthly-{year}-*.json files
+        ↓
+Notifier.backup_complete()  # Telegram summary (optional)
 ```
 
 ---
@@ -80,11 +100,25 @@ Notifier.send()                    # Telegram summary (optional)
 - `_make_record` accepts `label_ids: list[str] | None`; BudgetBakers API expects `labelIds` as a list.
 
 ### Scheduled daemon
-- `docker/app/entrypoint.sh`: if `CRON_SCHEDULE` is set, writes a crontab and starts `crond`; otherwise runs once and exits.
-- `TZ` env var must be set in the container for `crond` to interpret cron hours in local time (default is UTC).
-- `bootstrap` and `sync` Makefile targets override `CRON_SCHEDULE` with `-e CRON_SCHEDULE=` to force one-shot mode.
+- `docker/app/entrypoint.sh`: supports two independent cron jobs:
+  - `SYNC_SCHEDULE` — registers the sync job (`python -m app.main`)
+  - `BACKUP_SCHEDULE` — registers the backup job (`python -m app.backup auto`)
+  - Both optional and independent; if neither is set, runs one-shot sync and exits.
+  - `CMD=backup [mode] [param]` — runs a one-shot backup and exits (used by `tr-sync.sh backup`).
+- `TZ` env var must be set in the container for cron to interpret hours in local time (default is UTC).
 
-### BudgetBakers API constraints
+### Backup strategy
+- **`auto` mode**: designed for daily cron. Always overwrites current + previous month. In February, generates the yearly backup for the previous year if it does not yet exist (idempotent).
+- **`monthly` / `yearly` modes**: explicit, always execute, intended for manual runs and backfill.
+- Files are plain JSON, permanent, never purged (unlike `sync.db` which purges after 60 days).
+- Yearly cleanup removes the 12 monthly files whose period is covered by the yearly backup.
+
+### BudgetBakers API — GET (backup)
+- Base URL: `{base_url}/v1/api/{resource}`
+- Pagination via `nextOffset` in the response dict; plain list responses have no pagination.
+- `_get_all()` handles both response shapes: plain `list` (no pagination) and `{"data": [...], "nextOffset": N}`.
+
+### BudgetBakers API — POST (sync)
 - `POST /v1/api/records` — max 20 records per request.
 - `paymentType` is required on every record.
 - `labelIds` is a list (even for a single label).
@@ -114,22 +148,26 @@ make build SERVICE=<name>
 ## Data volume
 
 `/app/data` (mounted from host) contains:
-- `sync.db` — SQLite database with `processed_events` table
+- `sync.db` — SQLite database with `processed_events` table (purged after 60 days)
 - `sync.log` — rotating log file
 - pytr session/cookie files (login state)
+- `backups/monthly/` — monthly JSON snapshots (permanent)
+- `backups/yearly/` — yearly JSON snapshots (permanent)
 
 ---
 
 ## Test suite
 
-178 tests across 5 files — all passing, ruff clean.
+210 tests across 7 files — all passing.
 
 ```
 tests/test_config.py         # Config dataclass, _read_label_ids, LABELABLE_EVENT_TYPES
 tests/test_persistence.py    # EventRepository, dedup_event_id, mark_processed
 tests/test_tr_mapper.py      # _HANDLERS, IBAN extraction, label_ids, filter_by_lookback
-tests/test_wallet_client.py  # WalletClient.post_records batching
+tests/test_wallet_client.py  # post_records batching; GET methods + pagination
 tests/test_main.py           # filter_by_lookback, _build_batch; cfg mocks use label_ids={}
+tests/test_backup.py         # date helpers, run_monthly, run_yearly, run_auto (all cases)
+tests/test_notifier.py       # all notification types including backup_complete
 ```
 
 Run:
@@ -143,11 +181,12 @@ make test
 
 | File | Role |
 |---|---|
-| `app/main.py` | Orchestrator; passes `cfg.label_ids` to `build_records_for_event` |
+| `app/main.py` | Sync orchestrator; passes `cfg.label_ids` to `build_records_for_event` |
+| `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; CLI entry point |
 | `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions |
-| `app/tr_mapper.py` | `_HANDLERS`, `_ZERO_AMOUNT_TYPES`, `KNOWN_EVENT_TYPES`, `LABELABLE_EVENT_TYPES`, `_gross_tax_note`, `_extract_iban_from_details`, `_make_record` |
+| `app/tr_mapper.py` | `_HANDLERS`, `_ZERO_AMOUNT_TYPES`, `KNOWN_EVENT_TYPES`, `_make_record` |
 | `app/persistence.py` | `EventRepository`, `dedup_event_id`; `INSERT OR IGNORE` |
 | `app/config.py` | `Config` dataclass; `label_ids: dict[str, str]`; `_read_label_ids()` |
-| `app/wallet_client.py` | `WalletClient.post_records` |
-| `docker/app/Dockerfile` | Installs `cron`, copies `entrypoint.sh` |
-| `docker/app/entrypoint.sh` | One-shot vs crond mode |
+| `app/wallet_client.py` | `post_records` (sync) + `get_*` methods with pagination (backup) |
+| `app/logging_setup.py` | `setup_logging(data_dir)` for daemon; `configure_logging()` for CLI entry points |
+| `docker/app/entrypoint.sh` | Handles `SYNC_SCHEDULE`, `BACKUP_SCHEDULE`, `CMD` |
