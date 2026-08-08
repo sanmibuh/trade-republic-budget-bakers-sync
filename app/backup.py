@@ -2,8 +2,6 @@ from __future__ import annotations
 
 """Wallet backup logic.
 
-Entry point: python -m app.backup <mode> [param]
-
 Modes:
   auto              Smart daily mode. Backs up current + previous month.
                     In February, also generates yearly for the previous year
@@ -17,11 +15,9 @@ Modes:
 import calendar
 import json
 import logging
-import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from app.config import Config
 from app.notifier import Notifier
 from app.wallet_client import WalletClient
 
@@ -219,65 +215,16 @@ def run_auto(
 # CLI helpers
 # ---------------------------------------------------------------------------
 
-def _parse_monthly_param(argv: list[str]) -> tuple[int, int]:
-    if len(argv) >= 2:
-        try:
-            parsed = datetime.strptime(argv[1], "%Y-%m")  # noqa: DTZ007 — only year/month needed, no tz
-            return parsed.year, parsed.month
-        except ValueError:
-            print(f"Invalid YYYY-MM param: {argv[1]!r}", file=sys.stderr)
-            sys.exit(1)
+def _parse_monthly_param(param: str | None) -> tuple[int, int]:
+    """Parse an optional YYYY-MM string. Returns (year, month); raises ValueError on bad input."""
+    if param is not None:
+        parsed = datetime.strptime(param, "%Y-%m")  # noqa: DTZ007 — only year/month needed, no tz
+        return parsed.year, parsed.month
     return _previous_month(datetime.now(timezone.utc).date())
 
 
-def _parse_yearly_param(argv: list[str]) -> int:
-    if len(argv) >= 2:
-        try:
-            return int(argv[1])
-        except ValueError:
-            print(f"Invalid YYYY param: {argv[1]!r}", file=sys.stderr)
-            sys.exit(1)
+def _parse_yearly_param(param: str | None) -> int:
+    """Parse an optional YYYY string. Returns year; raises ValueError on bad input."""
+    if param is not None:
+        return int(param)
     return datetime.now(timezone.utc).year - 1
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
-
-def main(argv: list[str] | None = None) -> None:
-    if argv is None:
-        argv = sys.argv[1:]
-
-    if not argv:
-        print("Usage: python -m app.backup <mode> [param]", file=sys.stderr)
-        print("  mode: auto | monthly [YYYY-MM] | yearly [YYYY]", file=sys.stderr)
-        sys.exit(1)
-
-    mode = argv[0]
-
-    from app.logging_setup import configure_logging  # avoid circular at module level
-    configure_logging()
-
-    cfg = Config.from_env()
-    client = WalletClient(api_key=cfg.wallet_api_key)
-    notifier = Notifier(
-        bot_token=cfg.telegram_bot_token,
-        chat_id=cfg.telegram_chat_id,
-        owner_name=cfg.owner_name,
-    )
-
-    if mode == "auto":
-        run_auto(client, notifier, cfg.data_dir)
-    elif mode == "monthly":
-        year, month = _parse_monthly_param(argv)
-        run_monthly(client, notifier, cfg.data_dir, year, month)
-    elif mode == "yearly":
-        year = _parse_yearly_param(argv)
-        run_yearly(client, notifier, cfg.data_dir, year)
-    else:
-        print(f"Unknown mode: {mode!r}", file=sys.stderr)
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

@@ -57,6 +57,8 @@ def backup(mode: str, param: str | None) -> None:
       python -m app backup yearly 2025
     """
 
+    import click
+
     from app.backup import (
         _parse_monthly_param,
         _parse_yearly_param,
@@ -77,15 +79,19 @@ def backup(mode: str, param: str | None) -> None:
         owner_name=cfg.owner_name,
     )
 
-    argv = [mode] + ([param] if param else [])
-
     if mode == "auto":
         run_auto(client, notifier, cfg.data_dir)
     elif mode == "monthly":
-        year, month = _parse_monthly_param(argv)
+        try:
+            year, month = _parse_monthly_param(param)
+        except ValueError:
+            raise click.BadParameter(f"Expected YYYY-MM, got {param!r}", param_hint="PARAM") from None
         run_monthly(client, notifier, cfg.data_dir, year, month)
     elif mode == "yearly":
-        year = _parse_yearly_param(argv)
+        try:
+            year = _parse_yearly_param(param)
+        except ValueError:
+            raise click.BadParameter(f"Expected YYYY, got {param!r}", param_hint="PARAM") from None
         run_yearly(client, notifier, cfg.data_dir, year)
 
 
