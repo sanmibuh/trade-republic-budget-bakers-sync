@@ -106,7 +106,7 @@ class WalletClient:
             if isinstance(data, list):
                 results.extend(data)
                 break  # plain list → no pagination
-            elif isinstance(data, dict):
+            if isinstance(data, dict):
                 page = data.get("data", [])
                 if isinstance(page, list):
                     results.extend(page)

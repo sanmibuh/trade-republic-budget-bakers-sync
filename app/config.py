@@ -16,8 +16,8 @@ def _positive_int_env(name: str, default: int) -> int:
     raw = os.getenv(name, str(default))
     try:
         value = int(raw)
-    except ValueError:
-        raise ValueError(f"{name} must be an integer, got: {raw!r}")
+    except ValueError as err:
+        raise ValueError(f"{name} must be an integer, got: {raw!r}") from err
     if value <= 0:
         raise ValueError(f"{name} must be a positive integer, got: {value}")
     return value

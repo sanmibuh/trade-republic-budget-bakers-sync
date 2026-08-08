@@ -112,7 +112,7 @@ class TRClient:
             output_path=self._data_dir,
             not_before=not_before,
             store_event_database=False,
-            event_callback=lambda event: collected.append(event),
+            event_callback=collected.append,
         )
 
         try:
