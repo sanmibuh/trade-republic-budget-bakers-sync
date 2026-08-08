@@ -4,6 +4,8 @@ Automatically syncs your Trade Republic transactions into [BudgetBakers Wallet](
 
 Supports multiple accounts, Telegram notifications, and automatic deduplication so re-running never creates duplicate records.
 
+Also includes a **wallet backup** feature that saves full JSON snapshots of your BudgetBakers data (accounts, categories, budgets, labels, records) on a daily schedule.
+
 ---
 
 ## Quickstart
@@ -26,9 +28,10 @@ services:
       WALLET_PORTFOLIO_ACCOUNT_ID: "<portfolio_account_id>"
       LOOKBACK_DAYS: "7"
       TZ: "Europe/Berlin"
-      CRON_SCHEDULE: "0 8 * * *"         # every day at 08:00 local time
-      TELEGRAM_BOT_TOKEN: "<bot_token>"  # optional
-      TELEGRAM_CHAT_ID: "<chat_id>"      # optional
+      SYNC_SCHEDULE: "0 8 * * *"          # every day at 08:00 local time
+      BACKUP_SCHEDULE: "0 3 * * *"        # every day at 03:00 local time (optional)
+      TELEGRAM_BOT_TOKEN: "<bot_token>"   # optional
+      TELEGRAM_CHAT_ID: "<chat_id>"       # optional
     volumes:
       - ./myaccount:/app/data
 ```
@@ -76,9 +79,10 @@ make sync SERVICE=myaccount
 |---|---|---|
 | `LOOKBACK_DAYS` | `7` | How many days back to fetch and sync |
 | `TZ` | `UTC` | Container timezone — affects cron schedule interpretation (e.g. `Europe/Berlin`) |
-| `CRON_SCHEDULE` | — | 5-field cron expression. If unset, runs once and exits. |
-| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for sync notifications |
-| `TELEGRAM_CHAT_ID` | — | Telegram chat ID for sync notifications |
+| `SYNC_SCHEDULE` | — | 5-field cron expression for the sync job. If unset, runs once and exits. |
+| `BACKUP_SCHEDULE` | — | 5-field cron expression for the daily backup job (runs `auto` mode). |
+| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for notifications |
+| `TELEGRAM_CHAT_ID` | — | Telegram chat ID for notifications |
 | `LABEL_<EVENT_TYPE>` | — | BudgetBakers label UUID to attach to records of that event type (see below) |
 
 ### Labels per event type
@@ -99,9 +103,52 @@ Supported event types:
 
 ---
 
+## Wallet backup
+
+When `BACKUP_SCHEDULE` is set, the container runs a daily backup in **`auto` mode**:
+
+- Overwrites the backup for the current month (partial, fresh data)
+- Overwrites the backup for the previous month
+- In February: generates a yearly backup for the previous year (only once — idempotent) and removes the covered monthly files
+
+Backups are stored as JSON files inside the data volume:
+
+```
+/app/data/backups/
+  monthly/
+    wallet-monthly-2026-07.json
+    wallet-monthly-2026-08.json
+  yearly/
+    wallet-yearly-2025.json
+```
+
+Each file contains: `mode`, `date_from`, `date_to`, `generated_at`, `accounts`, `categories`, `budgets`, `labels`, `records`.
+
+### Manual backups
+
+```bash
+make backup SERVICE=myaccount MODE=auto           # same as the scheduled job
+make backup SERVICE=myaccount MODE=monthly        # previous month
+make backup SERVICE=myaccount MODE=monthly PARAM=2026-07
+make backup SERVICE=myaccount MODE=yearly         # previous year
+make backup SERVICE=myaccount MODE=yearly PARAM=2025
+```
+
+The container exposes a unified CLI via `python -m app`:
+
+```
+python -m app --help
+python -m app sync
+python -m app backup auto
+python -m app backup monthly [YYYY-MM]
+python -m app backup yearly  [YYYY]
+```
+
+---
+
 ## Multiple accounts
 
-Add one service per account in `docker-compose.yml`. Use a 5-minute offset on the cron schedule to avoid hitting the BudgetBakers API simultaneously:
+Add one service per account in `docker-compose.yml`. Use a 5-minute offset on the sync schedule to avoid hitting the BudgetBakers API simultaneously:
 
 ```yaml
 services:
@@ -116,7 +163,8 @@ services:
       WALLET_CASH_ACCOUNT_ID: "<alice_cash_id>"
       WALLET_PORTFOLIO_ACCOUNT_ID: "<alice_portfolio_id>"
       TZ: "Europe/Berlin"
-      CRON_SCHEDULE: "0 8 * * *"
+      SYNC_SCHEDULE: "0 8 * * *"
+      BACKUP_SCHEDULE: "0 3 * * *"
     volumes:
       - ./alice:/app/data
 
@@ -131,7 +179,8 @@ services:
       WALLET_CASH_ACCOUNT_ID: "<bob_cash_id>"
       WALLET_PORTFOLIO_ACCOUNT_ID: "<bob_portfolio_id>"
       TZ: "Europe/Berlin"
-      CRON_SCHEDULE: "5 8 * * *"    # 5-minute offset
+      SYNC_SCHEDULE: "5 8 * * *"       # 5-minute offset
+      BACKUP_SCHEDULE: "30 3 * * *"    # 30-minute offset
     volumes:
       - ./bob:/app/data
 ```
@@ -162,7 +211,8 @@ make <target> SERVICE=<name>
 | `build` | Build the app image (assumes base exists) |
 | `build-all` | Full rebuild — base + app, no cache |
 | `bootstrap` | Interactive first-time login |
-| `sync` | One-shot sync run (ignores `CRON_SCHEDULE`) |
+| `sync` | One-shot sync run (ignores `SYNC_SCHEDULE`) |
+| `backup` | One-shot backup — requires `MODE=auto\|monthly\|yearly` and optional `PARAM=` |
 | `up` | Start as scheduled daemon |
 | `down` | Stop the daemon |
 | `logs` | Follow daemon logs |
@@ -192,8 +242,13 @@ For NAS deployments where `make` is not available, use the included `tr-sync.sh`
 ./tr-sync.sh bootstrap myaccount
 ./tr-sync.sh up        myaccount
 ./tr-sync.sh logs      myaccount
-./tr-sync.sh sync      myaccount   # manual one-shot
+./tr-sync.sh sync      myaccount          # manual one-shot sync
+./tr-sync.sh backup    myaccount auto     # manual backup (auto mode)
+./tr-sync.sh backup    myaccount monthly 2026-07
+./tr-sync.sh backup    myaccount yearly 2025
 ./tr-sync.sh down      myaccount
 ```
+
+Internally these run `python -m app <subcommand>` inside the container.
 
 See `ARCHITECTURE.md` for full technical details.

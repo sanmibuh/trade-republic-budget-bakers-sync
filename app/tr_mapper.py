@@ -22,8 +22,7 @@ def normalize_event_time(event: dict[str, Any]) -> str:
         if isinstance(value, datetime):
             return value.isoformat()
         s = str(value)
-        s = re.sub(r'([+-])(\d{2})(\d{2})$', r'\1\2:\3', s)
-        return s
+        return re.sub(r'([+-])(\d{2})(\d{2})$', r'\1\2:\3', s)
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -85,6 +84,14 @@ def extract_amount(event: dict[str, Any], *keys: str) -> Decimal:
 # Details extraction helpers
 # ---------------------------------------------------------------------------
 
+def _resolve_detail_text(detail: dict[str, Any]) -> str | None:
+    """Extract display text from a detail dict, preferring displayValue.text."""
+    dv = detail.get("displayValue")
+    if isinstance(dv, dict) and dv.get("text"):
+        return dv["text"]
+    return detail.get("text") or None
+
+
 def _extract_detail_row(details: dict[str, Any], row_title: str) -> str | None:
     """Return the display text of the first table row matching row_title in a details payload."""
     for section in details.get("sections", []):
@@ -96,12 +103,20 @@ def _extract_detail_row(details: dict[str, Any], row_title: str) -> str | None:
                 continue
             detail = item.get("detail")
             if isinstance(detail, dict):
-                # prefer displayValue.text (clean, localised), fall back to text
-                dv = detail.get("displayValue")
-                if isinstance(dv, dict) and dv.get("text"):
-                    return dv["text"]
-                return detail.get("text") or None
+                return _resolve_detail_text(detail)
     return None
+
+
+def _resolve_iban(item: dict[str, Any]) -> str | None:
+    """Extract full or masked IBAN from a detail item."""
+    try:
+        full_iban: str = (
+            item["detail"]["action"]["payload"]
+            ["sections"][0]["data"][0]["title"]
+        )
+        return full_iban.replace(" ", "")
+    except (KeyError, IndexError, TypeError):
+        return (item.get("detail") or {}).get("text") or None
 
 
 def _extract_iban_from_details(details: dict[str, Any]) -> str | None:
@@ -120,17 +135,8 @@ def _extract_iban_from_details(details: dict[str, Any]) -> str | None:
         if not isinstance(data, list):
             continue
         for item in data:
-            if not isinstance(item, dict) or item.get("title") != "IBAN":
-                continue
-            try:
-                full_iban: str = (
-                    item["detail"]["action"]["payload"]
-                    ["sections"][0]["data"][0]["title"]
-                )
-                return full_iban.replace(" ", "")
-            except (KeyError, IndexError, TypeError):
-                masked = (item.get("detail") or {}).get("text")
-                return masked or None
+            if isinstance(item, dict) and item.get("title") == "IBAN":
+                return _resolve_iban(item)
     return None
 
 
@@ -154,7 +160,7 @@ _EVENT_TITLES: dict[str, str] = {
     "BANK_TRANSACTION_OUTGOING": "Bank Transfer Out",
 }
 
-_PREFIXED_TYPES = {"INTEREST_PAYOUT", "INTEREST_PAYMENT", "SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE", "TRADING_SAVINGSPLAN_EXECUTED"}
+_PREFIXED_TYPES: frozenset[str] = frozenset({"INTEREST_PAYOUT", "INTEREST_PAYMENT", "SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE", "TRADING_SAVINGSPLAN_EXECUTED"})
 
 
 def _event_note(event: dict[str, Any], event_type: str) -> str:

@@ -34,3 +34,19 @@ def setup_logging(log_dir: Path) -> logging.Logger:
     root.addHandler(ch)
 
     return logging.getLogger("sync")
+
+
+def configure_logging() -> None:
+    """Minimal console-only logging setup for entry points without a data dir (e.g. backup CLI)."""
+    root = logging.getLogger()
+    if root.handlers:
+        return  # already configured
+    root.setLevel(logging.DEBUG)
+    fmt = logging.Formatter(
+        fmt="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(fmt)
+    root.addHandler(ch)

@@ -18,7 +18,8 @@ from app.wallet_client import WalletClient
 try:
     from pytr.exceptions import AuthenticationError
 except Exception:  # pragma: no cover  # noqa: BLE001
-    AuthenticationError = Exception
+    class AuthenticationError(Exception):  # type: ignore[no-redef]  # pragma: no cover
+        """Sentinel: raised only by pytr when it IS installed."""
 
 log = logging.getLogger(__name__)
 
@@ -63,27 +64,28 @@ def _fetch_events(
         log.info("Trade Republic session established")
         events = tr_client.fetch_timeline_events(since=since)
         log.info("Fetched %d timeline events", len(events))
-        return events
     except LoginFailedError:
         log.exception("Login failed")
         notifier.login_failed()
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     except AuthenticationError:
         log.exception("Authentication error")
         notifier.authentication_required()
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     except HTTPError as exc:
         status = exc.response.status_code if exc.response is not None else None
         log.exception("HTTP error (status=%s)", status)
         if status == 401:
             notifier.authentication_required()
-            raise SystemExit(1)
+            raise SystemExit(1) from exc
         notifier.error(exc)
         raise
     except Exception as exc:
         log.exception("Unexpected error during TR connection/fetch")
         notifier.error(exc)
         raise
+    else:
+        return events
 
 
 def _build_batch(
@@ -216,5 +218,5 @@ def run() -> int:
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(run())

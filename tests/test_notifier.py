@@ -359,3 +359,88 @@ def test_notify_unknown_event_type_compat():
         result = notify_unknown_event_type("tok", "chat", "David", "NEW_EVENT")
     assert result is True
     assert "NEW" in mock_send.call_args.kwargs["message"]  # underscore gets escaped
+
+
+# ---------------------------------------------------------------------------
+# backup_complete
+# ---------------------------------------------------------------------------
+
+def test_notifier_backup_complete_monthly_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = _make_notifier().backup_complete(
+            mode="monthly",
+            period="2026-07",
+            date_from="2026-07-01",
+            date_to="2026-07-31",
+            counts={"records": 42, "accounts": 3, "categories": 18, "budgets": 5, "labels": 7},
+        )
+    assert result is True
+    msg = mock_send.call_args.kwargs["message"]
+    assert "📆" in msg
+    assert "42" in msg
+    assert "3" in msg
+    assert "18" in msg
+    assert "Monthly" in msg or "monthly" in msg
+
+
+def test_notifier_backup_complete_yearly_includes_removed():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().backup_complete(
+            mode="yearly",
+            period="2025",
+            date_from="2025-01-01",
+            date_to="2025-12-31",
+            counts={"records": 300, "accounts": 3, "categories": 20,
+                    "budgets": 4, "labels": 5, "monthly_removed": 12},
+        )
+    msg = mock_send.call_args.kwargs["message"]
+    assert "12" in msg
+    assert "Yearly" in msg or "yearly" in msg
+
+
+def test_notifier_backup_complete_no_credentials_returns_false():
+    notifier = Notifier(bot_token=None, chat_id=None, owner_name="David")
+    result = notifier.backup_complete(
+        mode="monthly", period="2026-07",
+        date_from="2026-07-01", date_to="2026-07-31",
+        counts={"records": 1, "accounts": 1, "categories": 1, "budgets": 0, "labels": 0},
+    )
+    assert result is False
+
+
+def test_notifier_backup_complete_no_monthly_removed_field():
+    """monthly_removed not present → no mention of removed files in message."""
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().backup_complete(
+            mode="monthly", period="2026-07",
+            date_from="2026-07-01", date_to="2026-07-31",
+            counts={"records": 10, "accounts": 2, "categories": 5, "budgets": 1, "labels": 2},
+        )
+    msg = mock_send.call_args.kwargs["message"]
+    assert "removed" not in msg.lower()
+
+
+def test_notifier_backup_complete_includes_filename():
+    """filename kwarg → appears in notification message."""
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().backup_complete(
+            mode="monthly", period="2026-07",
+            date_from="2026-07-01", date_to="2026-07-31",
+            counts={"records": 10, "accounts": 2, "categories": 5, "budgets": 1, "labels": 2},
+            filename="wallet-monthly-2026-07.json",
+        )
+    msg = mock_send.call_args.kwargs["message"]
+    assert "wallet" in msg
+    assert "2026" in msg
+
+
+def test_notifier_backup_complete_filename_optional():
+    """filename defaults to None → no File line in message."""
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().backup_complete(
+            mode="monthly", period="2026-07",
+            date_from="2026-07-01", date_to="2026-07-31",
+            counts={"records": 10, "accounts": 2, "categories": 5, "budgets": 1, "labels": 2},
+        )
+    msg = mock_send.call_args.kwargs["message"]
+    assert "File" not in msg

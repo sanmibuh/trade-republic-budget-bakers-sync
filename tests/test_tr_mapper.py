@@ -698,3 +698,68 @@ def test_build_event_label_not_applied_to_other_types():
         label_ids={"BANK_TRANSACTION_OUTGOING": "uuid-abc"},
     )
     assert "labelIds" not in records[0]
+
+
+# ---------------------------------------------------------------------------
+# _extract_detail_row — section data is not a list
+# ---------------------------------------------------------------------------
+
+def test_extract_detail_row_skips_non_list_section_data():
+    """Section where data is not a list should be skipped (line 101 branch)."""
+    details = {
+        "sections": [
+            {"data": "not-a-list"},  # not a list → continue
+            {
+                "data": [
+                    {"title": "Transaktion", "detail": {"text": "found it"}},
+                ]
+            },
+        ]
+    }
+    assert _extract_detail_row(details, "Transaktion") == "found it"
+
+
+# ---------------------------------------------------------------------------
+# _gross_tax_note — gross only (no tax)
+# ---------------------------------------------------------------------------
+
+def test_gross_tax_note_gross_only():
+    from app.tr_mapper import _gross_tax_note
+
+    result = _gross_tax_note("12.50", None)
+    assert result == "gross 12.50"
+
+
+def test_gross_tax_note_both():
+    from app.tr_mapper import _gross_tax_note
+
+    result = _gross_tax_note("12.50", "1.00")
+    assert result == "gross 12.50, tax 1.00"
+
+
+def test_gross_tax_note_neither():
+    from app.tr_mapper import _gross_tax_note
+
+    assert _gross_tax_note(None, None) is None
+
+
+# ---------------------------------------------------------------------------
+# _make_record — label_ids populated
+# ---------------------------------------------------------------------------
+
+def test_build_records_includes_label_ids_when_matched():
+    """label_ids branch (line 201) is hit when a matching label is provided."""
+    event = {
+        "eventType": "BANK_TRANSACTION_INCOMING",
+        "id": "ev-label",
+        "timestamp": "2024-06-01T10:00:00Z",
+        "amount": "50.00",
+        "title": "Salary",
+    }
+    records = build_records_for_event(
+        event,
+        cash_account_id="cash",
+        portfolio_account_id="port",
+        label_ids={"BANK_TRANSACTION_INCOMING": "uuid-label-in"},
+    )
+    assert records[0].get("labelIds") == ["uuid-label-in"]

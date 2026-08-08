@@ -1,4 +1,5 @@
-FROM ghcr.io/sanmibuh/python-trade-republic:v1.0.0
+ARG BASE_TAG=latest
+FROM ghcr.io/sanmibuh/python-trade-republic:${BASE_TAG}
 
 WORKDIR /app
 

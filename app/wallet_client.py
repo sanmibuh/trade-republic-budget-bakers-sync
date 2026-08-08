@@ -18,6 +18,7 @@ class WalletClient:
         base_url: str = "https://rest.budgetbakers.com/wallet",
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self._get_base = f"{self.base_url}/v1/api"
         self.session = requests.Session()
         self.session.verify = False
         self.session.headers.update(
@@ -75,3 +76,74 @@ class WalletClient:
                 response.raise_for_status()
 
         return all_results
+
+    # ------------------------------------------------------------------
+    # GET methods — Wallet backup API
+    # ------------------------------------------------------------------
+
+    def _get_all(self, resource: str, params: dict[str, Any] | None = None) -> list[dict]:
+        """Fetch all pages for a given resource, following nextOffset pagination."""
+        results: list[dict] = []
+        offset: int | None = None
+        base_params = dict(params or {})
+
+        while True:
+            req_params = dict(base_params)
+            if offset is not None:
+                req_params["offset"] = offset
+
+            log.debug("GET %s offset=%s", resource, offset)
+            response = self.session.get(
+                f"{self._get_base}/{resource}",
+                params=req_params,
+                timeout=30,
+            )
+            log.debug("GET %s → %s", resource, response.status_code)
+            response.raise_for_status()
+
+            data = response.json()
+
+            if isinstance(data, list):
+                results.extend(data)
+                break
+            if isinstance(data, dict):
+                offset = self._collect_page(data, results)
+                if not offset:
+                    break
+            else:
+                log.warning("GET %s: unexpected response type %s", resource, type(data))
+                break
+
+        return results
+
+    @staticmethod
+    def _collect_page(data: dict, results: list[dict]) -> int | None:
+        """Append items from a paginated dict response into results. Returns next offset or None."""
+        page = data.get("data", [])
+        if isinstance(page, list):
+            results.extend(page)
+        else:
+            results.append(page)
+        return data.get("nextOffset") or None
+
+    def get_accounts(self) -> list[dict]:
+        return self._get_all("accounts")
+
+    def get_categories(self) -> list[dict]:
+        return self._get_all("categories")
+
+    def get_budgets(self) -> list[dict]:
+        return self._get_all("budgets")
+
+    def get_labels(self) -> list[dict]:
+        return self._get_all("labels")
+
+    def get_records(self, date_from: str, date_to: str) -> list[dict]:
+        """Fetch all records within [date_from, date_to] (inclusive, YYYY-MM-DD)."""
+        return self._get_all(
+            "records",
+            params={
+                "recordDate": f"gte.{date_from}",
+                "recordDateTo": f"lte.{date_to}",
+            },
+        )

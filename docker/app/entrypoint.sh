@@ -1,25 +1,58 @@
 #!/bin/sh
-# If CRON_SCHEDULE is set, run as a scheduled daemon.
-# If not, run once and exit (original one-shot behaviour).
+# Entrypoint for the TR→BudgetBakers sync container.
 #
-# CRON_SCHEDULE format: standard 5-field cron expression, e.g.
-#   "0 8 * * *"   → every day at 08:00
-#   "0 8,20 * * *" → every day at 08:00 and 20:00
+# Behaviour is controlled by environment variables:
 #
-# Logs from cron jobs are forwarded to stdout so `docker logs` works normally.
+#   SYNC_SCHEDULE    Cron expression for the sync job (e.g. "0 8,20 * * *").
+#                    If empty / unset → run one-shot sync and exit.
+#
+#   BACKUP_SCHEDULE  Cron expression for the daily backup job (e.g. "0 3 * * *").
+#                    If empty / unset → no backup cron is registered.
+#                    Only meaningful when running as a daemon (SYNC_SCHEDULE set).
+#
+#   CMD              If set, run a one-shot command and exit.
+#                    Passed directly to `python -m app`, e.g.:
+#                      CMD="backup auto"
+#                      CMD="backup monthly 2026-07"
+#
+# Priority: CMD overrides everything. Otherwise SYNC_SCHEDULE controls daemon vs one-shot.
 
 set -e
 
-if [ -z "$CRON_SCHEDULE" ]; then
-    exec python -m app.main
+# ------------------------------------------------------------------
+# One-shot via CMD
+# ------------------------------------------------------------------
+if [ -n "$CMD" ]; then
+    echo "Running: python -m app $CMD"
+    # shellcheck disable=SC2086
+    exec python -m app $CMD
 fi
 
-echo "Starting in scheduled mode: CRON_SCHEDULE='$CRON_SCHEDULE'"
+# ------------------------------------------------------------------
+# One-shot sync (no schedule)
+# ------------------------------------------------------------------
+if [ -z "$SYNC_SCHEDULE" ]; then
+    exec python -m app sync
+fi
 
-# Write the crontab — redirect output to stdout/stderr of PID 1 so docker logs captures it
+# ------------------------------------------------------------------
+# Daemon mode — register cron jobs and start cron
+# ------------------------------------------------------------------
+echo "Starting in scheduled mode: SYNC_SCHEDULE='$SYNC_SCHEDULE'"
+
 CRONTAB_FILE=/etc/cron.d/tr-sync
-printf '%s root cd /app && python -m app.main >> /proc/1/fd/1 2>> /proc/1/fd/2\n' \
-    "$CRON_SCHEDULE" > "$CRONTAB_FILE"
+
+# Sync job
+printf '%s root cd /app && python -m app sync >> /proc/1/fd/1 2>> /proc/1/fd/2\n' \
+    "$SYNC_SCHEDULE" > "$CRONTAB_FILE"
+
+# Backup job (optional)
+if [ -n "$BACKUP_SCHEDULE" ]; then
+    echo "Registering backup cron: BACKUP_SCHEDULE='$BACKUP_SCHEDULE'"
+    printf '%s root cd /app && python -m app backup auto >> /proc/1/fd/1 2>> /proc/1/fd/2\n' \
+        "$BACKUP_SCHEDULE" >> "$CRONTAB_FILE"
+fi
+
 chmod 0644 "$CRONTAB_FILE"
 
 # Export environment variables so cron jobs inherit them
