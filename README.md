@@ -170,9 +170,8 @@ Add the `telegram-bot` service to your `docker-compose.yml`:
 ```yaml
 services:
   telegram-bot:
-    build:
-      context: .
-      dockerfile: docker/bot/Dockerfile
+    image: ghcr.io/sanmibuh/tr-wallet-sync:<tag>
+    entrypoint: ["python", "-m", "app", "bot"]
     environment:
       TELEGRAM_BOT_TOKEN: "<bot_token>"
       TELEGRAM_CHAT_ID: "<your_chat_id>"
@@ -199,10 +198,9 @@ services:
       # BACKUP_SCHEDULE not set → bot will show 🚫 Bob on backup commands
 ```
 
-Build and start the bot:
+Start the bot:
 
 ```bash
-make build-bot
 docker compose up -d telegram-bot
 ```
 
@@ -274,8 +272,7 @@ make <target> SERVICE=<name>
 | Target | Description |
 |---|---|
 | `build-base` | Build the base Docker image (`python-trade-republic`) |
-| `build` | Build the app image (assumes base exists) |
-| `build-bot` | Build the `telegram-bot` image |
+| `build` | Build the app image — includes cron and docker CLI |
 | `build-all` | Full rebuild — base + app, no cache |
 | `bootstrap` | Interactive first-time login |
 | `sync` | One-shot sync run (ignores `SYNC_SCHEDULE`) |
