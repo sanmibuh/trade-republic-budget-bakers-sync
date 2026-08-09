@@ -21,7 +21,7 @@ app/
   main.py           # Sync orchestrator: wires all modules, minimal logic
 
 docker/
-  base/Dockerfile   # python:3.11-slim + git + docker CLI + pip deps; published as python-trade-republic
+  base/Dockerfile   # python:3.11-slim + git + pip deps (incl. docker SDK); published as python-trade-republic
   app/Dockerfile    # installs cron, copies app code + entrypoint.sh
   app/entrypoint.sh # MODE=sync|backup|bot; one-shot if schedule not set
 ```
@@ -149,7 +149,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 
 | Image | Base | Published on |
 |---|---|---|
-| `ghcr.io/sanmibuh/python-trade-republic` | `python:3.11-slim` + git + docker CLI + pip deps | `v4.0.0` |
+| `ghcr.io/sanmibuh/python-trade-republic` | `python:3.11-slim` + git + pip deps (incl. docker SDK) | `v5.0.0` |
 | `ghcr.io/sanmibuh/tr-wallet-sync` | `python-trade-republic` + app code + cron | Minor/patch releases |
 
 `cron` is intentionally installed only in the app image (`docker/app/Dockerfile`), not in the base image — it is an app concern.
