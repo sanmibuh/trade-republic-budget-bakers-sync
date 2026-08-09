@@ -18,7 +18,7 @@ endif
 DATA_DIR       = ./$(SERVICE)/data
 OUTPUT_DIR     = ./$(SERVICE)/output
 
-.PHONY: help build-base build build-all bootstrap sync \
+.PHONY: help build-base build build-bot build-all bootstrap sync \
         docker-build docker-rebuild docker-bootstrap docker-sync \
         test clean
 
@@ -34,6 +34,7 @@ help:
 	@echo "Docker Compose targets  (uses COMPOSE_FILE=$(COMPOSE_FILE))"
 	@echo "  build-base      Build the base image (python + git + pip install) -- run when requirements.txt or Python version changes"
 	@echo "  build           Build the app image only (assumes base exists) -- run after code changes"
+	@echo "  build-bot       Build the telegram-bot image"
 	@echo "  build-all       Rebuild base + app both from scratch (no cache) -- full clean build"
 	@echo "  bootstrap       Run interactively to complete first-time 2FA login"
 	@echo "  sync            Run a one-shot sync"
@@ -56,6 +57,9 @@ build-base:
 
 build:
 	docker compose -f $(COMPOSE_FILE) build $(SERVICE)
+
+build-bot:
+	docker compose -f $(COMPOSE_FILE) build telegram-bot
 
 build-all:
 	docker build --no-cache -f docker/base/Dockerfile -t $(BASE_IMAGE):latest .

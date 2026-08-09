@@ -8,7 +8,7 @@ Technical reference for developers and AI assistants. Covers module design, data
 
 ```
 app/
-  __main__.py       # CLI entry point — click group with `sync` and `backup` subcommands
+  __main__.py       # CLI entry point — click group with `sync`, `backup`, and `bot` subcommands
   config.py         # Config dataclass — reads all env vars in one place
   persistence.py    # EventRepository (SQLite dedup)
   tr_mapper.py      # TR event → BudgetBakers record mapping
@@ -16,6 +16,7 @@ app/
   wallet_client.py  # WalletClient — BudgetBakers HTTP API (POST records + GET backup)
   backup.py         # Backup logic: auto / monthly / yearly modes
   notifier.py       # Notifier — Telegram notifications (transversal)
+  bot.py            # TelegramBot — long-polling bot for remote command execution
   logging_setup.py  # Rotating file + console logging; configure_logging() for CLIs
   main.py           # Sync orchestrator: wires all modules, minimal logic
 
@@ -23,17 +24,7 @@ docker/
   base/Dockerfile   # python:3.11-slim + pip deps; published as python-trade-republic
   app/Dockerfile    # installs cron, copies app code + entrypoint.sh
   app/entrypoint.sh # one-shot vs crond mode; supports SYNC_SCHEDULE, BACKUP_SCHEDULE, CMD
-
-tests/
-  test_config.py
-  test_persistence.py
-  test_tr_mapper.py
-  test_wallet_client.py
-  test_main.py
-  test_backup.py
-  test_notifier.py
-  test_cli.py
-  test_logging_setup.py
+  bot/Dockerfile    # installs docker CLI, runs `python -m app bot`
 ```
 
 ---
@@ -196,7 +187,7 @@ make test
 
 | File | Role |
 |---|---|
-| `app/__main__.py` | click CLI: `sync` and `backup` subcommands; single entry point |
+| `app/__main__.py` | click CLI: `sync`, `backup`, and `bot` subcommands; single entry point |
 | `app/main.py` | Sync orchestrator; passes `cfg.label_ids` to `build_records_for_event` |
 | `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |
 | `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions |

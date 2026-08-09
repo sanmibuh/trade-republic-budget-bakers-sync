@@ -95,5 +95,35 @@ def backup(mode: str, param: str | None) -> None:
         run_yearly(client, notifier, cfg.data_dir, year)
 
 
+@cli.command()
+def bot() -> None:
+    """Start the Telegram bot for remote command execution.
+
+    Listens for commands from the authorized Telegram chat and dispatches
+    them to the configured Docker containers via 'docker exec'.
+
+    \b
+    Required environment variables:
+      TELEGRAM_BOT_TOKEN    Bot token from BotFather.
+      TELEGRAM_CHAT_ID      Authorized chat ID — only this chat can issue commands.
+      INSTANCES             Comma-separated list of instance names (e.g. "david,eli").
+      CONTAINER_PREFIX      Docker container name prefix (e.g. "trade-republic-budget-bakers-sync").
+      BACKUP_ENABLED_<NAME> Set to "true" to allow backup commands for that instance.
+
+    \b
+    Supported Telegram commands:
+      /help
+      /status
+      /sync <instance>
+      /backup_monthly <instance> [YYYY-MM]
+      /backup_yearly  <instance> [YYYY]
+    """
+    from app.bot import run
+    from app.logging_setup import configure_logging
+
+    configure_logging()
+    run()
+
+
 if __name__ == "__main__":  # pragma: no cover
     cli()

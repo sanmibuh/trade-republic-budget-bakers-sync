@@ -186,3 +186,22 @@ def test_backup_yearly_invalid_param_exits(tmp_path):
     ):
         result = _runner().invoke(cli, ["backup", "yearly", "not-a-year"])
     assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# bot command
+# ---------------------------------------------------------------------------
+
+def test_bot_help():
+    result = _runner().invoke(cli, ["bot", "--help"])
+    assert result.exit_code == 0
+    assert "bot" in result.output.lower()
+
+
+def test_bot_calls_run():
+    with (
+        patch("app.bot.run") as mock_run,
+        patch("app.__main__.configure_logging"),
+    ):
+        _runner().invoke(cli, ["bot"])
+    mock_run.assert_called_once()
