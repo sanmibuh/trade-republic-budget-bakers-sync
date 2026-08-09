@@ -39,7 +39,6 @@ from __future__ import annotations
 import datetime
 import logging
 import os
-import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -47,6 +46,7 @@ from dataclasses import dataclass, field
 import requests
 import urllib3
 
+import docker
 from app.config import BotEnv
 from app.notifier import _escape_markdown as _esc
 
@@ -55,7 +55,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 log = logging.getLogger(__name__)
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
-_EXEC_TIMEOUT = 600  # seconds — sync can take a while
 _YEAR_BUTTON_COUNT = 3   # number of recent years offered in the yearly backup keyboard
 _MONTH_BUTTON_COUNT = 4  # number of recent months offered in the monthly backup keyboard
 
@@ -446,31 +445,25 @@ class TelegramBot:
 # ---------------------------------------------------------------------------
 
 def _docker_exec_silent(container_name: str, app_args: list[str]) -> None:
-    """Run `docker exec <container> python -m app <app_args>` and log the result.
+    """Run `python -m app <app_args>` inside a container via the Docker SDK.
 
     Does NOT send any Telegram message — the container's own Notifier handles that.
     """
-    cmd = ["docker", "exec", container_name, "python", "-m", "app"] + app_args
-    log.info("Executing: %s", " ".join(cmd))
+    cmd = ["python", "-m", "app"] + app_args
+    log.info("Executing: docker exec %s %s", container_name, " ".join(cmd))
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=_EXEC_TIMEOUT,
-            check=False,
-        )
-        if result.returncode == 0:
+        client = docker.from_env()
+        container = client.containers.get(container_name)
+        exit_code, output = container.exec_run(cmd)
+        if exit_code == 0:
             log.info("docker exec finished successfully for container %s", container_name)
         else:
             log.warning(
                 "docker exec exited with code %s for container %s:\n%s",
-                result.returncode,
+                exit_code,
                 container_name,
-                (result.stdout + result.stderr).strip(),
+                output.decode(errors="replace") if output else "",
             )
-    except subprocess.TimeoutExpired:
-        log.warning("docker exec timed out after %ss for container %s", _EXEC_TIMEOUT, container_name)
     except Exception as exc:  # noqa: BLE001
         log.warning("docker exec failed for container %s: %s", container_name, exc)
 

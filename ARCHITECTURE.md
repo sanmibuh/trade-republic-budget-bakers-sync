@@ -21,7 +21,7 @@ app/
   main.py           # Sync orchestrator: wires all modules, minimal logic
 
 docker/
-  base/Dockerfile   # python:3.11-slim + git + docker CLI + pip deps; published as python-trade-republic
+  base/Dockerfile   # python:3.11-slim + git + pip deps (incl. docker SDK); published as python-trade-republic
   app/Dockerfile    # installs cron, copies app code + entrypoint.sh
   app/entrypoint.sh # MODE=sync|backup|bot; one-shot if schedule not set
 ```
@@ -117,13 +117,13 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - Yearly cleanup removes the 12 monthly files whose period is covered by the yearly backup.
 
 ### Telegram bot
-- `app/bot.py`: long-polling bot dispatching commands to Docker containers via `docker exec`.
+- `app/bot.py`: long-polling bot dispatching commands to Docker containers via the Docker SDK (`docker` Python package).
 - `BotConfig` reads `INSTANCES` (sync instances), `CONTAINER_PREFIX`, and `BACKUP_SERVICE` from env.
 - `CONTAINER_PREFIX` must match the Docker Compose project `name:` field (e.g. `tr-sync`) — fixed in `docker-compose.yml` via `name: tr-sync` so it never changes regardless of the directory name.
 - Container naming: sync → `{prefix}-sync-{name}-1`, backup → `{prefix}-{backup_service}-1`.
 - Backup commands (`/backup_monthly`, `/backup_yearly`) execute directly on the backup container — no instance picker.
 - Sync commands (`/sync`) show an inline keyboard to pick the instance.
-- The Docker socket (`/var/run/docker.sock`) is required for `docker exec`.
+- The Docker socket (`/var/run/docker.sock`) is mounted into the bot container; the Docker SDK communicates with it directly (no docker CLI binary required).
 - Base URL: `{base_url}/v1/api/{resource}`
 - Pagination via `nextOffset` in the response dict; plain list responses have no pagination.
 - `_get_all()` handles both response shapes: plain `list` (no pagination) and `{"data": [...], "nextOffset": N}`.
@@ -149,7 +149,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 
 | Image | Base | Published on |
 |---|---|---|
-| `ghcr.io/sanmibuh/python-trade-republic` | `python:3.11-slim` + git + docker CLI + pip deps | `v4.0.0` |
+| `ghcr.io/sanmibuh/python-trade-republic` | `python:3.11-slim` + git + pip deps (incl. docker SDK) | `v5.0.0` |
 | `ghcr.io/sanmibuh/tr-wallet-sync` | `python-trade-republic` + app code + cron | Minor/patch releases |
 
 `cron` is intentionally installed only in the app image (`docker/app/Dockerfile`), not in the base image — it is an app concern.
