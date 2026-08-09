@@ -149,7 +149,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 
 | Image | Base | Published on |
 |---|---|---|
-| `ghcr.io/sanmibuh/python-trade-republic` | `python:3.11-slim` + git + docker CLI + pip deps | `v3.0.0` |
+| `ghcr.io/sanmibuh/python-trade-republic` | `python:3.11-slim` + git + docker CLI + pip deps | `v4.0.0` |
 | `ghcr.io/sanmibuh/tr-wallet-sync` | `python-trade-republic` + app code + cron | Minor/patch releases |
 
 `cron` is intentionally installed only in the app image (`docker/app/Dockerfile`), not in the base image — it is an app concern.
