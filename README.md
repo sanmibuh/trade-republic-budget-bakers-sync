@@ -161,13 +161,15 @@ An optional `telegram-bot` service lets you trigger sync and backup operations o
 | `/status` | Show all instances and whether backup is available for each |
 | `/help` | Show available commands |
 
-Backup commands are only available for instances that have `BACKUP_SCHEDULE` configured. The bot detects this automatically via `docker inspect` — no extra configuration needed.
+Backup commands are only available when `BACKUP_SERVICE` is configured in the bot's environment. The bot runs all backup operations on the dedicated backup container — not per sync instance.
 
 ### Setup
 
 Add the `telegram-bot` service to your `docker-compose.yml`:
 
 ```yaml
+name: my-project
+
 services:
   telegram-bot:
     image: ghcr.io/sanmibuh/tr-wallet-sync:<tag>
@@ -175,27 +177,36 @@ services:
     environment:
       TELEGRAM_BOT_TOKEN: "<bot_token>"
       TELEGRAM_CHAT_ID: "<your_chat_id>"
-      # Comma-separated list of service names defined below
+      # Comma-separated list of sync instance names defined below
       INSTANCES: "alice,bob"
-      # Must match the Docker Compose project name (directory name, lowercased by default)
-      CONTAINER_PREFIX: "my-project-folder"
+      # Must match the Docker Compose project name (name: field above)
+      CONTAINER_PREFIX: "my-project"
+      # Name of the backup service (omit or leave empty to disable backup commands)
+      BACKUP_SERVICE: "backup"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
-  alice:
-    image: ghcr.io/sanmibuh/tr-wallet-sync:latest
+  sync-alice:
+    image: ghcr.io/sanmibuh/tr-wallet-sync:<tag>
     environment:
+      MODE: sync
       OWNER_NAME: "Alice"
       # ... rest of alice config
-      BACKUP_SCHEDULE: "0 3 * * *"   # bot will allow backup commands for alice
 
-  bob:
-    image: ghcr.io/sanmibuh/tr-wallet-sync:latest
+  sync-bob:
+    image: ghcr.io/sanmibuh/tr-wallet-sync:<tag>
     environment:
+      MODE: sync
       OWNER_NAME: "Bob"
       # ... rest of bob config
-      # BACKUP_SCHEDULE not set → bot will show 🚫 Bob on backup commands
+
+  backup:
+    image: ghcr.io/sanmibuh/tr-wallet-sync:<tag>
+    environment:
+      MODE: backup
+      BACKUP_SCHEDULE: "0 3 * * *"
+      # ... rest of backup config
 ```
 
 Start the bot:

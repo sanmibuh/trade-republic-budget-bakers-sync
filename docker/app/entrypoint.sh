@@ -72,9 +72,9 @@ _start_cron() {
 }
 
 # ------------------------------------------------------------------
-# Sync mode (default)
+# Sync mode
 # ------------------------------------------------------------------
-if [ "$MODE" = "sync" ] || [ -z "$MODE" ]; then
+if [ "$MODE" = "sync" ]; then
     if [ -z "$SYNC_SCHEDULE" ]; then
         exec python -m app sync
     fi
@@ -91,5 +91,5 @@ if [ "$MODE" = "backup" ]; then
     _start_cron "$BACKUP_SCHEDULE" "backup auto" "BACKUP_SCHEDULE"
 fi
 
-log "ERROR: unknown MODE='$MODE'. Valid values: sync, backup, bot"
+log "ERROR: MODE='$MODE' is not set or not recognised. Valid values: sync, backup, bot"
 exit 1

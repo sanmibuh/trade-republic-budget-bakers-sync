@@ -79,3 +79,24 @@ class Config:
             data_dir=Path(os.getenv("DATA_DIR", "/app/data")),
             label_ids=_read_label_ids(),
         )
+
+
+@dataclass(frozen=True)
+class BotEnv:
+    """Raw environment values needed by the Telegram bot."""
+
+    bot_token: str
+    chat_id: str
+    instances_raw: str
+    container_prefix: str
+    backup_service: str
+
+    @classmethod
+    def from_env(cls) -> BotEnv:
+        return cls(
+            bot_token=_required_env("TELEGRAM_BOT_TOKEN"),
+            chat_id=_required_env("TELEGRAM_CHAT_ID"),
+            instances_raw=_required_env("INSTANCES"),
+            container_prefix=_required_env("CONTAINER_PREFIX"),
+            backup_service=os.getenv("BACKUP_SERVICE", "backup").strip(),
+        )

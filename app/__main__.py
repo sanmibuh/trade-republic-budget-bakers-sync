@@ -119,9 +119,9 @@ def bot() -> None:
     Supported Telegram commands:
       /help
       /status
-      /sync <instance>
-      /backup_monthly <instance> [YYYY-MM]
-      /backup_yearly  <instance> [YYYY]
+      /sync              (shows an inline keyboard to pick the instance)
+      /backup_monthly    [YYYY-MM]
+      /backup_yearly     [YYYY]
     """
     from app.bot import run
     from app.logging_setup import configure_logging

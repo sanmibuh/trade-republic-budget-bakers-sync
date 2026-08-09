@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 import requests
 import urllib3
 
+from app.config import BotEnv
 from app.notifier import _escape_markdown as _esc
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -61,9 +62,6 @@ _SSL_VERIFY: bool = os.environ.get("TELEGRAM_VERIFY_SSL", "true").strip().lower(
 # Separator used inside callback_data to encode command + param + instance.
 # Must not appear in instance names or period params (YYYY-MM / YYYY contain only digits and hyphens).
 _CB_SEP = ":"
-
-# Human-readable period unit per backup mode (used in ACK messages).
-_MODE_UNIT: dict[str, str] = {"monthly": "month", "yearly": "year"}
 
 
 # ---------------------------------------------------------------------------
@@ -85,35 +83,21 @@ class BotConfig:
 
     @classmethod
     def from_env(cls) -> BotConfig:
-        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-        chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-        if not bot_token:
-            raise ValueError("Missing required environment variable: TELEGRAM_BOT_TOKEN")
-        if not chat_id:
-            raise ValueError("Missing required environment variable: TELEGRAM_CHAT_ID")
-
-        raw_instances = os.environ.get("INSTANCES", "").strip()
-        if not raw_instances:
-            raise ValueError("Missing required environment variable: INSTANCES")
-
-        prefix = os.environ.get("CONTAINER_PREFIX", "").strip()
-        if not prefix:
-            raise ValueError("Missing required environment variable: CONTAINER_PREFIX")
+        env = BotEnv.from_env()
 
         instances: dict[str, InstanceConfig] = {}
-        for name in [n.strip() for n in raw_instances.split(",") if n.strip()]:
-            container_name = f"{prefix}-sync-{name.lower()}-1"
+        for name in [n.strip() for n in env.instances_raw.split(",") if n.strip()]:
+            container_name = f"{env.container_prefix}-sync-{name.lower()}-1"
             instances[name.lower()] = InstanceConfig(
                 name=name,
                 container_name=container_name,
             )
 
-        backup_service = os.environ.get("BACKUP_SERVICE", "backup").strip()
-        backup_container = f"{prefix}-{backup_service}-1" if backup_service else None
+        backup_container = f"{env.container_prefix}-{env.backup_service}-1" if env.backup_service else None
 
         return cls(
-            bot_token=bot_token,
-            chat_id=chat_id,
+            bot_token=env.bot_token,
+            chat_id=env.chat_id,
             instances=instances,
             backup_container=backup_container,
         )

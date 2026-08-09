@@ -192,13 +192,13 @@ def run() -> int:
         counts = _SyncCounts()
         try:
             batch = _build_batch(new_events, cfg, repo, notifier)
+            counts.excluded = batch.excluded_count
 
             if batch.records:
                 results = WalletClient(api_key=cfg.wallet_api_key).post_records(batch.records)
                 log.debug("API results: %s", results)
                 counts = _process_results(results, new_events, batch.event_record_indices, repo)
-
-            counts.excluded = batch.excluded_count
+                counts.excluded = batch.excluded_count
 
             log.info("Sync complete. synced=%d excluded=%d failed=%d", counts.synced, counts.excluded, counts.failed)
         except Exception as exc:
