@@ -363,7 +363,7 @@ def build_records_for_event(
     event_type = str(_get_first_match(event, "eventType", "type", "event_type") or "").upper()
     amount = extract_amount(event, "amount", "value", "grossAmount", "gross", "total")
 
-    log.debug("Building record(s) for event type=%s amount=%s — raw: %s", event_type, amount, event)
+    log.debug("Building record(s) for event type=%s amount=%s", event_type, amount)
     if amount == 0:
         log.debug("Skipping zero-amount event (type=%s)", event_type)
         return []
