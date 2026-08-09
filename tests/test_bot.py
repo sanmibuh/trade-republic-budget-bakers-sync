@@ -155,6 +155,32 @@ def test_docker_exec_silent_failure_does_not_raise():
         _docker_exec_silent("my-container", ["sync"])  # must not raise
 
 
+def test_docker_exec_silent_failure_calls_on_error():
+    on_error = MagicMock()
+    client = _make_docker_client(1, b"something broke")
+    with patch("app.bot.docker.from_env", return_value=client):
+        _docker_exec_silent("my-container", ["sync"], on_error=on_error)
+    on_error.assert_called_once()
+    assert "my-container" in on_error.call_args.args[0]
+
+
+def test_docker_exec_silent_exception_calls_on_error():
+    on_error = MagicMock()
+    client = MagicMock()
+    client.containers.get.side_effect = Exception("unexpected")
+    with patch("app.bot.docker.from_env", return_value=client):
+        _docker_exec_silent("my-container", ["sync"], on_error=on_error)
+    on_error.assert_called_once()
+
+
+def test_docker_exec_silent_success_does_not_call_on_error():
+    on_error = MagicMock()
+    client = _make_docker_client(0)
+    with patch("app.bot.docker.from_env", return_value=client):
+        _docker_exec_silent("my-container", ["sync"], on_error=on_error)
+    on_error.assert_not_called()
+
+
 def test_docker_exec_silent_container_not_found_does_not_raise():
     import docker.errors
     client = MagicMock()

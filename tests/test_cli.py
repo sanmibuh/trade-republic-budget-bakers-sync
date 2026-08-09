@@ -95,7 +95,7 @@ def _mock_cfg(tmp_path):
 def test_backup_auto_calls_run_auto(tmp_path):
     with (
         patch("app.__main__.configure_logging"),
-        patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)),
+        patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
         patch("app.backup.run_auto") as mock_auto,
@@ -112,7 +112,7 @@ def test_backup_auto_calls_run_auto(tmp_path):
 def test_backup_monthly_default_calls_run_monthly(tmp_path):
     with (
         patch("app.__main__.configure_logging"),
-        patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)),
+        patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
         patch("app.backup.run_monthly") as mock_monthly,
@@ -125,7 +125,7 @@ def test_backup_monthly_default_calls_run_monthly(tmp_path):
 def test_backup_monthly_with_param(tmp_path):
     with (
         patch("app.__main__.configure_logging"),
-        patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)),
+        patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
         patch("app.backup.run_monthly") as mock_monthly,
@@ -139,7 +139,7 @@ def test_backup_monthly_with_param(tmp_path):
 def test_backup_monthly_invalid_param_exits(tmp_path):
     with (
         patch("app.__main__.configure_logging"),
-        patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)),
+        patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
     ):
@@ -154,7 +154,7 @@ def test_backup_monthly_invalid_param_exits(tmp_path):
 def test_backup_yearly_default_calls_run_yearly(tmp_path):
     with (
         patch("app.__main__.configure_logging"),
-        patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)),
+        patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
         patch("app.backup.run_yearly") as mock_yearly,
@@ -167,7 +167,7 @@ def test_backup_yearly_default_calls_run_yearly(tmp_path):
 def test_backup_yearly_with_param(tmp_path):
     with (
         patch("app.__main__.configure_logging"),
-        patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)),
+        patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
         patch("app.backup.run_yearly") as mock_yearly,
@@ -180,7 +180,7 @@ def test_backup_yearly_with_param(tmp_path):
 def test_backup_yearly_invalid_param_exits(tmp_path):
     with (
         patch("app.__main__.configure_logging"),
-        patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)),
+        patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
     ):

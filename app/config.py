@@ -50,8 +50,20 @@ def _read_label_ids() -> dict[str, str]:
     }
 
 
+def _read_notifier_env() -> dict[str, object]:
+    """Read env vars shared by Config and BackupConfig."""
+    return {
+        "owner_name": os.getenv("OWNER_NAME", "Backup"),
+        "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
+        "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID"),
+        "data_dir": Path(os.getenv("DATA_DIR", "/app/data")),
+    }
+
+
 @dataclass(frozen=True)
 class Config:
+    """Full config for the sync command. Requires Trade Republic and Wallet credentials."""
+
     owner_name: str
     phone_number: str
     pin: str
@@ -67,17 +79,32 @@ class Config:
     @classmethod
     def from_env(cls) -> Config:
         return cls(
-            owner_name=os.getenv("OWNER_NAME", "Backup"),
+            **_read_notifier_env(),
             phone_number=_required_env("PHONE_NUMBER"),
             pin=_required_env("PIN"),
             wallet_api_key=_required_env("WALLET_API_KEY"),
             wallet_cash_account_id=_required_env("WALLET_CASH_ACCOUNT_ID"),
             wallet_portfolio_account_id=_required_env("WALLET_PORTFOLIO_ACCOUNT_ID"),
-            telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
-            telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID"),
             lookback_days=_positive_int_env("LOOKBACK_DAYS", default=7),
-            data_dir=Path(os.getenv("DATA_DIR", "/app/data")),
             label_ids=_read_label_ids(),
+        )
+
+
+@dataclass(frozen=True)
+class BackupConfig:
+    """Config for the backup command. Only requires WALLET_API_KEY — no TR credentials."""
+
+    owner_name: str
+    wallet_api_key: str
+    telegram_bot_token: str | None
+    telegram_chat_id: str | None
+    data_dir: Path
+
+    @classmethod
+    def from_env(cls) -> BackupConfig:
+        return cls(
+            **_read_notifier_env(),
+            wallet_api_key=_required_env("WALLET_API_KEY"),
         )
 
 

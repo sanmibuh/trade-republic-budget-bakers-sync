@@ -41,6 +41,7 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import requests
@@ -331,6 +332,7 @@ class TelegramBot:
         threading.Thread(
             target=_docker_exec_silent,
             args=(self._cfg.backup_container, ["backup", "monthly", period]),
+            kwargs={"on_error": self._send_message},
             daemon=True,
         ).start()
 
@@ -349,6 +351,7 @@ class TelegramBot:
         threading.Thread(
             target=_docker_exec_silent,
             args=(self._cfg.backup_container, ["backup", "yearly", year]),
+            kwargs={"on_error": self._send_message},
             daemon=True,
         ).start()
 
@@ -371,6 +374,7 @@ class TelegramBot:
         threading.Thread(
             target=_docker_exec_silent,
             args=(inst.container_name, ["sync"]),
+            kwargs={"on_error": self._send_message},
             daemon=True,
         ).start()
 
@@ -444,28 +448,39 @@ class TelegramBot:
 # Docker helpers
 # ---------------------------------------------------------------------------
 
-def _docker_exec_silent(container_name: str, app_args: list[str]) -> None:
+def _docker_exec_silent(
+    container_name: str,
+    app_args: list[str],
+    on_error: Callable[[str], None] | None = None,
+) -> None:
     """Run `python -m app <app_args>` inside a container via the Docker SDK.
 
-    Does NOT send any Telegram message — the container's own Notifier handles that.
+    Does NOT send any Telegram message on success — the container's own Notifier
+    handles that. On failure, calls `on_error(message)` if provided.
     """
     cmd = ["python", "-m", "app"] + app_args
     log.info("Executing: docker exec %s %s", container_name, " ".join(cmd))
     try:
         client = docker.from_env()
         container = client.containers.get(container_name)
-        exit_code, output = container.exec_run(cmd)
+        env = container.attrs["Config"]["Env"]
+        exit_code, output = container.exec_run(cmd, environment=env)
         if exit_code == 0:
             log.info("docker exec finished successfully for container %s", container_name)
         else:
+            details = output.decode(errors="replace").strip() if output else ""
             log.warning(
                 "docker exec exited with code %s for container %s:\n%s",
                 exit_code,
                 container_name,
-                output.decode(errors="replace") if output else "",
+                details,
             )
+            if on_error:
+                on_error(f"❌ Command failed on `{container_name}` \\(exit {exit_code}\\)\\.")
     except Exception as exc:  # noqa: BLE001
         log.warning("docker exec failed for container %s: %s", container_name, exc)
+        if on_error:
+            on_error(f"❌ Could not exec on `{container_name}`: {exc}")
 
 
 # ---------------------------------------------------------------------------
