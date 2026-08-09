@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*.[1-9]*.0'       # minor releases: v1.1.0, v1.2.0, ... (excludes v*.0.0)
       - 'v*.*.[1-9]*'       # patch releases: v1.1.1, v1.2.3, ... (excludes v*.*.0)
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag to build (e.g. v3.0.0)"
+        required: true
 
 jobs:
   publish-app:
@@ -25,7 +30,7 @@ jobs:
 
       - name: Extract version tag
         id: meta
-        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${{ github.event.inputs.version || github.ref_name }}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push app image
         uses: docker/build-push-action@v5

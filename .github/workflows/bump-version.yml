@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT_RELEASE }}
 
       - name: Check if requirements.txt was modified
         id: check
@@ -47,7 +47,7 @@ jobs:
       - name: Open PR with version bump
         if: steps.check.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_RELEASE }}
         run: |
           BRANCH="chore/bump-version-${{ steps.bump.outputs.new_version }}"
           git config user.name  "github-actions[bot]"
