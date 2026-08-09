@@ -107,13 +107,13 @@ def bot() -> None:
       TELEGRAM_BOT_TOKEN    Bot token from BotFather.
       TELEGRAM_CHAT_ID      Authorized chat ID — only this chat can issue commands.
       INSTANCES             Comma-separated list of sync instance names (e.g. "david,eli").
-      CONTAINER_PREFIX      Docker container name prefix (directory name, lowercased).
+      CONTAINER_PREFIX      Docker project name (set via `name:` in docker-compose.yml).
       BACKUP_SERVICE        Optional. Backup service name (default: "backup"). Set to empty to disable.
 
     \b
     Container naming convention:
-      Sync:   {CONTAINER_PREFIX}-sync-{instance}-1
-      Backup: {CONTAINER_PREFIX}-{BACKUP_SERVICE}-1
+      Sync:   {CONTAINER_PREFIX}-sync-{instance}-1   e.g. tr-sync-sync-david-1
+      Backup: {CONTAINER_PREFIX}-{BACKUP_SERVICE}-1  e.g. tr-sync-backup-1
 
     \b
     Supported Telegram commands:

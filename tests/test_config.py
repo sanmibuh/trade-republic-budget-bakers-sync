@@ -4,7 +4,6 @@ import pytest
 
 from app.config import Config
 
-
 BASE_ENV = {
     "PHONE_NUMBER": "+34600000000",
     "PIN": "1234",
