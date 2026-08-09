@@ -1,0 +1,68 @@
+name: tr-sync
+
+x-common: &common
+  image: ghcr.io/sanmibuh/tr-wallet-sync:v3.0.0
+  restart: unless-stopped
+
+x-sync-env: &sync-env
+  MODE: sync
+  LOOKBACK_DAYS: "10"
+  TZ: "Europe/Berlin"
+  # Optional: attach a BudgetBakers label UUID to records of these event types
+  # LABEL_BANK_TRANSACTION_INCOMING: "<uuid>"
+  # LABEL_BANK_TRANSACTION_OUTGOING: "<uuid>"
+
+services:
+  sync-1:
+    <<: *common
+    env_file:
+      - common.env
+      - sync-1.env
+    environment:
+      <<: *sync-env
+      OWNER_NAME: "Account 1"
+      WALLET_CASH_ACCOUNT_ID: "<cash_account_uuid>"
+      WALLET_PORTFOLIO_ACCOUNT_ID: "<portfolio_account_uuid>"
+      SYNC_SCHEDULE: "0 8,14,21 * * *"
+    volumes:
+      - ./1:/app/data
+
+  sync-2:
+    <<: *common
+    env_file:
+      - common.env
+      - sync-2.env
+    environment:
+      <<: *sync-env
+      OWNER_NAME: "Account 2"
+      WALLET_CASH_ACCOUNT_ID: "<cash_account_uuid>"
+      WALLET_PORTFOLIO_ACCOUNT_ID: "<portfolio_account_uuid>"
+      SYNC_SCHEDULE: "5 8,14,21 * * *"   # 5-minute offset to avoid API collision
+    volumes:
+      - ./2:/app/data
+
+  backup:
+    <<: *common
+    env_file:
+      - common.env
+    environment:
+      MODE: backup
+      BACKUP_SCHEDULE: "0 3 * * *"
+      TZ: "Europe/Berlin"
+    volumes:
+      - ./backup:/app/data
+
+  telegram-bot:
+    <<: *common
+    entrypoint: ["python", "-m", "app", "bot"]
+    env_file:
+      - common.env
+    environment:
+      # Comma-separated list of sync instance names (must match service names without "sync-" prefix)
+      INSTANCES: "1,2"
+      # Must match the Docker Compose project name (name: field above)
+      CONTAINER_PREFIX: "tr-sync"
+      # Name of the backup service (leave empty to disable backup commands in the bot)
+      BACKUP_SERVICE: "backup"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

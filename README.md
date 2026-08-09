@@ -10,63 +10,46 @@ Also includes a **wallet backup** feature that saves full JSON snapshots of your
 
 ## Quickstart
 
-### 1. Create your `docker-compose.yml`
+### 1. Copy the example config
 
-> `docker-compose.yml` is gitignored — never commit secrets.
-
-```yaml
-services:
-  myaccount:
-    image: ghcr.io/sanmibuh/tr-wallet-sync:latest
-    restart: unless-stopped
-    environment:
-      OWNER_NAME: "Alice"
-      PHONE_NUMBER: "+49123456789"
-      PIN: "<your_tr_pin>"
-      WALLET_API_KEY: "<wallet_api_key>"
-      WALLET_CASH_ACCOUNT_ID: "<cash_account_id>"
-      WALLET_PORTFOLIO_ACCOUNT_ID: "<portfolio_account_id>"
-      LOOKBACK_DAYS: "7"
-      TZ: "Europe/Berlin"
-      SYNC_SCHEDULE: "0 8 * * *"          # every day at 08:00 local time
-      BACKUP_SCHEDULE: "0 3 * * *"        # every day at 03:00 local time (optional)
-      TELEGRAM_BOT_TOKEN: "<bot_token>"   # optional
-      TELEGRAM_CHAT_ID: "<chat_id>"       # optional
-    volumes:
-      - ./myaccount:/app/data
+```sh
+cp deploy/example/docker-compose.yml  docker-compose.yml
+cp deploy/example/common.env.example  common.env
+cp deploy/example/sync-1.env.example  sync-1.env
 ```
+
+Fill in `common.env` (Wallet API key, Telegram credentials) and `sync-1.env` (Trade Republic phone + PIN). Update `WALLET_CASH_ACCOUNT_ID` and `WALLET_PORTFOLIO_ACCOUNT_ID` in `docker-compose.yml`.
 
 ### 2. First-time login (interactive 2FA)
 
 `pytr` requires an interactive login the first time (or after session expiry):
 
-```bash
-make bootstrap SERVICE=myaccount
+```sh
+./tr-sync.sh bootstrap sync-1
 ```
 
-Approve the push notification in your Trade Republic app (or enter the authenticator code). The session is saved to `./myaccount/` and reused in all future runs.
+Approve the push notification in your Trade Republic app (or enter the authenticator code). The session is saved to `./1/` and reused in all future runs.
 
 ### 3. Start the daemon
 
-```bash
-make up SERVICE=myaccount
+```sh
+./tr-sync.sh up sync-1
 ```
 
-Or run a single sync manually:
+Or start all services at once:
 
-```bash
-make sync SERVICE=myaccount
+```sh
+./tr-sync.sh up
 ```
 
 ---
 
 ## Environment variables
 
-### Required
+### Required (sync services)
 
 | Variable | Description |
 |---|---|
-| `OWNER_NAME` | Display name used in logs and Telegram messages |
 | `PHONE_NUMBER` | Trade Republic account phone number (e.g. `+49123456789`) |
 | `PIN` | Trade Republic account PIN |
 | `WALLET_API_KEY` | BudgetBakers Wallet API key |
@@ -77,6 +60,8 @@ make sync SERVICE=myaccount
 
 | Variable | Default | Description |
 |---|---|---|
+| `OWNER_NAME` | `Backup` | Display name used in Telegram notifications |
+| `MODE` | — | `sync`, `backup`, or `bot` — required by entrypoint |
 | `LOOKBACK_DAYS` | `7` | How many days back to fetch and sync |
 | `TZ` | `UTC` | Container timezone — affects cron schedule interpretation (e.g. `Europe/Berlin`) |
 | `SYNC_SCHEDULE` | — | 5-field cron expression for the sync job. If unset, runs once and exits. |
@@ -103,9 +88,24 @@ Supported event types:
 
 ---
 
+## Services architecture
+
+The recommended setup uses four separate services, each with a single responsibility:
+
+```
+sync-1        — syncs account 1 (has TR credentials, no backup schedule)
+sync-2        — syncs account 2 (has TR credentials, no backup schedule)
+backup        — runs daily wallet backups (no TR credentials)
+telegram-bot  — remote control via Telegram (no TR credentials)
+```
+
+See `deploy/example/docker-compose.yml` for a ready-to-use template.
+
+---
+
 ## Wallet backup
 
-When `BACKUP_SCHEDULE` is set, the container runs a daily backup in **`auto` mode**:
+The `backup` service runs a daily backup in **`auto` mode**:
 
 - Overwrites the backup for the current month (partial, fresh data)
 - Overwrites the backup for the previous month
@@ -126,15 +126,15 @@ Each file contains: `mode`, `date_from`, `date_to`, `generated_at`, `accounts`, 
 
 ### Manual backups
 
-```bash
-make backup SERVICE=myaccount MODE=auto           # same as the scheduled job
-make backup SERVICE=myaccount MODE=monthly        # previous month
-make backup SERVICE=myaccount MODE=monthly PARAM=2026-07
-make backup SERVICE=myaccount MODE=yearly         # previous year
-make backup SERVICE=myaccount MODE=yearly PARAM=2025
+```sh
+./tr-sync.sh backup auto             # same as the scheduled job
+./tr-sync.sh backup monthly          # previous month
+./tr-sync.sh backup monthly 2026-07  # specific month
+./tr-sync.sh backup yearly           # previous year
+./tr-sync.sh backup yearly 2025      # specific year
 ```
 
-The container exposes a unified CLI via `python -m app`:
+The container also exposes a unified CLI:
 
 ```
 python -m app --help
@@ -142,7 +142,7 @@ python -m app sync
 python -m app backup auto
 python -m app backup monthly [YYYY-MM]
 python -m app backup yearly  [YYYY]
-python -m app bot              # start the Telegram remote-control bot
+python -m app bot
 ```
 
 ---
@@ -158,61 +158,34 @@ An optional `telegram-bot` service lets you trigger sync and backup operations o
 | `/sync` | Force a Trade Republic sync — choose instance via inline buttons |
 | `/backup_monthly [YYYY-MM]` | Force a monthly backup (default: previous month) |
 | `/backup_yearly [YYYY]` | Force a yearly backup (default: previous year) |
-| `/status` | Show all instances and whether backup is available for each |
+| `/status` | Show all instances and whether backup is available |
 | `/help` | Show available commands |
 
-Backup commands are only available when `BACKUP_SERVICE` is configured in the bot's environment. The bot runs all backup operations on the dedicated backup container — not per sync instance.
+Backup commands are only available when `BACKUP_SERVICE` is configured. The bot runs all backup operations on the dedicated backup container — not per sync instance.
 
 ### Setup
 
 Add the `telegram-bot` service to your `docker-compose.yml`:
 
 ```yaml
-name: my-project
+name: tr-sync
 
 services:
   telegram-bot:
     image: ghcr.io/sanmibuh/tr-wallet-sync:<tag>
     entrypoint: ["python", "-m", "app", "bot"]
+    env_file:
+      - common.env
     environment:
-      TELEGRAM_BOT_TOKEN: "<bot_token>"
-      TELEGRAM_CHAT_ID: "<your_chat_id>"
-      # Comma-separated list of sync instance names defined below
-      INSTANCES: "alice,bob"
+      # Comma-separated list of sync instance names (without "sync-" prefix)
+      INSTANCES: "1,2"
       # Must match the Docker Compose project name (name: field above)
-      CONTAINER_PREFIX: "my-project"
-      # Name of the backup service (omit or leave empty to disable backup commands)
+      CONTAINER_PREFIX: "tr-sync"
+      # Name of the backup service (leave empty to disable backup commands)
       BACKUP_SERVICE: "backup"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
-
-  sync-alice:
-    image: ghcr.io/sanmibuh/tr-wallet-sync:<tag>
-    environment:
-      MODE: sync
-      OWNER_NAME: "Alice"
-      # ... rest of alice config
-
-  sync-bob:
-    image: ghcr.io/sanmibuh/tr-wallet-sync:<tag>
-    environment:
-      MODE: sync
-      OWNER_NAME: "Bob"
-      # ... rest of bob config
-
-  backup:
-    image: ghcr.io/sanmibuh/tr-wallet-sync:<tag>
-    environment:
-      MODE: backup
-      BACKUP_SCHEDULE: "0 3 * * *"
-      # ... rest of backup config
-```
-
-Start the bot:
-
-```bash
-docker compose up -d telegram-bot
 ```
 
 > **Security:** The bot only responds to messages from `TELEGRAM_CHAT_ID`. All other chats are silently ignored.
@@ -221,109 +194,40 @@ docker compose up -d telegram-bot
 
 ---
 
-## Multiple accounts
+## tr-sync.sh reference
 
-Add one service per account in `docker-compose.yml`. Use a 5-minute offset on the sync schedule to avoid hitting the BudgetBakers API simultaneously:
+The `tr-sync.sh` script is the main management tool for NAS deployments where `make` is not available.
 
-```yaml
-services:
-  alice:
-    image: ghcr.io/sanmibuh/tr-wallet-sync:latest
-    restart: unless-stopped
-    environment:
-      OWNER_NAME: "Alice"
-      PHONE_NUMBER: "+49123456789"
-      PIN: "<alice_pin>"
-      WALLET_API_KEY: "<alice_wallet_api_key>"
-      WALLET_CASH_ACCOUNT_ID: "<alice_cash_id>"
-      WALLET_PORTFOLIO_ACCOUNT_ID: "<alice_portfolio_id>"
-      TZ: "Europe/Berlin"
-      SYNC_SCHEDULE: "0 8 * * *"
-      BACKUP_SCHEDULE: "0 3 * * *"
-    volumes:
-      - ./alice:/app/data
-
-  bob:
-    image: ghcr.io/sanmibuh/tr-wallet-sync:latest
-    restart: unless-stopped
-    environment:
-      OWNER_NAME: "Bob"
-      PHONE_NUMBER: "+49987654321"
-      PIN: "<bob_pin>"
-      WALLET_API_KEY: "<bob_wallet_api_key>"
-      WALLET_CASH_ACCOUNT_ID: "<bob_cash_id>"
-      WALLET_PORTFOLIO_ACCOUNT_ID: "<bob_portfolio_id>"
-      TZ: "Europe/Berlin"
-      SYNC_SCHEDULE: "5 8 * * *"       # 5-minute offset
-      BACKUP_SCHEDULE: "30 3 * * *"    # 30-minute offset
-    volumes:
-      - ./bob:/app/data
-```
-
-Bootstrap and manage each independently:
-
-```bash
-make bootstrap SERVICE=alice
-make bootstrap SERVICE=bob
-
-make up SERVICE=alice
-make up SERVICE=bob
+```sh
+./tr-sync.sh pull      [service]           # pull image(s) — omit for all
+./tr-sync.sh bootstrap <sync-service>      # interactive 2FA login
+./tr-sync.sh sync      <sync-service>      # one-shot sync
+./tr-sync.sh backup    <mode> [param]      # one-shot backup
+./tr-sync.sh up        [service]           # start daemon(s)
+./tr-sync.sh down      [service]           # stop daemon(s)
+./tr-sync.sh upgrade   [service]           # pull + down + up
+./tr-sync.sh logs      <service>           # follow logs
 ```
 
 ---
 
-## Makefile targets
+## Local development
 
-```
-make <target> SERVICE=<name>
-```
+For running tests and one-shot commands locally (no Docker):
 
-`SERVICE` is required for all targets except `build-base`, `test`, and `clean`.
-
-| Target | Description |
-|---|---|
-| `build-base` | Build the base Docker image (`python-trade-republic`) |
-| `build` | Build the app image — includes cron and docker CLI |
-| `build-all` | Full rebuild — base + app, no cache |
-| `bootstrap` | Interactive first-time login |
-| `sync` | One-shot sync run (ignores `SYNC_SCHEDULE`) |
-| `backup` | One-shot backup — requires `MODE=auto\|monthly\|yearly` and optional `PARAM=` |
-| `up` | Start as scheduled daemon |
-| `down` | Stop the daemon |
-| `logs` | Follow daemon logs |
-| `test` | Run the test suite |
-| `clean` | Remove `__pycache__` and `.pytest_cache` |
-
----
-
-## Building from source
-
-If you prefer to build locally instead of pulling from ghcr:
-
-```bash
-make build-base
-make build   SERVICE=myaccount
-make up      SERVICE=myaccount
+```sh
+make test        # run test suite with coverage
+make lint        # run ruff linter
+make run-sync    # one-shot sync (env vars must be set)
+make run-backup  # one-shot backup auto
+make run-bot     # start the Telegram bot
+make clean       # remove __pycache__ and .pytest_cache
 ```
 
 ---
 
-## NAS deployment (QNAP, Synology, etc.)
+## NAS deployment
 
-For NAS deployments where `make` is not available, use the included `tr-sync.sh` script instead:
+See [deploy/DEPLOY.md](deploy/DEPLOY.md) for the full step-by-step deploy guide.
 
-```bash
-./tr-sync.sh pull      myaccount
-./tr-sync.sh bootstrap myaccount
-./tr-sync.sh up        myaccount
-./tr-sync.sh logs      myaccount
-./tr-sync.sh sync      myaccount          # manual one-shot sync
-./tr-sync.sh backup    myaccount auto     # manual backup (auto mode)
-./tr-sync.sh backup    myaccount monthly 2026-07
-./tr-sync.sh backup    myaccount yearly 2025
-./tr-sync.sh down      myaccount
-```
-
-Internally these run `python -m app <subcommand>` inside the container.
-
-See `ARCHITECTURE.md` for full technical details.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for full technical details.

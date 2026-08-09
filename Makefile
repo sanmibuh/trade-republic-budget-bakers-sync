@@ -1,103 +1,43 @@
-COMPOSE_FILE   ?= docker-compose.yml
-BASE_IMAGE     ?= python-trade-republic
-IMAGE          ?= tr-wallet-sync
+VENV = .venv
+PYTHON = $(VENV)/bin/python
 
-# SERVICE must be passed explicitly, e.g.: make sync SERVICE=service1
-ifndef SERVICE
-  ifneq ($(MAKECMDGOALS),help)
-  ifneq ($(MAKECMDGOALS),build-base)
-  ifneq ($(MAKECMDGOALS),test)
-  ifneq ($(MAKECMDGOALS),clean)
-  $(error SERVICE is required. Usage: make <target> SERVICE=<name>  e.g. make sync SERVICE=service1)
-  endif
-  endif
-  endif
-  endif
-endif
+.PHONY: help test lint clean run-sync run-backup run-bot
 
-DATA_DIR       = ./$(SERVICE)/data
-OUTPUT_DIR     = ./$(SERVICE)/output
-
-.PHONY: help build-base build build-all bootstrap sync \
-        docker-build docker-rebuild docker-bootstrap docker-sync \
-        test clean
-
-# ── Default ────────────────────────────────────────────────────────────────
+# ── Default ─────────────────────────────────────────────────────────────────
 
 help:
 	@echo ""
-	@echo "Usage: make <target> SERVICE=<name> [VARIABLE=value]"
+	@echo "Usage: make <target>"
 	@echo ""
-	@echo "  SERVICE is required for most targets (e.g. SERVICE=service1)"
-	@echo "  Directories are resolved as ./<SERVICE>/data and ./<SERVICE>/output"
+	@echo "Dev targets (local, no Docker):"
+	@echo "  test        Run the test suite with coverage"
+	@echo "  lint        Run ruff linter"
+	@echo "  run-sync    One-shot sync (requires env vars set)"
+	@echo "  run-backup  One-shot backup auto (requires env vars set)"
+	@echo "  run-bot     Start the Telegram bot (requires env vars set)"
+	@echo "  clean       Remove __pycache__ and .pytest_cache"
 	@echo ""
-	@echo "Docker Compose targets  (uses COMPOSE_FILE=$(COMPOSE_FILE))"
-	@echo "  build-base      Build the base image (python + git + pip install) -- run when requirements.txt or Python version changes"
-	@echo "  build           Build the app image (cron + docker CLI + app code) -- run after code changes"
-	@echo "  build-all       Rebuild base + app both from scratch (no cache) -- full clean build"
-	@echo "  bootstrap       Run interactively to complete first-time 2FA login"
-	@echo "  sync            Run a one-shot sync"
-	@echo ""
-	@echo "Plain Docker targets    (uses IMAGE=$(IMAGE))"
-	@echo "  docker-build    Build the image with docker build (uses cache)"
-	@echo "  docker-rebuild  Build the image with docker build (no cache)"
-	@echo "  docker-bootstrap  Run interactively to complete first-time 2FA login"
-	@echo "  docker-sync     Run a one-shot sync"
-	@echo ""
-	@echo "Dev targets"
-	@echo "  test            Run the test suite"
-	@echo "  clean           Remove __pycache__ and .pytest_cache"
+	@echo "Env vars must be set before running sync/backup/bot targets."
+	@echo "Example: export \$$(cat .env | xargs) && make run-sync"
 	@echo ""
 
-# ── Docker Compose ──────────────────────────────────────────────────────────
-
-build-base:
-	docker build -f docker/base/Dockerfile -t $(BASE_IMAGE):latest .
-
-build:
-	docker compose -f $(COMPOSE_FILE) build $(SERVICE)
-
-build-all:
-	docker build --no-cache -f docker/base/Dockerfile -t $(BASE_IMAGE):latest .
-	docker compose -f $(COMPOSE_FILE) build --no-cache $(SERVICE)
-
-bootstrap:
-	@mkdir -p $(DATA_DIR) $(OUTPUT_DIR)
-	docker compose -f $(COMPOSE_FILE) run --rm -it $(SERVICE)
-
-sync:
-	@mkdir -p $(DATA_DIR) $(OUTPUT_DIR)
-	docker compose -f $(COMPOSE_FILE) run --rm $(SERVICE)
-
-# ── Plain Docker ────────────────────────────────────────────────────────────
-
-docker-build:
-	docker build -t $(IMAGE) .
-
-docker-rebuild:
-	docker build --no-cache -t $(IMAGE) .
-
-docker-bootstrap:
-	@mkdir -p $(DATA_DIR) $(OUTPUT_DIR)
-	docker run --rm -it \
-		--env-file .env \
-		-v "$(PWD)/$(DATA_DIR):/app/data" \
-		-v "$(PWD)/$(OUTPUT_DIR):/app/output" \
-		$(IMAGE)
-
-docker-sync:
-	@mkdir -p $(DATA_DIR) $(OUTPUT_DIR)
-	docker run --rm \
-		--env-file .env \
-		-v "$(PWD)/$(DATA_DIR):/app/data" \
-		-v "$(PWD)/$(OUTPUT_DIR):/app/output" \
-		$(IMAGE)
-
-# ── Dev ─────────────────────────────────────────────────────────────────────
+# ── Dev ──────────────────────────────────────────────────────────────────────
 
 test:
-	.venv/bin/pytest tests/ -v
+	$(PYTHON) -m pytest --cov=app --cov-report=term-missing
+
+lint:
+	$(PYTHON) -m ruff check .
+
+run-sync:
+	$(PYTHON) -m app sync
+
+run-backup:
+	$(PYTHON) -m app backup auto
+
+run-bot:
+	$(PYTHON) -m app bot
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	rm -rf .pytest_cache
+	rm -rf .pytest_cache .coverage coverage.json
