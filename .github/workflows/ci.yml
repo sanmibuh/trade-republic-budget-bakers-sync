@@ -8,6 +8,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@v4
@@ -21,4 +23,48 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run tests with coverage
-        run: python -m pytest --cov=app --cov-fail-under=97 --cov-report=term-missing
+        id: tests
+        run: |
+          python -m pytest --cov=app --cov-fail-under=97 --cov-report=term-missing \
+            --cov-report=json 2>&1 | tee test-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Post coverage comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TOTAL=$(python -c "import json; d=json.load(open('coverage.json')); print(d['totals']['percent_covered_display'])")
+          PASSED=$(grep -oP '\d+ passed' test-output.txt || echo "0 passed")
+          FAILED=$(grep -oP '\d+ failed' test-output.txt || echo "")
+          EXIT_CODE="${{ steps.tests.outputs.exit_code }}"
+
+          if [ "$EXIT_CODE" = "0" ]; then
+            STATUS="✅ All checks passed"
+          else
+            STATUS="❌ Checks failed"
+          fi
+
+          BODY="## CI Results
+
+          $STATUS
+
+          | | |
+          |---|---|
+          | Tests | $PASSED${FAILED:+ · $FAILED} |
+          | Coverage | ${TOTAL}% |
+
+          <details>
+          <summary>Coverage detail</summary>
+
+          \`\`\`
+          $(grep -A 9999 'Name' test-output.txt | grep -v '^$' | head -40)
+          \`\`\`
+
+          </details>"
+
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body "$BODY" \
+            --edit-last 2>/dev/null || \
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body "$BODY"
