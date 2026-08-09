@@ -443,6 +443,7 @@ def _container_has_backup_schedule(container_name: str) -> bool:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         if result.returncode != 0:
             log.warning("docker inspect failed for %s: %s", container_name, result.stderr.strip())
@@ -469,6 +470,7 @@ def _docker_exec_silent(container_name: str, app_args: list[str]) -> None:
             capture_output=True,
             text=True,
             timeout=_EXEC_TIMEOUT,
+            check=False,
         )
         if result.returncode == 0:
             log.info("docker exec finished successfully for container %s", container_name)

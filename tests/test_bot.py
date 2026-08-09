@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -13,7 +13,6 @@ from app.bot import (
     _container_has_backup_schedule,
     _docker_exec_silent,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -509,7 +508,7 @@ def test_launch_sync_sends_ack_and_starts_thread():
     inst = bot._cfg.instances["david"]
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot._docker_exec_silent") as mock_exec,
+        patch("app.bot._docker_exec_silent"),
         patch("app.bot.threading.Thread") as mock_thread,
     ):
         mock_thread.return_value.start = MagicMock()

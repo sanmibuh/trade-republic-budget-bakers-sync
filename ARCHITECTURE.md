@@ -160,9 +160,27 @@ make build SERVICE=<name>
 
 ---
 
+## Test-Driven Development (TDD)
+
+All new features and bug fixes follow a TDD workflow:
+
+1. **Write the test first** — define the expected behaviour before writing any implementation.
+2. **Watch it fail** — confirm the test fails for the right reason (not a setup error).
+3. **Implement** — write the minimum code to make the test pass.
+4. **Refactor** — clean up with tests as the safety net.
+
+This ensures:
+- Every code path has a test that actually caught a real failure at some point.
+- Tests document intent, not just current behaviour.
+- Coverage stays meaningful — no tests written after the fact just to hit a number.
+
+When working with an AI assistant: **always ask for tests before implementation**, or provide the tests yourself and ask the assistant to make them pass.
+
+---
+
 ## Test suite
 
-262 tests across 9 files — all passing.
+322 tests across 10 files — all passing.
 
 ```
 tests/test_config.py          # _required_env, _positive_int_env, _read_label_ids, Config.from_env
