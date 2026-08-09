@@ -15,7 +15,7 @@ import sys
 
 import click
 
-from app.logging_setup import configure_logging
+from app.logging_setup import configure_logging, setup_logging
 
 
 @click.group()
@@ -28,7 +28,6 @@ def sync() -> None:
     """Run a one-shot Trade Republic → Wallet sync."""
     from app.main import run
 
-    configure_logging()
     sys.exit(run())
 
 
@@ -70,8 +69,8 @@ def backup(mode: str, param: str | None) -> None:
     from app.notifier import Notifier
     from app.wallet_client import WalletClient
 
-    configure_logging()
     cfg = BackupConfig.from_env()
+    setup_logging(cfg.data_dir)
     client = WalletClient(api_key=cfg.wallet_api_key)
     notifier = Notifier(
         bot_token=cfg.telegram_bot_token,
@@ -124,7 +123,6 @@ def bot() -> None:
       /backup_yearly     [YYYY]
     """
     from app.bot import run
-    from app.logging_setup import configure_logging
 
     configure_logging()
     run()

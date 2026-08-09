@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Wallet backup logic.
 
 Modes:
@@ -11,6 +9,7 @@ Modes:
   yearly  [YYYY]    Explicit yearly backup. Default: previous calendar year.
                     Always executes; removes covered monthly files afterwards.
 """
+from __future__ import annotations
 
 import calendar
 import json

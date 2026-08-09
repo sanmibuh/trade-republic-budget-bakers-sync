@@ -107,7 +107,7 @@ class WalletClient:
                 results.extend(data)
                 break
             if isinstance(data, dict):
-                offset = self._collect_page(data, results)
+                offset = self._collect_page(resource, data, results)
                 if not offset:
                     break
             else:
@@ -117,9 +117,9 @@ class WalletClient:
         return results
 
     @staticmethod
-    def _collect_page(data: dict, results: list[dict]) -> int | None:
+    def _collect_page(resource: str, data: dict, results: list[dict]) -> int | None:
         """Append items from a paginated dict response into results. Returns next offset or None."""
-        page = data.get("data", [])
+        page = data.get(resource, [])
         if isinstance(page, list):
             results.extend(page)
         else:
@@ -139,11 +139,14 @@ class WalletClient:
         return self._get_all("labels")
 
     def get_records(self, date_from: str, date_to: str) -> list[dict]:
-        """Fetch all records within [date_from, date_to] (inclusive, YYYY-MM-DD)."""
+        """Fetch all records within [date_from, date_to] (inclusive, YYYY-MM-DD).
+
+        The API supports repeated `recordDate` params with AND logic:
+        recordDate=gte.<from>&recordDate=lte.<to>
+        """
         return self._get_all(
             "records",
             params={
-                "recordDate": f"gte.{date_from}",
-                "recordDateTo": f"lte.{date_to}",
+                "recordDate": [f"gte.{date_from}", f"lte.{date_to}"],
             },
         )
