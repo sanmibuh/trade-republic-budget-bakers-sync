@@ -4,13 +4,6 @@ Pending ideas and improvements, roughly ordered by impact. No fixed dates or pri
 
 ---
 
-## Sync
-
-### Reduce notification noise on sync
-Every sync run sends two separate messages: a _"fetched N events"_ summary and a _"success, saved M"_ confirmation. Merge them into a single message sent at the end, combining both period, fetch counts, and save results.
-
----
-
 ## Bot
 
 ### 2FA via Telegram bot

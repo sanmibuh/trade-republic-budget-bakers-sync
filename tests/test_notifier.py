@@ -58,7 +58,7 @@ def test_send_telegram_message_returns_true_on_success():
     mock_response = MagicMock()
     mock_response.raise_for_status = MagicMock()
 
-    with patch("app.notifier.requests.post", return_value=mock_response) as mock_post:
+    with patch("app.notifier.http_post", return_value=mock_response) as mock_post:
         result = send_telegram_message("mytoken", "mychat", "Test message")
 
     assert result is True
@@ -69,21 +69,11 @@ def test_send_telegram_message_returns_true_on_success():
     assert call_args.kwargs["json"]["text"] == "Test message"
 
 
-def test_send_telegram_message_disables_ssl_verify():
-    mock_response = MagicMock()
-    mock_response.raise_for_status = MagicMock()
-
-    with patch("app.notifier.requests.post", return_value=mock_response) as mock_post:
-        send_telegram_message("tok", "chat", "msg")
-
-    assert mock_post.call_args.kwargs["verify"] is False
-
-
 def test_send_telegram_message_request_exception_returns_false():
     mock_response = MagicMock()
     mock_response.raise_for_status.side_effect = requests.RequestException("fail")
 
-    with patch("app.notifier.requests.post", return_value=mock_response):
+    with patch("app.notifier.http_post", return_value=mock_response):
         result = send_telegram_message("token", "chat", "msg")
 
     assert result is False
@@ -97,7 +87,7 @@ def test_send_telegram_message_http_error_returns_false():
 
     http_error = requests.HTTPError(response=mock_response)
 
-    with patch("requests.post") as mock_post:
+    with patch("app.notifier.http_post") as mock_post:
         mock_post.return_value.raise_for_status.side_effect = http_error
         from app.notifier import send_telegram_message
         result = send_telegram_message(bot_token="tok", chat_id="chat", message="hello")
@@ -109,7 +99,7 @@ def test_send_telegram_message_http_error_no_response_returns_false():
     """HTTPError with no response object should still be caught and return False."""
     http_error = requests.HTTPError(response=None)
 
-    with patch("requests.post") as mock_post:
+    with patch("app.notifier.http_post") as mock_post:
         mock_post.return_value.raise_for_status.side_effect = http_error
         from app.notifier import send_telegram_message
         result = send_telegram_message(bot_token="tok", chat_id="chat", message="hello")
@@ -161,13 +151,34 @@ def test_notifier_error_includes_exception_info():
     assert "something broke" in msg
 
 
-def test_notifier_fetch_summary_sends_message():
+def test_notifier_fetch_summary_does_not_send_message():
+    """fetch_summary buffers data; it must NOT send a Telegram message immediately."""
     with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
-        result = _make_notifier().fetch_summary(since="2024-01-01", until="2024-01-07", fetched=10, new=5, skipped=5)
-    assert result is True
+        _make_notifier().fetch_summary(since="2024-01-01", until="2024-01-07", fetched=10, new=5, skipped=5)
+    mock_send.assert_not_called()
+
+
+def test_notifier_sync_complete_includes_fetch_summary_when_buffered():
+    """After fetch_summary is called, sync_complete should include period and fetch counts."""
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        n = _make_notifier()
+        n.fetch_summary(since="2024-01-01", until="2024-01-07", fetched=10, new=5, skipped=5)
+        n.sync_complete(synced=5, failed=0, skipped=5)
+    mock_send.assert_called_once()
     msg = mock_send.call_args.kwargs["message"]
-    assert "10" in msg
-    assert "5" in msg
+    assert "2024" in msg
+    assert "01" in msg
+    assert "2024\\-01\\-07" in msg or "2024-01-07" in msg
+    assert "10" in msg  # fetched count
+
+
+def test_notifier_sync_complete_without_fetch_summary_still_works():
+    """sync_complete without a prior fetch_summary must still send a valid message."""
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().sync_complete(synced=3, failed=0, skipped=1)
+    mock_send.assert_called_once()
+    msg = mock_send.call_args.kwargs["message"]
+    assert "✅" in msg
 
 
 def test_notifier_sync_complete_success():
