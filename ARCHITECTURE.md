@@ -102,11 +102,11 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `entrypoint.sh` and `tr-sync.sh` both use `python -m app <subcommand>` — single consistent interface.
 
 ### Scheduled daemon
-- `docker/app/entrypoint.sh`: supports two independent cron jobs:
-  - `SYNC_SCHEDULE` — registers the sync job (`python -m app sync`)
-  - `BACKUP_SCHEDULE` — registers the backup job (`python -m app backup auto`)
-  - Both optional and independent; if neither is set, runs one-shot sync and exits.
-  - `CMD=backup [mode] [param]` — runs a one-shot backup and exits (used by `tr-sync.sh backup`).
+- `docker/app/entrypoint.sh`: behaviour controlled by `MODE` env var:
+  - `MODE=sync` — registers `SYNC_SCHEDULE` cron job (`python -m app sync`). One-shot if `SYNC_SCHEDULE` not set.
+  - `MODE=backup` — registers `BACKUP_SCHEDULE` cron job (`python -m app backup auto`). One-shot if `BACKUP_SCHEDULE` not set.
+  - `MODE=bot` — starts the Telegram bot (`python -m app bot`).
+  - `CMD=<command>` — overrides all modes, runs a one-shot command and exits.
 - `TZ` env var must be set in the container for cron to interpret hours in local time (default is UTC).
 
 ### Backup strategy
@@ -115,7 +115,13 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - Files are plain JSON, permanent, never purged (unlike `sync.db` which purges after 60 days).
 - Yearly cleanup removes the 12 monthly files whose period is covered by the yearly backup.
 
-### BudgetBakers API — GET (backup)
+### Telegram bot
+- `app/bot.py`: long-polling bot dispatching commands to Docker containers via `docker exec`.
+- `BotConfig` reads `INSTANCES` (sync instances), `CONTAINER_PREFIX`, and `BACKUP_SERVICE` from env.
+- Container naming: sync → `{prefix}-sync-{name}-1`, backup → `{prefix}-{backup_service}-1`.
+- Backup commands (`/backup_monthly`, `/backup_yearly`) execute directly on the backup container — no instance picker.
+- Sync commands (`/sync`) show an inline keyboard to pick the instance.
+- The Docker socket (`/var/run/docker.sock`) is required for `docker exec`.
 - Base URL: `{base_url}/v1/api/{resource}`
 - Pagination via `nextOffset` in the response dict; plain list responses have no pagination.
 - `_get_all()` handles both response shapes: plain `list` (no pagination) and `{"data": [...], "nextOffset": N}`.

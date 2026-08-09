@@ -106,9 +106,14 @@ def bot() -> None:
     Required environment variables:
       TELEGRAM_BOT_TOKEN    Bot token from BotFather.
       TELEGRAM_CHAT_ID      Authorized chat ID — only this chat can issue commands.
-      INSTANCES             Comma-separated list of instance names (e.g. "david,eli").
-      CONTAINER_PREFIX      Docker container name prefix (e.g. "trade-republic-budget-bakers-sync").
-      BACKUP_ENABLED_<NAME> Set to "true" to allow backup commands for that instance.
+      INSTANCES             Comma-separated list of sync instance names (e.g. "david,eli").
+      CONTAINER_PREFIX      Docker container name prefix (directory name, lowercased).
+      BACKUP_SERVICE        Optional. Backup service name (default: "backup"). Set to empty to disable.
+
+    \b
+    Container naming convention:
+      Sync:   {CONTAINER_PREFIX}-sync-{instance}-1
+      Backup: {CONTAINER_PREFIX}-{BACKUP_SERVICE}-1
 
     \b
     Supported Telegram commands:

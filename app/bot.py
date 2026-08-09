@@ -6,26 +6,33 @@ Usage (via CLI):
 Environment variables:
     TELEGRAM_BOT_TOKEN  Required. Bot token from BotFather.
     TELEGRAM_CHAT_ID    Required. Authorized chat ID (only this chat can issue commands).
-    INSTANCES           Required. Comma-separated list of instance names (e.g. "david,eli").
+    INSTANCES           Required. Comma-separated list of sync instance names (e.g. "david,eli").
     CONTAINER_PREFIX    Required. Docker container name prefix (e.g. "trade-republic-budget-bakers-sync").
+    BACKUP_SERVICE      Optional. Name of the backup service (default: "backup").
+                        Set to empty string to disable backup commands.
 
-Backup availability is determined automatically by inspecting whether the target container has
-BACKUP_SCHEDULE defined in its environment (same variable used by entrypoint.sh to register the
-cron job). No extra configuration needed in the bot service.
+Container naming convention:
+    Sync instances:  {CONTAINER_PREFIX}-sync-{instance}-1   (e.g. "myproject-sync-david-1")
+    Backup service:  {CONTAINER_PREFIX}-{BACKUP_SERVICE}-1  (e.g. "myproject-backup-1")
 
 Commands (registered via setMyCommands for Telegram autocomplete):
     /sync                              Force a Trade Republic sync — choose instance via inline buttons.
-    /backup_monthly [YYYY-MM]          Force monthly backup — choose instance via inline buttons.
-    /backup_yearly  [YYYY]             Force yearly backup  — choose instance via inline buttons.
-    /status                            Show configured instances and their capabilities.
+    /backup_monthly [YYYY-MM]          Force monthly backup (runs on the backup service).
+    /backup_yearly  [YYYY]             Force yearly backup  (runs on the backup service).
+    /status                            Show configured instances and backup service availability.
     /help                              Show available commands.
 
-Interaction flow:
-    1. User sends a command (e.g. /sync or /backup_monthly 2026-07).
+Interaction flow for /sync:
+    1. User sends /sync.
     2. Bot replies with inline keyboard buttons, one per configured instance.
     3. User taps an instance button.
-    4. Bot sends an ACK ("▶️ Executing ...") and launches docker exec in a background thread.
+    4. Bot sends an ACK ("▶️ Executing sync for David...") and launches docker exec in background.
     5. The container's own Notifier sends the final Telegram result notification when done.
+
+Interaction flow for /backup_monthly / /backup_yearly:
+    1. User sends the command (with optional period param).
+    2. Bot sends an ACK and launches docker exec on the backup service directly.
+    3. The backup container's Notifier sends the result notification.
 """
 from __future__ import annotations
 
@@ -66,7 +73,7 @@ _MODE_UNIT: dict[str, str] = {"monthly": "month", "yearly": "year"}
 @dataclass(frozen=True)
 class InstanceConfig:
     name: str            # human-readable, used in commands (e.g. "david")
-    container_name: str  # Docker container name (e.g. "trade-republic-budget-bakers-sync-david-1")
+    container_name: str  # Docker container name (e.g. "myproject-sync-david-1")
 
 
 @dataclass(frozen=True)
@@ -74,6 +81,7 @@ class BotConfig:
     bot_token: str
     chat_id: str
     instances: dict[str, InstanceConfig] = field(default_factory=dict)
+    backup_container: str | None = None  # None means backup commands are disabled
 
     @classmethod
     def from_env(cls) -> BotConfig:
@@ -94,13 +102,21 @@ class BotConfig:
 
         instances: dict[str, InstanceConfig] = {}
         for name in [n.strip() for n in raw_instances.split(",") if n.strip()]:
-            container_name = f"{prefix}-{name.lower()}-1"
+            container_name = f"{prefix}-sync-{name.lower()}-1"
             instances[name.lower()] = InstanceConfig(
                 name=name,
                 container_name=container_name,
             )
 
-        return cls(bot_token=bot_token, chat_id=chat_id, instances=instances)
+        backup_service = os.environ.get("BACKUP_SERVICE", "backup").strip()
+        backup_container = f"{prefix}-{backup_service}-1" if backup_service else None
+
+        return cls(
+            bot_token=bot_token,
+            chat_id=chat_id,
+            instances=instances,
+            backup_container=backup_container,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -145,11 +161,14 @@ class TelegramBot:
     def _register_commands(self) -> None:
         commands = [
             {"command": "sync",           "description": "Force Trade Republic sync (choose instance)"},
-            {"command": "backup_monthly", "description": "Force monthly backup [YYYY-MM] (choose instance)"},
-            {"command": "backup_yearly",  "description": "Force yearly backup [YYYY] (choose instance)"},
-            {"command": "status",         "description": "Show instances and backup availability"},
+            {"command": "status",         "description": "Show instances and backup service availability"},
             {"command": "help",           "description": "Show available commands"},
         ]
+        if self._cfg.backup_container:
+            commands[1:1] = [
+                {"command": "backup_monthly", "description": "Force monthly backup [YYYY-MM]"},
+                {"command": "backup_yearly",  "description": "Force yearly backup [YYYY]"},
+            ]
         try:
             resp = requests.post(
                 f"{self._api}/setMyCommands",
@@ -247,7 +266,6 @@ class TelegramBot:
 
         cmd = parts[0]
         instance_key = parts[-1].lower()
-        param = parts[1] if len(parts) == 3 else None  # present only for backup commands with a param
 
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
@@ -256,24 +274,25 @@ class TelegramBot:
 
         if cmd == "sync":
             self._launch_sync(inst)
-        elif cmd == "backup_monthly":
-            self._launch_backup(inst, "monthly", param)
-        elif cmd == "backup_yearly":
-            self._launch_backup(inst, "yearly", param)
         else:
             log.warning("Unknown callback cmd: %r", cmd)
 
     # ------------------------------------------------------------------
-    # Command handlers — show instance picker keyboard
+    # Command handlers
     # ------------------------------------------------------------------
 
     def _cmd_help(self, _args: list[str]) -> None:
         lines = [
             "🤖 *Available commands*\n",
-            "/sync — Force Trade Republic sync",
-            "/backup\\_monthly `[YYYY\\-MM]` — Monthly backup \\(default: previous month\\)",
-            "/backup\\_yearly `[YYYY]` — Yearly backup \\(default: previous year\\)",
-            "/status — Show instances and backup availability",
+            "/sync — Force Trade Republic sync \\(choose instance\\)",
+        ]
+        if self._cfg.backup_container:
+            lines += [
+                "/backup\\_monthly `[YYYY\\-MM]` — Monthly backup \\(default: previous month\\)",
+                "/backup\\_yearly `[YYYY]` — Yearly backup \\(default: previous year\\)",
+            ]
+        lines += [
+            "/status — Show instances and backup service",
             "/help — This message",
         ]
         self._send_message("\n".join(lines))
@@ -285,30 +304,48 @@ class TelegramBot:
 
         lines = ["📋 *Instance status*\n"]
         for inst in self._cfg.instances.values():
-            backup_ok = _container_has_backup_schedule(inst.container_name)
-            backup_icon = "✅" if backup_ok else "❌"
             lines.append(
-                f"• *{_esc(inst.name)}*\n"
-                f"  Container: `{_esc(inst.container_name)}`\n"
-                f"  Backup available: {backup_icon}"
+                f"• *{_esc(inst.name)}* — `{_esc(inst.container_name)}`"
             )
+
+        if self._cfg.backup_container:
+            lines.append(f"\n💾 *Backup service*: `{_esc(self._cfg.backup_container)}`")
+        else:
+            lines.append("\n💾 *Backup service*: not configured")
+
         self._send_message("\n".join(lines))
 
     def _cmd_sync(self, _args: list[str]) -> None:
-        buttons = self._instance_buttons("sync", param=None)
+        buttons = self._instance_buttons("sync")
         self._send_message("🔄 *Sync* — Choose instance:", keyboard=buttons)
 
     def _cmd_backup_monthly(self, args: list[str]) -> None:
+        if not self._cfg.backup_container:
+            self._send_message("🚫 Backup service is not configured\\.")
+            return
         param = args[0] if args else None
-        label = f"Monthly backup ({param or 'previous month'})"
-        buttons = self._instance_buttons("backup_monthly", param=param, check_backup=True)
-        self._send_message(f"📦 *{_esc(label)}* — Choose instance:", keyboard=buttons)
+        label = _esc(f"Monthly backup ({param or 'previous month'})")
+        self._send_message(f"📦 *{label}*\\.\\.\\.")
+        app_args = ["backup", "monthly"] + ([param] if param else [])
+        threading.Thread(
+            target=_docker_exec_silent,
+            args=(self._cfg.backup_container, app_args),
+            daemon=True,
+        ).start()
 
     def _cmd_backup_yearly(self, args: list[str]) -> None:
+        if not self._cfg.backup_container:
+            self._send_message("🚫 Backup service is not configured\\.")
+            return
         param = args[0] if args else None
-        label = f"Yearly backup ({param or 'previous year'})"
-        buttons = self._instance_buttons("backup_yearly", param=param, check_backup=True)
-        self._send_message(f"📆 *{_esc(label)}* — Choose instance:", keyboard=buttons)
+        label = _esc(f"Yearly backup ({param or 'previous year'})")
+        self._send_message(f"📆 *{label}*\\.\\.\\.")
+        app_args = ["backup", "yearly"] + ([param] if param else [])
+        threading.Thread(
+            target=_docker_exec_silent,
+            args=(self._cfg.backup_container, app_args),
+            daemon=True,
+        ).start()
 
     # ------------------------------------------------------------------
     # Execution
@@ -322,72 +359,16 @@ class TelegramBot:
             daemon=True,
         ).start()
 
-    def _launch_backup(self, inst: InstanceConfig, mode: str, param: str | None) -> None:
-        if not _container_has_backup_schedule(inst.container_name):
-            self._send_message(
-                f"🚫 *{_esc(inst.name)}* has no `BACKUP_SCHEDULE` configured — "
-                f"backup cron is not registered\\."
-            )
-            return
-        unit = _MODE_UNIT.get(mode, mode)
-        period_label = _esc(param or f"previous {unit}")
-        self._send_message(
-            f"▶️ Executing *backup {_esc(mode)}* \\(`{period_label}`\\) for *{_esc(inst.name)}*\\.\\.\\."
-        )
-        app_args = ["backup", mode] + ([param] if param else [])
-        threading.Thread(
-            target=_docker_exec_silent,
-            args=(inst.container_name, app_args),
-            daemon=True,
-        ).start()
-
     # ------------------------------------------------------------------
     # Keyboard builder
     # ------------------------------------------------------------------
 
-    def _instance_buttons(
-        self,
-        cmd: str,
-        param: str | None,
-        check_backup: bool = False,
-    ) -> list[list[dict]]:
-        """Build an inline keyboard row with one button per instance.
-
-        When check_backup=True, instances without BACKUP_SCHEDULE are shown with a 🚫 prefix
-        and their callback_data is set to a no-op token so tapping them does nothing harmful.
-        The docker inspect calls run concurrently to avoid blocking the polling thread.
-        """
-        # Resolve backup availability in parallel when needed.
-        if check_backup:
-            results: dict[str, bool] = {}
-
-            def _check(name: str, container: str) -> None:
-                results[name] = _container_has_backup_schedule(container)
-
-            threads = [
-                threading.Thread(target=_check, args=(key, inst.container_name), daemon=True)
-                for key, inst in self._cfg.instances.items()
-            ]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join(timeout=12)
-            availability = results
-        else:
-            availability = dict.fromkeys(self._cfg.instances, True)
-
-        buttons = []
-        for key, inst in self._cfg.instances.items():
-            has_backup = availability.get(key, False)
-            if check_backup and not has_backup:
-                # Show the instance as unavailable; noop callback so the tap is acknowledged
-                # but produces no action (handled gracefully in _handle_callback_query).
-                buttons.append({"text": f"🚫 {inst.name}", "callback_data": "noop"})
-            else:
-                data_parts = [cmd, param, inst.name.lower()] if param else [cmd, inst.name.lower()]
-                buttons.append({"text": inst.name, "callback_data": _CB_SEP.join(data_parts)})
-
-        # All instances in a single row; split into rows of 3 if many instances.
+    def _instance_buttons(self, cmd: str) -> list[list[dict]]:
+        """Build an inline keyboard row with one button per sync instance."""
+        buttons = [
+            {"text": inst.name, "callback_data": f"{cmd}{_CB_SEP}{inst.name.lower()}"}
+            for inst in self._cfg.instances.values()
+        ]
         return [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
 
     # ------------------------------------------------------------------
@@ -430,32 +411,6 @@ class TelegramBot:
 # ---------------------------------------------------------------------------
 # Docker helpers
 # ---------------------------------------------------------------------------
-
-def _container_has_backup_schedule(container_name: str) -> bool:
-    """Return True if the container has BACKUP_SCHEDULE set (non-empty) in its environment.
-
-    Uses `docker inspect` via subprocess — requires the Docker socket to be mounted.
-    Returns False if the container is not found or the inspect call fails.
-    """
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "--format", "{{range .Config.Env}}{{.}}\n{{end}}", container_name],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        if result.returncode != 0:
-            log.warning("docker inspect failed for %s: %s", container_name, result.stderr.strip())
-            return False
-        for line in result.stdout.splitlines():
-            if line.startswith("BACKUP_SCHEDULE=") and line[len("BACKUP_SCHEDULE="):].strip():
-                return True
-        return False
-    except Exception as exc:  # noqa: BLE001
-        log.warning("Could not inspect container %s: %s", container_name, exc)
-        return False
-
 
 def _docker_exec_silent(container_name: str, app_args: list[str]) -> None:
     """Run `docker exec <container> python -m app <app_args>` and log the result.

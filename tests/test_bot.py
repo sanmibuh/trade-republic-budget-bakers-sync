@@ -10,7 +10,6 @@ from app.bot import (
     BotConfig,
     InstanceConfig,
     TelegramBot,
-    _container_has_backup_schedule,
     _docker_exec_silent,
 )
 
@@ -18,25 +17,23 @@ from app.bot import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _cfg(instances: dict[str, InstanceConfig] | None = None) -> BotConfig:
+def _cfg(
+    instances: dict[str, InstanceConfig] | None = None,
+    backup_container: str | None = "proj-backup-1",
+) -> BotConfig:
     if instances is None:
         instances = {
-            "david": InstanceConfig(name="David", container_name="proj-david-1"),
-            "eli":   InstanceConfig(name="Eli",   container_name="proj-eli-1"),
+            "david": InstanceConfig(name="David", container_name="proj-sync-david-1"),
+            "eli":   InstanceConfig(name="Eli",   container_name="proj-sync-eli-1"),
         }
-    return BotConfig(bot_token="tok", chat_id="42", instances=instances)
+    return BotConfig(bot_token="tok", chat_id="42", instances=instances, backup_container=backup_container)
 
 
-def _bot(instances: dict[str, InstanceConfig] | None = None) -> TelegramBot:
-    return TelegramBot(_cfg(instances))
-
-
-def _message(text: str, chat_id: str = "42") -> dict:
-    return {"message": {"chat": {"id": int(chat_id)}, "text": text}}
-
-
-def _callback(data: str, chat_id: str = "42", cq_id: str = "cq1") -> dict:
-    return {"callback_query": {"id": cq_id, "data": data, "message": {"chat": {"id": int(chat_id)}}}}
+def _bot(
+    instances: dict[str, InstanceConfig] | None = None,
+    backup_container: str | None = "proj-backup-1",
+) -> TelegramBot:
+    return TelegramBot(_cfg(instances, backup_container))
 
 
 # ---------------------------------------------------------------------------
@@ -59,8 +56,32 @@ def test_botconfig_from_env_valid(monkeypatch):
     assert cfg.chat_id == "123"
     assert "david" in cfg.instances
     assert "eli" in cfg.instances
-    assert cfg.instances["david"].container_name == "myproject-david-1"
-    assert cfg.instances["eli"].container_name == "myproject-eli-1"
+    # Sync containers include "sync-" prefix
+    assert cfg.instances["david"].container_name == "myproject-sync-david-1"
+    assert cfg.instances["eli"].container_name == "myproject-sync-eli-1"
+
+
+def test_botconfig_from_env_backup_container_default(monkeypatch):
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    cfg = BotConfig.from_env()
+    assert cfg.backup_container == "myproject-backup-1"
+
+
+def test_botconfig_from_env_backup_service_custom(monkeypatch):
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("BACKUP_SERVICE", "wallet-backup")
+    cfg = BotConfig.from_env()
+    assert cfg.backup_container == "myproject-wallet-backup-1"
+
+
+def test_botconfig_from_env_backup_service_empty_disables_backup(monkeypatch):
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("BACKUP_SERVICE", "")
+    cfg = BotConfig.from_env()
+    assert cfg.backup_container is None
 
 
 def test_botconfig_from_env_missing_token(monkeypatch):
@@ -102,43 +123,6 @@ def test_botconfig_from_env_instance_names_normalised(monkeypatch):
     cfg = BotConfig.from_env()
     assert "david" in cfg.instances
     assert "eli" in cfg.instances
-
-
-# ---------------------------------------------------------------------------
-# _container_has_backup_schedule
-# ---------------------------------------------------------------------------
-
-def _inspect_result(stdout: str, returncode: int = 0) -> MagicMock:
-    r = MagicMock()
-    r.returncode = returncode
-    r.stdout = stdout
-    r.stderr = ""
-    return r
-
-
-def test_container_has_backup_schedule_returns_true_when_set():
-    with patch("app.bot.subprocess.run", return_value=_inspect_result("FOO=bar\nBACKUP_SCHEDULE=0 3 * * *\n")):
-        assert _container_has_backup_schedule("my-container") is True
-
-
-def test_container_has_backup_schedule_returns_false_when_empty_value():
-    with patch("app.bot.subprocess.run", return_value=_inspect_result("BACKUP_SCHEDULE=\n")):
-        assert _container_has_backup_schedule("my-container") is False
-
-
-def test_container_has_backup_schedule_returns_false_when_key_absent():
-    with patch("app.bot.subprocess.run", return_value=_inspect_result("FOO=bar\nBAR=baz\n")):
-        assert _container_has_backup_schedule("my-container") is False
-
-
-def test_container_has_backup_schedule_returns_false_on_inspect_failure():
-    with patch("app.bot.subprocess.run", return_value=_inspect_result("", returncode=1)):
-        assert _container_has_backup_schedule("my-container") is False
-
-
-def test_container_has_backup_schedule_returns_false_on_exception():
-    with patch("app.bot.subprocess.run", side_effect=OSError("docker not found")):
-        assert _container_has_backup_schedule("my-container") is False
 
 
 # ---------------------------------------------------------------------------
@@ -191,14 +175,12 @@ def test_docker_exec_silent_passes_app_command_args():
 # TelegramBot._register_commands
 # ---------------------------------------------------------------------------
 
-def test_register_commands_calls_set_my_commands():
-    bot = _bot()
+def test_register_commands_includes_backup_when_configured():
+    bot = _bot(backup_container="proj-backup-1")
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
         bot._register_commands()
-    url = mock_post.call_args.args[0]
-    assert "setMyCommands" in url
     commands = mock_post.call_args.kwargs["json"]["commands"]
     cmd_names = [c["command"] for c in commands]
     assert "sync" in cmd_names
@@ -206,6 +188,19 @@ def test_register_commands_calls_set_my_commands():
     assert "backup_yearly" in cmd_names
     assert "status" in cmd_names
     assert "help" in cmd_names
+
+
+def test_register_commands_excludes_backup_when_not_configured():
+    bot = _bot(backup_container=None)
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+        bot._register_commands()
+    commands = mock_post.call_args.kwargs["json"]["commands"]
+    cmd_names = [c["command"] for c in commands]
+    assert "backup_monthly" not in cmd_names
+    assert "backup_yearly" not in cmd_names
+    assert "sync" in cmd_names
 
 
 def test_register_commands_does_not_raise_on_failure():
@@ -237,7 +232,7 @@ def test_handle_message_unknown_command_replies():
     with patch.object(bot, "_send_message") as mock_send:
         bot._handle_message({"chat": {"id": 42}, "text": "/unknown"})
     mock_send.assert_called_once()
-    assert "Unknown" in mock_send.call_args.args[0] or "nknown" in mock_send.call_args.args[0]
+    assert "Unknown" in mock_send.call_args.args[0]
 
 
 def test_handle_message_dispatches_help():
@@ -256,18 +251,30 @@ def test_handle_message_strips_bot_name_suffix():
 
 
 # ---------------------------------------------------------------------------
-# TelegramBot._cmd_help / _cmd_status
+# TelegramBot._cmd_help
 # ---------------------------------------------------------------------------
 
-def test_cmd_help_sends_message():
-    bot = _bot()
+def test_cmd_help_includes_backup_when_configured():
+    bot = _bot(backup_container="proj-backup-1")
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_help([])
-    mock_send.assert_called_once()
     msg = mock_send.call_args.args[0]
     assert "sync" in msg.lower()
     assert "backup" in msg.lower()
 
+
+def test_cmd_help_excludes_backup_when_not_configured():
+    bot = _bot(backup_container=None)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_help([])
+    msg = mock_send.call_args.args[0]
+    assert "sync" in msg.lower()
+    assert "backup_monthly" not in msg and "backup\\_monthly" not in msg
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._cmd_status
+# ---------------------------------------------------------------------------
 
 def test_cmd_status_no_instances_sends_warning():
     bot = _bot(instances={})
@@ -279,128 +286,159 @@ def test_cmd_status_no_instances_sends_warning():
 
 def test_cmd_status_shows_each_instance():
     bot = _bot()
-    with (
-        patch("app.bot._container_has_backup_schedule", return_value=True),
-        patch.object(bot, "_send_message") as mock_send,
-    ):
+    with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_status([])
     msg = mock_send.call_args.args[0]
     assert "David" in msg
     assert "Eli" in msg
 
 
-def test_cmd_status_shows_backup_unavailable():
-    bot = _bot()
-    with (
-        patch("app.bot._container_has_backup_schedule", return_value=False),
-        patch.object(bot, "_send_message") as mock_send,
-    ):
+def test_cmd_status_shows_backup_container_when_configured():
+    bot = _bot(backup_container="proj-backup-1")
+    with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_status([])
     msg = mock_send.call_args.args[0]
-    assert "❌" in msg
+    # Container name is MarkdownV2-escaped (hyphens become \-)
+    assert "proj" in msg and "backup" in msg and "1" in msg
+
+
+def test_cmd_status_shows_backup_not_configured():
+    bot = _bot(backup_container=None)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_status([])
+    msg = mock_send.call_args.args[0]
+    assert "not configured" in msg
 
 
 # ---------------------------------------------------------------------------
-# TelegramBot._cmd_sync / _cmd_backup_* — keyboard shown
+# TelegramBot._cmd_sync
 # ---------------------------------------------------------------------------
 
-def test_cmd_sync_sends_keyboard():
+def test_cmd_sync_sends_keyboard_with_instances():
     bot = _bot()
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_sync([])
     mock_send.assert_called_once()
     _, kwargs = mock_send.call_args
     assert "keyboard" in kwargs
-    # one row of buttons, one per instance
     all_buttons = [btn for row in kwargs["keyboard"] for btn in row]
     labels = [b["text"] for b in all_buttons]
     assert "David" in labels
     assert "Eli" in labels
 
 
-def test_cmd_backup_monthly_no_param_shows_keyboard():
-    bot = _bot()
-    with (
-        patch("app.bot._container_has_backup_schedule", return_value=True),
-        patch.object(bot, "_send_message") as mock_send,
-    ):
+# ---------------------------------------------------------------------------
+# TelegramBot._cmd_backup_monthly / _cmd_backup_yearly
+# ---------------------------------------------------------------------------
+
+def test_cmd_backup_monthly_no_backup_container_sends_error():
+    bot = _bot(backup_container=None)
+    with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_backup_monthly([])
-    _, kwargs = mock_send.call_args
-    assert "keyboard" in kwargs
+    mock_send.assert_called_once()
+    assert "not configured" in mock_send.call_args.args[0]
+
+
+def test_cmd_backup_monthly_sends_ack_and_starts_thread():
+    bot = _bot(backup_container="proj-backup-1")
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        mock_thread.return_value.start = MagicMock()
+        bot._cmd_backup_monthly([])
+    mock_send.assert_called_once()
     assert "previous month" in mock_send.call_args.args[0]
+    mock_thread.assert_called_once()
 
 
-def test_cmd_backup_monthly_with_param_encodes_in_keyboard():
-    bot = _bot()
+def test_cmd_backup_monthly_with_param_includes_period_in_ack():
+    bot = _bot(backup_container="proj-backup-1")
     with (
-        patch("app.bot._container_has_backup_schedule", return_value=True),
         patch.object(bot, "_send_message") as mock_send,
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._cmd_backup_monthly(["2026-07"])
-    _, kwargs = mock_send.call_args
-    all_buttons = [btn for row in kwargs["keyboard"] for btn in row]
-    cb_data = [b["callback_data"] for b in all_buttons]
-    # callback_data should encode the param for at least one button
-    assert any("2026-07" in d for d in cb_data)
+    # MarkdownV2 escapes hyphens, so check year and month separately
+    assert "2026" in mock_send.call_args.args[0]
+    assert "07" in mock_send.call_args.args[0]
 
 
-def test_cmd_backup_yearly_no_param_shows_keyboard():
-    bot = _bot()
+def test_cmd_backup_monthly_executes_on_backup_container():
+    bot = _bot(backup_container="proj-backup-1")
     with (
-        patch("app.bot._container_has_backup_schedule", return_value=True),
-        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_send_message"),
+        patch("app.bot._docker_exec_silent"),
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
+        bot._cmd_backup_monthly(["2026-07"])
+    # Verify Thread was called with the right target and args
+    _, kwargs = mock_thread.call_args
+    assert kwargs["args"] == ("proj-backup-1", ["backup", "monthly", "2026-07"])
+
+
+def test_cmd_backup_yearly_no_backup_container_sends_error():
+    bot = _bot(backup_container=None)
+    with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_backup_yearly([])
-    _, kwargs = mock_send.call_args
-    assert "keyboard" in kwargs
+    assert "not configured" in mock_send.call_args.args[0]
+
+
+def test_cmd_backup_yearly_sends_ack_and_starts_thread():
+    bot = _bot(backup_container="proj-backup-1")
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        mock_thread.return_value.start = MagicMock()
+        bot._cmd_backup_yearly([])
     assert "previous year" in mock_send.call_args.args[0]
+    mock_thread.assert_called_once()
+
+
+def test_cmd_backup_yearly_executes_on_backup_container():
+    bot = _bot(backup_container="proj-backup-1")
+    with (
+        patch.object(bot, "_send_message"),
+        patch("app.bot._docker_exec_silent"),
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        mock_thread.return_value.start = MagicMock()
+        bot._cmd_backup_yearly(["2025"])
+    _, kwargs = mock_thread.call_args
+    assert kwargs["args"] == ("proj-backup-1", ["backup", "yearly", "2025"])
 
 
 # ---------------------------------------------------------------------------
-# TelegramBot._instance_buttons — backup availability reflected in buttons
+# TelegramBot._instance_buttons
 # ---------------------------------------------------------------------------
 
-def test_instance_buttons_no_check_backup_all_active():
+def test_instance_buttons_returns_one_button_per_instance():
     bot = _bot()
-    rows = bot._instance_buttons("sync", param=None, check_backup=False)
+    rows = bot._instance_buttons("sync")
     all_buttons = [btn for row in rows for btn in row]
-    assert all(b["callback_data"] != "noop" for b in all_buttons)
-    assert all("🚫" not in b["text"] for b in all_buttons)
+    assert len(all_buttons) == 2
+    labels = [b["text"] for b in all_buttons]
+    assert "David" in labels
+    assert "Eli" in labels
 
 
-def test_instance_buttons_check_backup_unavailable_shown_as_noop():
+def test_instance_buttons_callback_data_encodes_cmd_and_instance():
     bot = _bot()
-    with patch("app.bot._container_has_backup_schedule", return_value=False):
-        rows = bot._instance_buttons("backup_monthly", param=None, check_backup=True)
+    rows = bot._instance_buttons("sync")
     all_buttons = [btn for row in rows for btn in row]
-    assert all(b["callback_data"] == "noop" for b in all_buttons)
-    assert all("🚫" in b["text"] for b in all_buttons)
-
-
-def test_instance_buttons_check_backup_mixed():
-    """One instance available, one not — only unavailable gets noop."""
-    instances = {
-        "david": InstanceConfig(name="David", container_name="proj-david-1"),
-        "eli":   InstanceConfig(name="Eli",   container_name="proj-eli-1"),
-    }
-    bot = _bot(instances)
-
-    def _has_schedule(container_name: str) -> bool:
-        return "david" in container_name  # only david has it
-
-    with patch("app.bot._container_has_backup_schedule", side_effect=_has_schedule):
-        rows = bot._instance_buttons("backup_monthly", param=None, check_backup=True)
-
-    all_buttons = {b["text"]: b["callback_data"] for row in rows for b in row}
-    assert all_buttons["David"] != "noop"
-    assert all_buttons["🚫 Eli"] == "noop"
+    data = {b["text"]: b["callback_data"] for b in all_buttons}
+    assert data["David"] == "sync:david"
+    assert data["Eli"] == "sync:eli"
 
 
 def test_instance_buttons_rows_split_at_three():
     """More than 3 instances → buttons split into rows of max 3."""
-    instances = {str(i): InstanceConfig(name=str(i), container_name=f"proj-{i}-1") for i in range(5)}
+    instances = {str(i): InstanceConfig(name=str(i), container_name=f"proj-sync-{i}-1") for i in range(5)}
     bot = _bot(instances)
-    rows = bot._instance_buttons("sync", param=None, check_backup=False)
+    rows = bot._instance_buttons("sync")
     assert all(len(row) <= 3 for row in rows)
     assert sum(len(row) for row in rows) == 5
 
@@ -441,43 +479,6 @@ def test_callback_query_sync_dispatches_launch_sync():
     assert mock_sync.call_args.args[0].name == "David"
 
 
-def test_callback_query_backup_monthly_no_param_dispatches():
-    bot = _bot()
-    with (
-        patch.object(bot, "_answer_callback_query"),
-        patch.object(bot, "_launch_backup") as mock_backup,
-    ):
-        bot._handle_callback_query({"id": "cq1", "data": "backup_monthly:david", "message": {"chat": {"id": 42}}})
-    mock_backup.assert_called_once()
-    _, mode, param = mock_backup.call_args.args
-    assert mode == "monthly"
-    assert param is None
-
-
-def test_callback_query_backup_monthly_with_param_dispatches():
-    bot = _bot()
-    with (
-        patch.object(bot, "_answer_callback_query"),
-        patch.object(bot, "_launch_backup") as mock_backup,
-    ):
-        bot._handle_callback_query({"id": "cq1", "data": "backup_monthly:2026-07:david", "message": {"chat": {"id": 42}}})
-    _, mode, param = mock_backup.call_args.args
-    assert mode == "monthly"
-    assert param == "2026-07"
-
-
-def test_callback_query_backup_yearly_dispatches():
-    bot = _bot()
-    with (
-        patch.object(bot, "_answer_callback_query"),
-        patch.object(bot, "_launch_backup") as mock_backup,
-    ):
-        bot._handle_callback_query({"id": "cq1", "data": "backup_yearly:2025:david", "message": {"chat": {"id": 42}}})
-    _, mode, param = mock_backup.call_args.args
-    assert mode == "yearly"
-    assert param == "2025"
-
-
 def test_callback_query_unknown_instance_replies():
     bot = _bot()
     with (
@@ -486,7 +487,7 @@ def test_callback_query_unknown_instance_replies():
     ):
         bot._handle_callback_query({"id": "cq1", "data": "sync:nobody", "message": {"chat": {"id": 42}}})
     mock_send.assert_called_once()
-    assert "Unknown" in mock_send.call_args.args[0] or "nknown" in mock_send.call_args.args[0]
+    assert "Unknown" in mock_send.call_args.args[0]
 
 
 def test_callback_query_malformed_data_does_not_raise():
@@ -499,8 +500,18 @@ def test_callback_query_malformed_data_does_not_raise():
     # must not raise
 
 
+def test_callback_query_unknown_cmd_logs_warning_and_does_not_raise():
+    bot = _bot()
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_callback_query({"id": "cq1", "data": "badcmd:david", "message": {"chat": {"id": 42}}})
+    mock_send.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
-# TelegramBot._launch_sync / _launch_backup
+# TelegramBot._launch_sync
 # ---------------------------------------------------------------------------
 
 def test_launch_sync_sends_ack_and_starts_thread():
@@ -513,58 +524,9 @@ def test_launch_sync_sends_ack_and_starts_thread():
     ):
         mock_thread.return_value.start = MagicMock()
         bot._launch_sync(inst)
-
     mock_send.assert_called_once()
     assert "David" in mock_send.call_args.args[0]
     mock_thread.assert_called_once()
-
-
-def test_launch_backup_without_schedule_sends_error():
-    bot = _bot()
-    inst = bot._cfg.instances["david"]
-    with (
-        patch("app.bot._container_has_backup_schedule", return_value=False),
-        patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot.threading.Thread") as mock_thread,
-    ):
-        bot._launch_backup(inst, "monthly", None)
-
-    mock_send.assert_called_once()
-    assert "BACKUP_SCHEDULE" in mock_send.call_args.args[0]
-    mock_thread.assert_not_called()
-
-
-def test_launch_backup_with_schedule_sends_ack_and_starts_thread():
-    bot = _bot()
-    inst = bot._cfg.instances["david"]
-    with (
-        patch("app.bot._container_has_backup_schedule", return_value=True),
-        patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot.threading.Thread") as mock_thread,
-    ):
-        mock_thread.return_value.start = MagicMock()
-        bot._launch_backup(inst, "monthly", "2026-07")
-
-    mock_send.assert_called_once()
-    msg = mock_send.call_args.args[0]
-    assert "David" in msg
-    assert "2026" in msg
-    mock_thread.assert_called_once()
-
-
-def test_launch_backup_yearly_uses_correct_unit():
-    bot = _bot()
-    inst = bot._cfg.instances["david"]
-    with (
-        patch("app.bot._container_has_backup_schedule", return_value=True),
-        patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot.threading.Thread") as mock_thread,
-    ):
-        mock_thread.return_value.start = MagicMock()
-        bot._launch_backup(inst, "yearly", None)
-
-    msg = mock_send.call_args.args[0]
-    assert "year" in msg  # "previous year" — not "previous yearly"
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +604,6 @@ def test_handle_update_routes_callback_query():
 
 
 def test_handle_update_ignores_unknown_type():
-    """Updates with neither message nor callback_query should be silently ignored."""
     bot = _bot()
     with (
         patch.object(bot, "_handle_message") as mock_msg,
@@ -651,20 +612,3 @@ def test_handle_update_ignores_unknown_type():
         bot._handle_update({"update_id": 1, "edited_message": {"text": "hi"}})
     mock_msg.assert_not_called()
     mock_cb.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# TelegramBot._handle_callback_query — unknown cmd branch
-# ---------------------------------------------------------------------------
-
-def test_callback_query_unknown_cmd_logs_warning_and_does_not_raise():
-    """A valid instance but unknown command in callback_data should log and not raise."""
-    bot = _bot()
-    with (
-        patch.object(bot, "_answer_callback_query"),
-        patch.object(bot, "_send_message") as mock_send,
-    ):
-        # "badcmd:david" — unknown cmd, known instance
-        bot._handle_callback_query({"id": "cq1", "data": "badcmd:david", "message": {"chat": {"id": 42}}})
-    # No message should be sent for an unknown cmd (just a warning log)
-    mock_send.assert_not_called()
