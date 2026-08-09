@@ -139,11 +139,14 @@ class WalletClient:
         return self._get_all("labels")
 
     def get_records(self, date_from: str, date_to: str) -> list[dict]:
-        """Fetch all records within [date_from, date_to] (inclusive, YYYY-MM-DD)."""
+        """Fetch all records within [date_from, date_to] (inclusive, YYYY-MM-DD).
+
+        The API supports repeated `recordDate` params with AND logic:
+        recordDate=gte.<from>&recordDate=lte.<to>
+        """
         return self._get_all(
             "records",
             params={
-                "recordDate": f"gte.{date_from}",
-                "recordDateTo": f"lte.{date_to}",
+                "recordDate": [f"gte.{date_from}", f"lte.{date_to}"],
             },
         )

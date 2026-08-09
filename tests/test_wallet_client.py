@@ -168,9 +168,10 @@ def test_get_records_passes_date_params():
     result = client.get_records("2026-07-01", "2026-07-31")
 
     assert result == data
+    # The API accepts `recordDate` twice with AND logic:
+    # recordDate=gte.2026-07-01&recordDate=lte.2026-07-31
     params = client.session.get.call_args.kwargs["params"]
-    assert params["recordDate"] == "gte.2026-07-01"
-    assert params["recordDateTo"] == "lte.2026-07-31"
+    assert params["recordDate"] == ["gte.2026-07-01", "lte.2026-07-31"]
 
 
 def test_get_pagination_follows_next_offset():
