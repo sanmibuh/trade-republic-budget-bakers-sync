@@ -1,0 +1,19 @@
+coverage.json
+  s_ca9c30117e69fb::t_788dbf3bfc9a7c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "0ca72cd6cdb92b3ecac8b03fd793e2c37013eff0",
+  "prompts": {},
+  "sessions": {
+    "s_ca9c30117e69fb": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_01a267f75ffeo4balANBcWYiMx",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
