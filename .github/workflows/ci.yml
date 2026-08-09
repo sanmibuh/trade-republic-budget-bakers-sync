@@ -178,10 +178,14 @@ jobs:
             STATUS="❌ Checks failed"
           fi
 
-          FAILED_ROW=""
+          TABLE_ROWS="| ✅ Tests passed | ${PR_PASSED}${TESTS_DIFF} | ${MAIN_PASSED} |"
           if [ "$PR_FAILED" != "0" ]; then
-            FAILED_ROW="| ❌ Failed | ${PR_FAILED} | ${MAIN_PASSED:+—} |"
+            TABLE_ROWS="${TABLE_ROWS}
+          | ❌ Failed | ${PR_FAILED} | ${MAIN_PASSED:+—} |"
           fi
+          TABLE_ROWS="${TABLE_ROWS}
+          | 📊 Coverage | ${PR_COV}%${COV_DIFF} | ${MAIN_COV}% |
+          | 📝 Lines covered | ${PR_COVERED} / ${PR_LINES}${LINES_DIFF} | ${MAIN_COVERED} / ${MAIN_LINES} |"
 
           BODY="## CI Results
 
@@ -189,10 +193,7 @@ jobs:
 
           | Metric | PR | main |
           |---|---|---|
-          | ✅ Tests passed | ${PR_PASSED}${TESTS_DIFF} | ${MAIN_PASSED} |
-          ${FAILED_ROW}
-          | 📊 Coverage | ${PR_COV}%${COV_DIFF} | ${MAIN_COV}% |
-          | 📝 Lines covered | ${PR_COVERED} / ${PR_LINES}${LINES_DIFF} | ${MAIN_COVERED} / ${MAIN_LINES} |
+          ${TABLE_ROWS}
 
           <details>
           <summary>Coverage detail</summary>
