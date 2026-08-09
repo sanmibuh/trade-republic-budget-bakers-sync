@@ -1,7 +1,7 @@
 name: tr-sync
 
 x-common: &common
-  image: ghcr.io/sanmibuh/tr-wallet-sync:v3.0.0
+  image: ghcr.io/sanmibuh/tr-wallet-sync:v4.0.0
   restart: unless-stopped
 
 x-sync-env: &sync-env
