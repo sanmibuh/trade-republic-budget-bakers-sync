@@ -40,23 +40,38 @@ fi
 # ------------------------------------------------------------------
 echo "Starting in scheduled mode: SYNC_SCHEDULE='$SYNC_SCHEDULE'"
 
+# Export environment variables as a sourceable shell script so cron jobs
+# inherit them reliably (avoids /etc/environment parsing issues with
+# special characters in values).
+ENV_FILE=/etc/cron_env
+printenv | while IFS='=' read -r key value; do
+    printf 'export %s=%s\n' "$key" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g;s/.*/'&'/")"
+done > "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+
 CRONTAB_FILE=/etc/cron.d/tr-sync
 
-# Sync job
-printf '%s root cd /app && python -m app sync >> /proc/1/fd/1 2>> /proc/1/fd/2\n' \
-    "$SYNC_SCHEDULE" > "$CRONTAB_FILE"
+# Write crontab header
+printf 'SHELL=/bin/sh\n' > "$CRONTAB_FILE"
+
+# Sync job — source env file first so all container vars are available
+printf '%s root . %s; cd /app && python -m app sync > /proc/1/fd/1 2>/proc/1/fd/2\n' \
+    "$SYNC_SCHEDULE" "$ENV_FILE" >> "$CRONTAB_FILE"
 
 # Backup job (optional)
 if [ -n "$BACKUP_SCHEDULE" ]; then
     echo "Registering backup cron: BACKUP_SCHEDULE='$BACKUP_SCHEDULE'"
-    printf '%s root cd /app && python -m app backup auto >> /proc/1/fd/1 2>> /proc/1/fd/2\n' \
-        "$BACKUP_SCHEDULE" >> "$CRONTAB_FILE"
+    printf '%s root . %s; cd /app && python -m app backup auto > /proc/1/fd/1 2>/proc/1/fd/2\n' \
+        "$BACKUP_SCHEDULE" "$ENV_FILE" >> "$CRONTAB_FILE"
 fi
+
+# cron requires the file to end with a newline
+printf '\n' >> "$CRONTAB_FILE"
 
 chmod 0644 "$CRONTAB_FILE"
 
-# Export environment variables so cron jobs inherit them
-env > /etc/environment
+echo "Crontab registered:"
+cat "$CRONTAB_FILE"
 
 # Start cron daemon in foreground
 exec cron -f
