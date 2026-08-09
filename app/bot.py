@@ -374,7 +374,7 @@ class TelegramBot:
                 t.join(timeout=12)
             availability = results
         else:
-            availability = {key: True for key in self._cfg.instances}
+            availability = dict.fromkeys(self._cfg.instances, True)
 
         buttons = []
         for key, inst in self._cfg.instances.items():
