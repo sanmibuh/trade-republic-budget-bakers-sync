@@ -162,6 +162,72 @@ def test_build_unknown_event_no_title_uses_event_type():
     assert records[0]["note"] == "SOME_FUTURE_TYPE"
 
 
+# ---------------------------------------------------------------------------
+# build_records_for_event — unknown refund event types
+# ---------------------------------------------------------------------------
+
+def test_build_card_refund_note_prefixed_with_title():
+    event = {
+        "eventType": "CARD_REFUND",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "15.00",
+        "title": "Supermarket",
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert len(records) == 1
+    assert records[0]["note"] == "Refund: Supermarket"
+    assert records[0]["accountId"] == "cash"
+
+
+def test_build_refund_no_title_uses_refund_fallback():
+    event = {"eventType": "CARD_REFUND", "timestamp": "2024-01-01T00:00:00Z", "amount": "5.00"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["note"] == "Refund"
+
+
+def test_build_refund_with_related_id_appended_to_note():
+    event = {
+        "eventType": "CARD_REFUND",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "20.00",
+        "title": "Coffee Shop",
+        "relatedId": "orig-tx-abc123",
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["note"] == "Refund: Coffee Shop (ref: orig-tx-abc123)"
+
+
+def test_build_refund_with_original_id_appended_to_note():
+    event = {
+        "eventType": "PURCHASE_REFUND",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "10.00",
+        "title": "Online Store",
+        "originalId": "orig-99",
+    }
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["note"] == "Refund: Online Store (ref: orig-99)"
+
+
+def test_build_refund_posts_to_cash_account():
+    event = {
+        "eventType": "CARD_REFUND",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "8.50",
+        "title": "Pharmacy",
+    }
+    records = build_records_for_event(event, cash_account_id="cash-acc", portfolio_account_id="port-acc")
+    assert records[0]["accountId"] == "cash-acc"
+    assert "transfer" not in records[0]
+
+
+def test_build_non_refund_unknown_type_not_affected():
+    """Unknown non-refund types should still use the raw title, not the Refund prefix."""
+    event = {"eventType": "SOME_NEW_TYPE", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00", "title": "Misc"}
+    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    assert records[0]["note"] == "Misc"
+
+
 @pytest.mark.parametrize("event_type", ["BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER", "TRADING_SAVINGSPLAN_EXECUTED", "SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE"])
 def test_build_order_events_use_transfer(event_type):
     event = {"eventType": event_type, "timestamp": "2024-01-01T00:00:00Z", "amount": "200.00"}

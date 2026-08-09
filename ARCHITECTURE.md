@@ -37,8 +37,9 @@ TRClient.fetch_timeline_events()
 filter_by_lookback()         # drops events older than LOOKBACK_DAYS
         ↓
 build_records_for_event()    # TR event dict → list[BudgetBakers record dict]
-  └── _HANDLERS[event_type]  # per-type handler builds the record
-  └── label applied generically post-handler if LABEL_<EVENT_TYPE> is set
+   └── _build_note()          # single source of truth for the note/description
+   └── _HANDLERS[event_type]  # per-type handler builds record structure (accounts, payment type, counter-party)
+   └── label applied generically post-handler if LABEL_<EVENT_TYPE> is set
         ↓
 EventRepository.dedup_event_id()   # filters already-synced events (SQLite)
         ↓
@@ -75,7 +76,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `Notifier` holds `bot_token`, `chat_id`, `owner_name` as state — methods have no repetitive parameters.
 - `EventRepository` is a context manager (`with EventRepository(...) as repo`) — encapsulates SQLite connection lifetime.
 - `TRClient` keeps the pytr client as internal state — callers never touch pytr directly.
-- `tr_mapper` uses a handler registry `_HANDLERS: dict[str, Callable]` — adding a new TR event type requires only a handler function + one line in `_HANDLERS`; no existing logic changes (Open/Closed principle).
+- `tr_mapper` uses a handler registry `_HANDLERS: dict[str, Callable]` and a single `_build_note()` function — adding a new TR event type requires only a handler (if the record structure differs) + one line in `_HANDLERS`; note logic is added to `_build_note` / `_note_extras` independently (Open/Closed principle).
 
 ### pytr integration
 - `TRClient.fetch_timeline_events` uses `pytr.timeline.Timeline` with an `event_callback`.
@@ -195,23 +196,7 @@ When working with an AI assistant: **always ask for tests before implementation*
 
 ---
 
-## Test suite
-
-344 tests across 11 files — all passing.
-
-```
-tests/test_config.py          # Config, BackupConfig, BotEnv — from_env, required/optional fields
-tests/test_persistence.py     # EventRepository, dedup_event_id, mark_processed, purge
-tests/test_tr_mapper.py       # _HANDLERS, IBAN extraction, label_ids, filter_by_lookback, _gross_tax_note
-tests/test_wallet_client.py   # post_records batching; _get_all + _collect_page pagination branches
-tests/test_main.py            # _fetch_events (all error branches), _build_batch, _process_results, run()
-tests/test_backup.py          # date helpers, _parse_monthly/yearly_param, run_monthly/yearly/auto
-tests/test_notifier.py        # all notification types including backup_complete with filename
-tests/test_bot.py             # BotConfig.from_env, TelegramBot commands and callback handling
-tests/test_cli.py             # click CLI: help, sync, backup subcommands via CliRunner
-tests/test_logging_setup.py   # setup_logging, configure_logging (idempotency)
-tests/test_tr_client.py       # TRClient login, fetch, error branches
-```
+## Tests
 
 Run:
 ```bash
@@ -239,7 +224,7 @@ See `deploy/DEPLOY.md` for setup instructions.
 | `app/main.py` | Sync orchestrator; passes `cfg.label_ids` to `build_records_for_event` |
 | `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |
 | `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions |
-| `app/tr_mapper.py` | `_HANDLERS`, `_ZERO_AMOUNT_TYPES`, `KNOWN_EVENT_TYPES`, `_make_record` |
+| `app/tr_mapper.py` | `_build_note` (note/description), `_note_extras` (detail fragments), `_HANDLERS`, `KNOWN_EVENT_TYPES`, `_make_record` |
 | `app/persistence.py` | `EventRepository`, `dedup_event_id`; `INSERT OR IGNORE` |
 | `app/config.py` | `Config` (sync) and `BackupConfig` (backup) dataclasses; `BotEnv`; `_read_label_ids()` |
 | `app/wallet_client.py` | `post_records` (sync) + `_get_all`/`_collect_page` + `get_*` (backup) |
