@@ -36,6 +36,7 @@ Interaction flow for /backup_monthly / /backup_yearly:
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 import subprocess
@@ -55,6 +56,7 @@ log = logging.getLogger(__name__)
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 _EXEC_TIMEOUT = 600  # seconds — sync can take a while
+_YEAR_BUTTON_COUNT = 3  # number of recent years offered in the yearly backup keyboard
 
 # Set TELEGRAM_VERIFY_SSL=false to disable SSL verification (e.g. behind a corporate proxy).
 _SSL_VERIFY: bool = os.environ.get("TELEGRAM_VERIFY_SSL", "true").strip().lower() != "false"
@@ -243,14 +245,20 @@ class TelegramBot:
             return
 
         parts = data.split(_CB_SEP)
-        # Encoded format: "<cmd>:<instance>" or "<cmd>:<param>:<instance>"
+        # Encoded format: "<cmd>:<param>" (backup_yearly) or "<cmd>:<instance>" (sync)
         if len(parts) < 2:
             log.warning("Malformed callback_data: %r", data)
             return
 
         cmd = parts[0]
-        instance_key = parts[-1].lower()
 
+        if cmd == "backup_yearly":
+            year = parts[1]
+            self._launch_backup_yearly(year)
+            return
+
+        # All remaining cmds (sync) use instance routing.
+        instance_key = parts[-1].lower()
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
             self._send_message(f"❓ Unknown instance: `{_esc(instance_key)}`")
@@ -321,15 +329,29 @@ class TelegramBot:
         if not self._cfg.backup_container:
             self._send_message("🚫 Backup service is not configured\\.")
             return
-        param = args[0] if args else None
-        label = _esc(f"Yearly backup ({param or 'previous year'})")
+        if args:
+            self._launch_backup_yearly(args[0])
+        else:
+            self._send_message("📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons())
+
+    def _launch_backup_yearly(self, year: str) -> None:
+        label = _esc(f"Yearly backup ({year})")
         self._send_message(f"📆 *{label}*\\.\\.\\.")
-        app_args = ["backup", "yearly"] + ([param] if param else [])
         threading.Thread(
             target=_docker_exec_silent,
-            args=(self._cfg.backup_container, app_args),
+            args=(self._cfg.backup_container, ["backup", "yearly", year]),
             daemon=True,
         ).start()
+
+    def _year_buttons(self) -> list[list[dict]]:
+        """Inline keyboard with the most recent years (previous year first)."""
+        current_year = datetime.datetime.now(tz=datetime.timezone.utc).year
+        years = [current_year - i for i in range(1, _YEAR_BUTTON_COUNT + 1)]
+        buttons = [
+            {"text": str(y), "callback_data": f"backup_yearly{_CB_SEP}{y}"}
+            for y in years
+        ]
+        return [buttons]
 
     # ------------------------------------------------------------------
     # Execution

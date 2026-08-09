@@ -386,15 +386,48 @@ def test_cmd_backup_yearly_no_backup_container_sends_error():
     assert "not configured" in mock_send.call_args.args[0]
 
 
-def test_cmd_backup_yearly_sends_ack_and_starts_thread():
+def test_cmd_backup_yearly_without_args_shows_year_keyboard():
+    """Without args, /backup_yearly should show an inline year-selection keyboard."""
+    import datetime
+    bot = _bot(backup_container="proj-backup-1")
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_backup_yearly([])
+    mock_send.assert_called_once()
+    _, kwargs = mock_send.call_args
+    keyboard = kwargs.get("keyboard") or mock_send.call_args[1].get("keyboard")
+    assert keyboard is not None, "Expected a keyboard when no year arg is given"
+    all_buttons = [btn for row in keyboard for btn in row]
+    prev_year = str(datetime.datetime.now(tz=datetime.timezone.utc).year - 1)
+    labels = [b["text"] for b in all_buttons]
+    assert any(prev_year in label for label in labels), f"Expected {prev_year} in buttons: {labels}"
+
+
+def test_cmd_backup_yearly_keyboard_callback_data_encodes_year():
+    """Keyboard buttons encode 'backup_yearly:<year>' as callback_data."""
+    import datetime
+    bot = _bot(backup_container="proj-backup-1")
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_backup_yearly([])
+    keyboard = mock_send.call_args[1].get("keyboard") or mock_send.call_args.kwargs.get("keyboard")
+    all_buttons = [btn for row in keyboard for btn in row]
+    prev_year = str(datetime.datetime.now(tz=datetime.timezone.utc).year - 1)
+    cb_data = [b["callback_data"] for b in all_buttons]
+    assert any(f"backup_yearly:{prev_year}" in d for d in cb_data)
+
+
+def test_cmd_backup_yearly_with_arg_executes_directly():
+    """With an explicit year arg, execute without showing a keyboard."""
     bot = _bot(backup_container="proj-backup-1")
     with (
         patch.object(bot, "_send_message") as mock_send,
+        patch("app.bot._docker_exec_silent"),
         patch("app.bot.threading.Thread") as mock_thread,
     ):
         mock_thread.return_value.start = MagicMock()
-        bot._cmd_backup_yearly([])
-    assert "previous year" in mock_send.call_args.args[0]
+        bot._cmd_backup_yearly(["2025"])
+    # No keyboard should be shown
+    _, kwargs = mock_send.call_args
+    assert kwargs.get("keyboard") is None
     mock_thread.assert_called_once()
 
 
@@ -409,6 +442,48 @@ def test_cmd_backup_yearly_executes_on_backup_container():
         bot._cmd_backup_yearly(["2025"])
     _, kwargs = mock_thread.call_args
     assert kwargs["args"] == ("proj-backup-1", ["backup", "yearly", "2025"])
+
+
+def test_callback_query_backup_yearly_dispatches_launch():
+    """backup_yearly:<year> callback should trigger _launch_backup_yearly."""
+    bot = _bot(backup_container="proj-backup-1")
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_launch_backup_yearly") as mock_launch,
+    ):
+        bot._handle_callback_query({
+            "id": "cq1",
+            "data": "backup_yearly:2025",
+            "message": {"chat": {"id": 42}},
+        })
+    mock_launch.assert_called_once_with("2025")
+
+
+def test_launch_backup_yearly_sends_ack_and_starts_thread():
+    bot = _bot(backup_container="proj-backup-1")
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch("app.bot._docker_exec_silent"),
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        mock_thread.return_value.start = MagicMock()
+        bot._launch_backup_yearly("2025")
+    mock_send.assert_called_once()
+    assert "2025" in mock_send.call_args.args[0]
+    mock_thread.assert_called_once()
+
+
+def test_launch_backup_yearly_executes_correct_args():
+    bot = _bot(backup_container="proj-backup-1")
+    with (
+        patch.object(bot, "_send_message"),
+        patch("app.bot._docker_exec_silent"),
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        mock_thread.return_value.start = MagicMock()
+        bot._launch_backup_yearly("2024")
+    _, kwargs = mock_thread.call_args
+    assert kwargs["args"] == ("proj-backup-1", ["backup", "yearly", "2024"])
 
 
 # ---------------------------------------------------------------------------
