@@ -56,7 +56,8 @@ log = logging.getLogger(__name__)
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 _EXEC_TIMEOUT = 600  # seconds — sync can take a while
-_YEAR_BUTTON_COUNT = 3  # number of recent years offered in the yearly backup keyboard
+_YEAR_BUTTON_COUNT = 3   # number of recent years offered in the yearly backup keyboard
+_MONTH_BUTTON_COUNT = 4  # number of recent months offered in the monthly backup keyboard
 
 # Set TELEGRAM_VERIFY_SSL=false to disable SSL verification (e.g. behind a corporate proxy).
 _SSL_VERIFY: bool = os.environ.get("TELEGRAM_VERIFY_SSL", "true").strip().lower() != "false"
@@ -257,6 +258,11 @@ class TelegramBot:
             self._launch_backup_yearly(year)
             return
 
+        if cmd == "backup_monthly":
+            period = parts[1]
+            self._launch_backup_monthly(period)
+            return
+
         # All remaining cmds (sync) use instance routing.
         instance_key = parts[-1].lower()
         inst = self._cfg.instances.get(instance_key)
@@ -315,13 +321,17 @@ class TelegramBot:
         if not self._cfg.backup_container:
             self._send_message("🚫 Backup service is not configured\\.")
             return
-        param = args[0] if args else None
-        label = _esc(f"Monthly backup ({param or 'previous month'})")
+        if args:
+            self._launch_backup_monthly(args[0])
+        else:
+            self._send_message("📦 *Monthly backup* — Choose month:", keyboard=self._month_buttons())
+
+    def _launch_backup_monthly(self, period: str) -> None:
+        label = _esc(f"Monthly backup ({period})")
         self._send_message(f"📦 *{label}*\\.\\.\\.")
-        app_args = ["backup", "monthly"] + ([param] if param else [])
         threading.Thread(
             target=_docker_exec_silent,
-            args=(self._cfg.backup_container, app_args),
+            args=(self._cfg.backup_container, ["backup", "monthly", period]),
             daemon=True,
         ).start()
 
@@ -376,6 +386,23 @@ class TelegramBot:
             for inst in self._cfg.instances.values()
         ]
         return [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+
+    def _month_buttons(self) -> list[list[dict]]:
+        """Inline keyboard with the most recent months (previous month first)."""
+        today = datetime.datetime.now(tz=datetime.timezone.utc).date()
+        months = []
+        year, month = today.year, today.month
+        for _ in range(_MONTH_BUTTON_COUNT):
+            month -= 1
+            if month == 0:
+                month = 12
+                year -= 1
+            months.append(f"{year}-{month:02d}")
+        buttons = [
+            {"text": m, "callback_data": f"backup_monthly{_CB_SEP}{m}"}
+            for m in months
+        ]
+        return [buttons]
 
     # ------------------------------------------------------------------
     # Telegram API helpers
