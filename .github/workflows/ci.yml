@@ -32,6 +32,7 @@ jobs:
           python -m pytest --cov=app --cov-fail-under=97 \
             --cov-report=term-missing \
             --cov-report=json 2>&1 | tee test-output.txt
+          python -m json.tool coverage.json > coverage.pretty.json && mv coverage.pretty.json coverage.json
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       # ----------------------------------------------------------------
