@@ -622,3 +622,50 @@ def test_answer_callback_query_does_not_raise_on_failure():
     bot = _bot()
     with patch("app.bot.requests.post", side_effect=requests.RequestException("fail")):
         bot._answer_callback_query("cq1")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._handle_update — routing
+# ---------------------------------------------------------------------------
+
+def test_handle_update_routes_message():
+    bot = _bot()
+    with patch.object(bot, "_handle_message") as mock_msg:
+        bot._handle_update({"update_id": 1, "message": {"chat": {"id": 42}, "text": "/help"}})
+    mock_msg.assert_called_once()
+
+
+def test_handle_update_routes_callback_query():
+    bot = _bot()
+    with patch.object(bot, "_handle_callback_query") as mock_cb:
+        bot._handle_update({"update_id": 1, "callback_query": {"id": "cq1", "data": "noop", "message": {"chat": {"id": 42}}}})
+    mock_cb.assert_called_once()
+
+
+def test_handle_update_ignores_unknown_type():
+    """Updates with neither message nor callback_query should be silently ignored."""
+    bot = _bot()
+    with (
+        patch.object(bot, "_handle_message") as mock_msg,
+        patch.object(bot, "_handle_callback_query") as mock_cb,
+    ):
+        bot._handle_update({"update_id": 1, "edited_message": {"text": "hi"}})
+    mock_msg.assert_not_called()
+    mock_cb.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._handle_callback_query — unknown cmd branch
+# ---------------------------------------------------------------------------
+
+def test_callback_query_unknown_cmd_logs_warning_and_does_not_raise():
+    """A valid instance but unknown command in callback_data should log and not raise."""
+    bot = _bot()
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        # "badcmd:david" — unknown cmd, known instance
+        bot._handle_callback_query({"id": "cq1", "data": "badcmd:david", "message": {"chat": {"id": 42}}})
+    # No message should be sent for an unknown cmd (just a warning log)
+    mock_send.assert_not_called()
