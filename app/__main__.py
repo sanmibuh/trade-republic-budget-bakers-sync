@@ -66,12 +66,12 @@ def backup(mode: str, param: str | None) -> None:
         run_monthly,
         run_yearly,
     )
-    from app.config import Config
+    from app.config import BackupConfig
     from app.notifier import Notifier
     from app.wallet_client import WalletClient
 
     configure_logging()
-    cfg = Config.from_env()
+    cfg = BackupConfig.from_env()
     client = WalletClient(api_key=cfg.wallet_api_key)
     notifier = Notifier(
         bot_token=cfg.telegram_bot_token,
@@ -100,7 +100,7 @@ def bot() -> None:
     """Start the Telegram bot for remote command execution.
 
     Listens for commands from the authorized Telegram chat and dispatches
-    them to the configured Docker containers via 'docker exec'.
+    them to the configured Docker containers via the Docker SDK.
 
     \b
     Required environment variables:

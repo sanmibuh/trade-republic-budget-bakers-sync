@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.config import Config
+from app.config import BackupConfig, Config
 
 BASE_ENV = {
     "PHONE_NUMBER": "+34600000000",
@@ -12,6 +12,14 @@ BASE_ENV = {
     "WALLET_PORTFOLIO_ACCOUNT_ID": "portfolio-id",
 }
 
+BACKUP_ENV = {
+    "WALLET_API_KEY": "key",
+}
+
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
 
 def test_owner_name_default_is_backup(monkeypatch):
     """OWNER_NAME not set → defaults to 'Backup' (for the backup service)."""
@@ -43,3 +51,79 @@ def test_missing_required_env_raises(monkeypatch):
 
     with pytest.raises(ValueError, match="WALLET_API_KEY"):
         Config.from_env()
+
+
+# ---------------------------------------------------------------------------
+# BackupConfig
+# ---------------------------------------------------------------------------
+
+def test_backup_config_from_env_minimal(monkeypatch):
+    """BackupConfig only requires WALLET_API_KEY."""
+    for key, value in BACKUP_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("PHONE_NUMBER", raising=False)
+    monkeypatch.delenv("PIN", raising=False)
+    monkeypatch.delenv("WALLET_CASH_ACCOUNT_ID", raising=False)
+    monkeypatch.delenv("WALLET_PORTFOLIO_ACCOUNT_ID", raising=False)
+
+    cfg = BackupConfig.from_env()
+
+    assert cfg.wallet_api_key == "key"
+
+
+def test_backup_config_does_not_require_phone_number(monkeypatch):
+    """BackupConfig must not fail when PHONE_NUMBER is absent."""
+    monkeypatch.setenv("WALLET_API_KEY", "key")
+    monkeypatch.delenv("PHONE_NUMBER", raising=False)
+
+    cfg = BackupConfig.from_env()  # must not raise
+
+    assert cfg is not None
+
+
+def test_backup_config_does_not_require_wallet_account_ids(monkeypatch):
+    """BackupConfig must not fail when account IDs are absent."""
+    monkeypatch.setenv("WALLET_API_KEY", "key")
+    monkeypatch.delenv("WALLET_CASH_ACCOUNT_ID", raising=False)
+    monkeypatch.delenv("WALLET_PORTFOLIO_ACCOUNT_ID", raising=False)
+
+    cfg = BackupConfig.from_env()  # must not raise
+
+    assert cfg is not None
+
+
+def test_backup_config_missing_wallet_api_key_raises(monkeypatch):
+    """BackupConfig raises ValueError when WALLET_API_KEY is missing."""
+    monkeypatch.delenv("WALLET_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="WALLET_API_KEY"):
+        BackupConfig.from_env()
+
+
+def test_backup_config_owner_name_defaults_to_backup(monkeypatch):
+    monkeypatch.setenv("WALLET_API_KEY", "key")
+    monkeypatch.delenv("OWNER_NAME", raising=False)
+
+    cfg = BackupConfig.from_env()
+
+    assert cfg.owner_name == "Backup"
+
+
+def test_backup_config_owner_name_explicit(monkeypatch):
+    monkeypatch.setenv("WALLET_API_KEY", "key")
+    monkeypatch.setenv("OWNER_NAME", "Eli")
+
+    cfg = BackupConfig.from_env()
+
+    assert cfg.owner_name == "Eli"
+
+
+def test_backup_config_telegram_fields_optional(monkeypatch):
+    monkeypatch.setenv("WALLET_API_KEY", "key")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+    cfg = BackupConfig.from_env()
+
+    assert cfg.telegram_bot_token is None
+    assert cfg.telegram_chat_id is None
