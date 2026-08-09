@@ -1,4 +1,4 @@
-ARG BASE_TAG=latest
+ARG BASE_TAG=v3.0.0
 FROM ghcr.io/sanmibuh/python-trade-republic:${BASE_TAG}
 
 WORKDIR /app

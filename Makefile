@@ -33,7 +33,7 @@ help:
 	@echo ""
 	@echo "Docker Compose targets  (uses COMPOSE_FILE=$(COMPOSE_FILE))"
 	@echo "  build-base      Build the base image (python + git + pip install) -- run when requirements.txt or Python version changes"
-	@echo "  build           Build the app image only (assumes base exists) -- run after code changes"
+	@echo "  build           Build the app image (cron + docker CLI + app code) -- run after code changes"
 	@echo "  build-all       Rebuild base + app both from scratch (no cache) -- full clean build"
 	@echo "  bootstrap       Run interactively to complete first-time 2FA login"
 	@echo "  sync            Run a one-shot sync"

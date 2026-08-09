@@ -764,3 +764,49 @@ def test_read_label_ids_ignores_blank_values(monkeypatch):
 
     result = _read_label_ids()
     assert "BANK_TRANSACTION_INCOMING" not in result
+
+
+def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
+    """excluded_count must be reported in sync_complete even if post_records raises.
+
+    Regression test for bug where counts.excluded was assigned *after*
+    _process_results, so a failure there would report excluded=0 in the
+    finally block.
+    """
+    from unittest.mock import patch
+
+    from app.main import run
+
+    fake_events = [{"id": "e1", "timestamp": "2024-01-01T00:00:00Z", "amount": "10.00", "eventType": "PAYMENT"}]
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.Notifier") as mock_notifier_cls,
+        patch("app.main._fetch_events", return_value=fake_events),
+        patch("app.main.filter_by_lookback", return_value=fake_events),
+        patch("app.main._build_batch") as mock_batch,
+        patch("app.main.WalletClient") as mock_wallet,
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        cfg.lookback_days = 7
+        mock_cfg_cls.return_value = cfg
+
+        batch = MagicMock()
+        batch.records = [{"amount": 10}]
+        batch.excluded_count = 3   # excluded events present
+        batch.event_record_indices = [[0]]
+        mock_batch.return_value = batch
+
+        mock_wallet.return_value.post_records.side_effect = RuntimeError("wallet down")
+
+        notifier_instance = mock_notifier_cls.return_value
+
+        with pytest.raises(RuntimeError):
+            run()
+
+    # sync_complete must be called (via finally) with the correct excluded count
+    notifier_instance.sync_complete.assert_called_once()
+    _, kwargs = notifier_instance.sync_complete.call_args
+    assert kwargs["excluded"] == 3

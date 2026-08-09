@@ -67,7 +67,7 @@ class Config:
     @classmethod
     def from_env(cls) -> Config:
         return cls(
-            owner_name=_required_env("OWNER_NAME"),
+            owner_name=os.getenv("OWNER_NAME", "Backup"),
             phone_number=_required_env("PHONE_NUMBER"),
             pin=_required_env("PIN"),
             wallet_api_key=_required_env("WALLET_API_KEY"),
@@ -78,4 +78,25 @@ class Config:
             lookback_days=_positive_int_env("LOOKBACK_DAYS", default=7),
             data_dir=Path(os.getenv("DATA_DIR", "/app/data")),
             label_ids=_read_label_ids(),
+        )
+
+
+@dataclass(frozen=True)
+class BotEnv:
+    """Raw environment values needed by the Telegram bot."""
+
+    bot_token: str
+    chat_id: str
+    instances_raw: str
+    container_prefix: str
+    backup_service: str
+
+    @classmethod
+    def from_env(cls) -> BotEnv:
+        return cls(
+            bot_token=_required_env("TELEGRAM_BOT_TOKEN"),
+            chat_id=_required_env("TELEGRAM_CHAT_ID"),
+            instances_raw=_required_env("INSTANCES"),
+            container_prefix=_required_env("CONTAINER_PREFIX"),
+            backup_service=os.getenv("BACKUP_SERVICE", "backup").strip(),
         )
