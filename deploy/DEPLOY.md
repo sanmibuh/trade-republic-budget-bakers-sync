@@ -1,6 +1,31 @@
 # Deploy guide
 
-Step-by-step guide for deploying on a NAS (QNAP, Synology, etc.).
+Step-by-step guide for deploying on a NAS (QNAP, Synology, etc.) and running locally for development.
+
+---
+
+## Local development (no Docker)
+
+Use `make` to run sync, backup, or bot commands locally against real credentials.
+
+### Setup
+
+```sh
+cp deploy/local/local.env.template deploy/local/local.env
+# fill in WALLET_API_KEY and any other vars you need
+```
+
+`deploy/local/local.env` is git-ignored. `deploy/local/data/` (written by local runs) is also ignored.
+
+### Run commands
+
+```sh
+make run-backup                        # backup auto
+make run-backup-yearly  PARAM=2025     # backup specific year
+make run-backup-monthly PARAM=2026-07  # backup specific month
+make run-sync                          # one-shot sync
+make run-bot                           # start Telegram bot
+```
 
 ---
 
@@ -9,6 +34,10 @@ Step-by-step guide for deploying on a NAS (QNAP, Synology, etc.).
 ```
 deploy/
   DEPLOY.md           # this guide
+  local/              # local dev environment
+    local.env.template  # template — copy to local.env and fill in values
+    local.env           # real credentials (never committed)
+    data/               # written by local runs (never committed)
   example/            # example config files (no secrets)
     docker-compose.yml
     common.env.example

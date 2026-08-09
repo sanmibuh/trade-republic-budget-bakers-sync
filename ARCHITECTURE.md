@@ -218,6 +218,17 @@ Run:
 make test
 ```
 
+Local one-shot runs (requires `deploy/local/local.env`):
+```bash
+make run-backup                        # backup auto
+make run-backup-yearly  PARAM=2025     # specific year
+make run-backup-monthly PARAM=2026-07  # specific month
+make run-sync                          # one-shot sync
+make run-bot                           # Telegram bot
+```
+
+See `deploy/DEPLOY.md` for setup instructions.
+
 ---
 
 ## Relevant files (quick reference)
