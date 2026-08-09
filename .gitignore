@@ -15,8 +15,7 @@ env/
 # Environment / secrets
 .env
 *.env
-docker-compose.yml
-deploy/
+deploy/nas/
 
 # pytest / coverage
 .pytest_cache/
