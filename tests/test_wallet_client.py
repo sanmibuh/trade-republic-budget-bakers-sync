@@ -177,7 +177,7 @@ def test_get_records_passes_date_params():
 def test_get_pagination_follows_next_offset():
     """_get_all should follow nextOffset until exhausted."""
     client = _make_client()
-    page1 = {"data": [{"id": "r1"}], "nextOffset": 1}
+    page1 = {"accounts": [{"id": "r1"}], "nextOffset": 1}
     page2 = [{"id": "r2"}]  # plain list, no nextOffset → stop
 
     responses = [
@@ -206,10 +206,10 @@ def test_get_raises_on_http_error():
 
 
 def test_get_all_dict_page_non_list_appended():
-    """When data["data"] is not a list, it should be appended as a single item."""
+    """When the resource key maps to a non-list value, it should be appended as a single item."""
     client = _make_client()
-    # dict response where "data" is a dict (not list) and no nextOffset
-    body = {"data": {"id": "singleton"}}
+    # dict response where "accounts" is a dict (not list) and no nextOffset
+    body = {"accounts": {"id": "singleton"}}
     client.session.get = MagicMock(return_value=_mock_get_response(200, body))
 
     result = client.get_accounts()
@@ -233,8 +233,8 @@ def test_get_all_unexpected_response_type_breaks():
 def test_get_all_dict_with_next_offset_paginates():
     """Dict response with nextOffset should fetch next page."""
     client = _make_client()
-    page1 = {"data": [{"id": "r1"}], "nextOffset": 42}
-    page2 = {"data": [{"id": "r2"}]}  # no nextOffset → stop
+    page1 = {"accounts": [{"id": "r1"}], "nextOffset": 42}
+    page2 = {"accounts": [{"id": "r2"}]}  # no nextOffset → stop
 
     responses = [
         _mock_get_response(200, page1),

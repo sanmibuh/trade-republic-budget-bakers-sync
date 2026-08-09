@@ -41,20 +41,14 @@ def test_backup_help():
 # ---------------------------------------------------------------------------
 
 def test_sync_calls_run():
-    with (
-        patch("app.main.run", return_value=0) as mock_run,
-        patch("app.__main__.configure_logging"),
-    ):
+    with patch("app.main.run", return_value=0) as mock_run:
         result = _runner().invoke(cli, ["sync"])
     assert result.exit_code == 0
     mock_run.assert_called_once()
 
 
 def test_sync_exits_with_run_return_code():
-    with (
-        patch("app.main.run", return_value=1),
-        patch("app.__main__.configure_logging"),
-    ):
+    with patch("app.main.run", return_value=1):
         result = _runner().invoke(cli, ["sync"])
     assert result.exit_code == 1
 
@@ -94,7 +88,7 @@ def _mock_cfg(tmp_path):
 
 def test_backup_auto_calls_run_auto(tmp_path):
     with (
-        patch("app.__main__.configure_logging"),
+        patch("app.__main__.setup_logging") as mock_setup_log,
         patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -103,6 +97,7 @@ def test_backup_auto_calls_run_auto(tmp_path):
         result = _runner().invoke(cli, ["backup", "auto"])
     assert result.exit_code == 0
     mock_auto.assert_called_once()
+    mock_setup_log.assert_called_once_with(tmp_path / "logs")
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +106,7 @@ def test_backup_auto_calls_run_auto(tmp_path):
 
 def test_backup_monthly_default_calls_run_monthly(tmp_path):
     with (
-        patch("app.__main__.configure_logging"),
+        patch("app.__main__.setup_logging"),
         patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -124,7 +119,7 @@ def test_backup_monthly_default_calls_run_monthly(tmp_path):
 
 def test_backup_monthly_with_param(tmp_path):
     with (
-        patch("app.__main__.configure_logging"),
+        patch("app.__main__.setup_logging"),
         patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -138,7 +133,7 @@ def test_backup_monthly_with_param(tmp_path):
 
 def test_backup_monthly_invalid_param_exits(tmp_path):
     with (
-        patch("app.__main__.configure_logging"),
+        patch("app.__main__.setup_logging"),
         patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -153,7 +148,7 @@ def test_backup_monthly_invalid_param_exits(tmp_path):
 
 def test_backup_yearly_default_calls_run_yearly(tmp_path):
     with (
-        patch("app.__main__.configure_logging"),
+        patch("app.__main__.setup_logging"),
         patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -166,7 +161,7 @@ def test_backup_yearly_default_calls_run_yearly(tmp_path):
 
 def test_backup_yearly_with_param(tmp_path):
     with (
-        patch("app.__main__.configure_logging"),
+        patch("app.__main__.setup_logging"),
         patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -179,7 +174,7 @@ def test_backup_yearly_with_param(tmp_path):
 
 def test_backup_yearly_invalid_param_exits(tmp_path):
     with (
-        patch("app.__main__.configure_logging"),
+        patch("app.__main__.setup_logging"),
         patch("app.config.BackupConfig.from_env", return_value=_mock_cfg(tmp_path)),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
