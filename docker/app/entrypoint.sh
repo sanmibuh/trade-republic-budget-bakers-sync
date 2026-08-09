@@ -19,11 +19,13 @@
 
 set -e
 
+log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+
 # ------------------------------------------------------------------
 # One-shot via CMD
 # ------------------------------------------------------------------
 if [ -n "$CMD" ]; then
-    echo "Running: python -m app $CMD"
+    log "Running: python -m app $CMD"
     # shellcheck disable=SC2086
     exec python -m app $CMD
 fi
@@ -38,7 +40,7 @@ fi
 # ------------------------------------------------------------------
 # Daemon mode — register cron jobs and start cron
 # ------------------------------------------------------------------
-echo "Starting in scheduled mode: SYNC_SCHEDULE='$SYNC_SCHEDULE'"
+log "Starting in scheduled mode: SYNC_SCHEDULE='$SYNC_SCHEDULE'"
 
 # Export environment variables as a sourceable shell script so cron jobs
 # inherit them reliably (avoids /etc/environment parsing issues with
@@ -60,7 +62,7 @@ printf '%s root . %s; cd /app && python -m app sync > /proc/1/fd/1 2>/proc/1/fd/
 
 # Backup job (optional)
 if [ -n "$BACKUP_SCHEDULE" ]; then
-    echo "Registering backup cron: BACKUP_SCHEDULE='$BACKUP_SCHEDULE'"
+    log "Registering backup cron: BACKUP_SCHEDULE='$BACKUP_SCHEDULE'"
     printf '%s root . %s; cd /app && python -m app backup auto > /proc/1/fd/1 2>/proc/1/fd/2\n' \
         "$BACKUP_SCHEDULE" "$ENV_FILE" >> "$CRONTAB_FILE"
 fi
@@ -70,7 +72,7 @@ printf '\n' >> "$CRONTAB_FILE"
 
 chmod 0644 "$CRONTAB_FILE"
 
-echo "Crontab registered:"
+log "Crontab registered:"
 cat "$CRONTAB_FILE"
 
 # Start cron daemon in foreground
