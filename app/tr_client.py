@@ -68,6 +68,8 @@ class TRClient:
                 log.debug("Submitting authenticator code")
                 client.complete_weblogin(verify_code=code)
                 log.debug("Polling login process for CONFIRMED status")
+                # NOTE: _await_weblogin_confirmation is a private pytr method.
+                # If pytr renames it in a future version this will raise AttributeError at runtime.
                 client._await_weblogin_confirmation()
                 client.save_websession()
             else:

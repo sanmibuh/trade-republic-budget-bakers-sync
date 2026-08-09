@@ -48,6 +48,9 @@ log = logging.getLogger(__name__)
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 _EXEC_TIMEOUT = 600  # seconds — sync can take a while
 
+# Set TELEGRAM_VERIFY_SSL=false to disable SSL verification (e.g. behind a corporate proxy).
+_SSL_VERIFY: bool = os.environ.get("TELEGRAM_VERIFY_SSL", "true").strip().lower() != "false"
+
 # Separator used inside callback_data to encode command + param + instance.
 # Must not appear in instance names or period params (YYYY-MM / YYYY contain only digits and hyphens).
 _CB_SEP = ":"
@@ -152,7 +155,7 @@ class TelegramBot:
                 f"{self._api}/setMyCommands",
                 json={"commands": commands},
                 timeout=10,
-                verify=False,
+                verify=_SSL_VERIFY,
             )
             resp.raise_for_status()
             log.info("Telegram commands registered successfully")
@@ -172,7 +175,7 @@ class TelegramBot:
                 "allowed_updates": ["message", "callback_query"],
             },
             timeout=40,
-            verify=False,
+            verify=_SSL_VERIFY,
         )
         resp.raise_for_status()
         for update in resp.json().get("result", []):
@@ -315,7 +318,7 @@ class TelegramBot:
         self._send_message(f"▶️ Executing *sync* for *{_esc(inst.name)}*\\.\\.\\.")
         threading.Thread(
             target=_docker_exec_silent,
-            args=(inst.container_name, "sync"),
+            args=(inst.container_name, ["sync"]),
             daemon=True,
         ).start()
 
@@ -331,7 +334,7 @@ class TelegramBot:
         self._send_message(
             f"▶️ Executing *backup {_esc(mode)}* \\(`{period_label}`\\) for *{_esc(inst.name)}*\\.\\.\\."
         )
-        app_args = f"backup {mode}" + (f" {param}" if param else "")
+        app_args = ["backup", mode] + ([param] if param else [])
         threading.Thread(
             target=_docker_exec_silent,
             args=(inst.container_name, app_args),
@@ -356,7 +359,6 @@ class TelegramBot:
         """
         # Resolve backup availability in parallel when needed.
         if check_backup:
-            availability: dict[str, bool] = {}
             results: dict[str, bool] = {}
 
             def _check(name: str, container: str) -> None:
@@ -406,7 +408,7 @@ class TelegramBot:
                 f"{self._api}/sendMessage",
                 json=payload,
                 timeout=20,
-                verify=False,
+                verify=_SSL_VERIFY,
             )
             resp.raise_for_status()
         except requests.RequestException as exc:
@@ -419,7 +421,7 @@ class TelegramBot:
                 f"{self._api}/answerCallbackQuery",
                 json={"callback_query_id": callback_query_id},
                 timeout=10,
-                verify=False,
+                verify=_SSL_VERIFY,
             )
         except requests.RequestException as exc:
             log.warning("Failed to answer callback query: %s", exc)
@@ -454,12 +456,12 @@ def _container_has_backup_schedule(container_name: str) -> bool:
         return False
 
 
-def _docker_exec_silent(container_name: str, app_command: str) -> None:
-    """Run `docker exec <container> python -m app <app_command>` and log the result.
+def _docker_exec_silent(container_name: str, app_args: list[str]) -> None:
+    """Run `docker exec <container> python -m app <app_args>` and log the result.
 
     Does NOT send any Telegram message — the container's own Notifier handles that.
     """
-    cmd = ["docker", "exec", container_name, "python", "-m", "app"] + app_command.split()
+    cmd = ["docker", "exec", container_name, "python", "-m", "app"] + app_args
     log.info("Executing: %s", " ".join(cmd))
     try:
         result = subprocess.run(

@@ -156,7 +156,7 @@ def _exec_result(returncode: int) -> MagicMock:
 
 def test_docker_exec_silent_success():
     with patch("app.bot.subprocess.run", return_value=_exec_result(0)) as mock_run:
-        _docker_exec_silent("my-container", "sync")
+        _docker_exec_silent("my-container", ["sync"])
     cmd = mock_run.call_args.args[0]
     assert "docker" in cmd
     assert "exec" in cmd
@@ -166,22 +166,22 @@ def test_docker_exec_silent_success():
 
 def test_docker_exec_silent_failure_does_not_raise():
     with patch("app.bot.subprocess.run", return_value=_exec_result(1)):
-        _docker_exec_silent("my-container", "sync")  # must not raise
+        _docker_exec_silent("my-container", ["sync"])  # must not raise
 
 
 def test_docker_exec_silent_timeout_does_not_raise():
     with patch("app.bot.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="docker", timeout=600)):
-        _docker_exec_silent("my-container", "sync")  # must not raise
+        _docker_exec_silent("my-container", ["sync"])  # must not raise
 
 
 def test_docker_exec_silent_exception_does_not_raise():
     with patch("app.bot.subprocess.run", side_effect=OSError("docker not found")):
-        _docker_exec_silent("my-container", "sync")  # must not raise
+        _docker_exec_silent("my-container", ["sync"])  # must not raise
 
 
 def test_docker_exec_silent_passes_app_command_args():
     with patch("app.bot.subprocess.run", return_value=_exec_result(0)) as mock_run:
-        _docker_exec_silent("my-container", "backup monthly 2026-07")
+        _docker_exec_silent("my-container", ["backup", "monthly", "2026-07"])
     cmd = mock_run.call_args.args[0]
     assert "backup" in cmd
     assert "monthly" in cmd
