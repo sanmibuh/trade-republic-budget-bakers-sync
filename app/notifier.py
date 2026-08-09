@@ -205,49 +205,6 @@ class Notifier:
         return self._send("\n".join(lines))
 
 
-# ---------------------------------------------------------------------------
-# Module-level functions kept for backwards compatibility / standalone use
-# ---------------------------------------------------------------------------
-
-def notify_authentication_required(bot_token: str | None, chat_id: str | None, owner_name: str) -> bool:
-    return Notifier(bot_token, chat_id, owner_name).authentication_required()
-
-
-def notify_login_required(bot_token: str | None, chat_id: str | None, owner_name: str) -> bool:
-    return Notifier(bot_token, chat_id, owner_name).login_required()
-
-
-def notify_login_failed(bot_token: str | None, chat_id: str | None, owner_name: str) -> bool:
-    return Notifier(bot_token, chat_id, owner_name).login_failed()
-
-
-def notify_login_success(bot_token: str | None, chat_id: str | None, owner_name: str) -> bool:
-    return Notifier(bot_token, chat_id, owner_name).login_success()
-
-
-def notify_unknown_event_type(bot_token: str | None, chat_id: str | None, owner_name: str, event_type: str) -> bool:
-    return Notifier(bot_token, chat_id, owner_name).unknown_event_type(event_type)
-
-
-def notify_error(bot_token: str | None, chat_id: str | None, owner_name: str, error: Exception) -> bool:
-    return Notifier(bot_token, chat_id, owner_name).error(error)
-
-
-def notify_fetch_summary(
-    bot_token: str | None,
-    chat_id: str | None,
-    owner_name: str,
-    since: str,
-    until: str,
-    fetched: int,
-    new: int,
-    skipped: int,
-) -> bool:
-    return Notifier(bot_token, chat_id, owner_name).fetch_summary(
-        since=since, until=until, fetched=fetched, new=new, skipped=skipped
-    )
-
-
 def notify_sync_complete(
     bot_token: str | None,
     chat_id: str | None,

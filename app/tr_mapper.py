@@ -160,7 +160,13 @@ _EVENT_TITLES: dict[str, str] = {
     "BANK_TRANSACTION_OUTGOING": "Bank Transfer Out",
 }
 
-_PREFIXED_TYPES: frozenset[str] = frozenset({"INTEREST_PAYOUT", "INTEREST_PAYMENT", "SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE", "TRADING_SAVINGSPLAN_EXECUTED"})
+_PREFIXED_TYPES: frozenset[str] = frozenset({
+    "INTEREST_PAYOUT",
+    "INTEREST_PAYMENT",
+    "SAVEBACK_AGGREGATE",
+    "SPARE_CHANGE_AGGREGATE",
+    "TRADING_SAVINGSPLAN_EXECUTED",
+})
 
 
 def _event_note(event: dict[str, Any], event_type: str) -> str:
