@@ -37,8 +37,9 @@ TRClient.fetch_timeline_events()
 filter_by_lookback()         # drops events older than LOOKBACK_DAYS
         ↓
 build_records_for_event()    # TR event dict → list[BudgetBakers record dict]
-  └── _HANDLERS[event_type]  # per-type handler builds the record
-  └── label applied generically post-handler if LABEL_<EVENT_TYPE> is set
+   └── _build_note()          # single source of truth for the note/description
+   └── _HANDLERS[event_type]  # per-type handler builds record structure (accounts, payment type, counter-party)
+   └── label applied generically post-handler if LABEL_<EVENT_TYPE> is set
         ↓
 EventRepository.dedup_event_id()   # filters already-synced events (SQLite)
         ↓
