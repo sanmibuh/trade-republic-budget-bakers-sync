@@ -35,8 +35,22 @@ jobs:
           python -m json.tool coverage.json > coverage.pretty.json && mv coverage.pretty.json coverage.json
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
+      - name: Extract metrics
+        id: metrics
+        run: |
+          PASSED_COUNT=$(grep -oP '\d+(?= passed)' test-output.txt || echo "0")
+          FAILED_COUNT=$(grep -oP '\d+(?= failed)' test-output.txt || echo "0")
+          TOTAL_COV=$(python -c "import json; d=json.load(open('coverage.json')); print(d['totals']['percent_covered_display'])")
+          COVERED_LINES=$(python -c "import json; d=json.load(open('coverage.json')); print(d['totals']['covered_lines'])")
+          TOTAL_LINES=$(python -c "import json; d=json.load(open('coverage.json')); print(d['totals']['num_statements'])")
+          echo "passed=${PASSED_COUNT}"     >> "$GITHUB_OUTPUT"
+          echo "failed=${FAILED_COUNT}"     >> "$GITHUB_OUTPUT"
+          echo "coverage=${TOTAL_COV}"      >> "$GITHUB_OUTPUT"
+          echo "covered=${COVERED_LINES}"   >> "$GITHUB_OUTPUT"
+          echo "lines=${TOTAL_LINES}"       >> "$GITHUB_OUTPUT"
+
       # ----------------------------------------------------------------
-      # On merge to main: save coverage.json to ci-data branch
+      # On merge to main: save coverage.json + stats to ci-data branch
       # ----------------------------------------------------------------
       - name: Save coverage to ci-data
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -46,11 +60,31 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           cp coverage.json /tmp/coverage.json
+          # Save a small stats file alongside coverage.json
+          python -c "
+          import json
+          d = json.load(open('/tmp/coverage.json'))
+          t = d['totals']
+          stats = {
+              'percent': t['percent_covered_display'],
+              'covered_lines': t['covered_lines'],
+              'num_statements': t['num_statements'],
+          }
+          json.dump(stats, open('/tmp/ci-stats.json','w'))
+          "
+          PASSED_COUNT="${{ steps.metrics.outputs.passed }}"
+          python -c "
+          import json
+          s = json.load(open('/tmp/ci-stats.json'))
+          s['tests_passed'] = int('${PASSED_COUNT}')
+          json.dump(s, open('/tmp/ci-stats.json','w'))
+          "
           rm coverage.json
           git fetch origin ci-data
           git checkout ci-data
           cp /tmp/coverage.json ./coverage.json
-          git add coverage.json
+          cp /tmp/ci-stats.json ./ci-stats.json
+          git add coverage.json ci-stats.json
           git diff --cached --quiet || git commit -m "chore: update coverage from main@${{ github.sha }}"
           git push origin ci-data
 
@@ -61,26 +95,82 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           git fetch origin ci-data
-          git show origin/ci-data:coverage.json > main-coverage.json 2>/dev/null || echo '{}' > main-coverage.json
+          git show origin/ci-data:coverage.json  > main-coverage.json  2>/dev/null || echo '{}' > main-coverage.json
+          git show origin/ci-data:ci-stats.json  > main-ci-stats.json  2>/dev/null || echo '{}' > main-ci-stats.json
 
       - name: Post coverage comment
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TOTAL=$(python -c "import json; d=json.load(open('coverage.json')); print(d['totals']['percent_covered_display'])")
-          MAIN_TOTAL=$(python -c "
+          PR_COV="${{ steps.metrics.outputs.coverage }}"
+          PR_COVERED="${{ steps.metrics.outputs.covered }}"
+          PR_LINES="${{ steps.metrics.outputs.lines }}"
+          PR_PASSED="${{ steps.metrics.outputs.passed }}"
+          PR_FAILED="${{ steps.metrics.outputs.failed }}"
+          EXIT_CODE="${{ steps.tests.outputs.exit_code }}"
+
+          # Read main stats
+          MAIN_COV=$(python -c "
           import json, sys
           try:
-              d = json.load(open('main-coverage.json'))
-              print(d['totals']['percent_covered_display'])
+              d = json.load(open('main-ci-stats.json'))
+              print(d.get('percent', 'N/A'))
+          except Exception:
+              print('N/A')
+          ")
+          MAIN_COVERED=$(python -c "
+          import json
+          try:
+              d = json.load(open('main-ci-stats.json'))
+              print(d.get('covered_lines', 'N/A'))
+          except Exception:
+              print('N/A')
+          ")
+          MAIN_LINES=$(python -c "
+          import json
+          try:
+              d = json.load(open('main-ci-stats.json'))
+              print(d.get('num_statements', 'N/A'))
+          except Exception:
+              print('N/A')
+          ")
+          MAIN_PASSED=$(python -c "
+          import json
+          try:
+              d = json.load(open('main-ci-stats.json'))
+              print(d.get('tests_passed', 'N/A'))
           except Exception:
               print('N/A')
           ")
 
-          PASSED=$(grep -oP '\d+ passed' test-output.txt || echo "0 passed")
-          FAILED=$(grep -oP '\d+ failed' test-output.txt || echo "")
-          EXIT_CODE="${{ steps.tests.outputs.exit_code }}"
+          # Diffs
+          COV_DIFF=$(python -c "
+          try:
+              diff = float('${PR_COV}') - float('${MAIN_COV}')
+              sign = '+' if diff >= 0 else ''
+              print(f' ({sign}{diff:.1f}%)')
+          except Exception:
+              print('')
+          ")
+          LINES_DIFF=$(python -c "
+          try:
+              diff = int('${PR_LINES}') - int('${MAIN_LINES}')
+              sign = '+' if diff >= 0 else ''
+              pct = diff / int('${MAIN_LINES}') * 100 if int('${MAIN_LINES}') else 0
+              psign = '+' if pct >= 0 else ''
+              print(f' ({sign}{diff}, {psign}{pct:.1f}%)')
+          except Exception:
+              print('')
+          ")
+          TESTS_DIFF=$(python -c "
+          try:
+              diff = int('${PR_PASSED}') - int('${MAIN_PASSED}')
+              sign = '+' if diff >= 0 else ''
+              print(f' ({sign}{diff})')
+          except Exception:
+              print('')
+          ")
 
           if [ "$EXIT_CODE" = "0" ]; then
             STATUS="✅ All checks passed"
@@ -88,28 +178,21 @@ jobs:
             STATUS="❌ Checks failed"
           fi
 
-          # Coverage diff
-          if [ "$MAIN_TOTAL" = "N/A" ]; then
-            COVERAGE_DIFF="(no baseline)"
-          else
-            DIFF=$(python -c "
-          a = float('${TOTAL}')
-          b = float('${MAIN_TOTAL}')
-          diff = a - b
-          sign = '+' if diff >= 0 else ''
-          print(f'{sign}{diff:.1f}%')
-          ")
-            COVERAGE_DIFF="${DIFF} vs main (${MAIN_TOTAL}%)"
+          FAILED_ROW=""
+          if [ "$PR_FAILED" != "0" ]; then
+            FAILED_ROW="| ❌ Failed | ${PR_FAILED} | ${MAIN_PASSED:+—} |"
           fi
 
           BODY="## CI Results
 
           $STATUS
 
-          | | |
-          |---|---|
-          | Tests | $PASSED${FAILED:+ · $FAILED} |
-          | Coverage | ${TOTAL}% · ${COVERAGE_DIFF} |
+          | Metric | PR | main |
+          |---|---|---|
+          | ✅ Tests passed | ${PR_PASSED}${TESTS_DIFF} | ${MAIN_PASSED} |
+          ${FAILED_ROW}
+          | 📊 Coverage | ${PR_COV}%${COV_DIFF} | ${MAIN_COV}% |
+          | 📝 Lines covered | ${PR_COVERED} / ${PR_LINES}${LINES_DIFF} | ${MAIN_COVERED} / ${MAIN_LINES} |
 
           <details>
           <summary>Coverage detail</summary>
