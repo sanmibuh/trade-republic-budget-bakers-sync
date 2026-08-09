@@ -70,7 +70,7 @@ def backup(mode: str, param: str | None) -> None:
     from app.wallet_client import WalletClient
 
     cfg = BackupConfig.from_env()
-    setup_logging(cfg.data_dir / "logs")
+    setup_logging(cfg.data_dir)
     client = WalletClient(api_key=cfg.wallet_api_key)
     notifier = Notifier(
         bot_token=cfg.telegram_bot_token,

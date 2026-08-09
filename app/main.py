@@ -166,7 +166,7 @@ def run() -> int:
     cfg = Config.from_env()
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
 
-    setup_logging(cfg.data_dir / "logs")
+    setup_logging(cfg.data_dir)
     log.info("Starting sync for owner: %s", cfg.owner_name)
 
     notifier = Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)

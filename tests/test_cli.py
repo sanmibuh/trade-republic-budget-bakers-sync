@@ -97,7 +97,7 @@ def test_backup_auto_calls_run_auto(tmp_path):
         result = _runner().invoke(cli, ["backup", "auto"])
     assert result.exit_code == 0
     mock_auto.assert_called_once()
-    mock_setup_log.assert_called_once_with(tmp_path / "logs")
+    mock_setup_log.assert_called_once_with(tmp_path)
 
 
 # ---------------------------------------------------------------------------
