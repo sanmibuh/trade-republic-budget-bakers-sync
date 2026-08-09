@@ -36,16 +36,18 @@ Interaction flow for /backup_monthly / /backup_yearly:
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import os
-import subprocess
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import requests
 import urllib3
 
+import docker
 from app.config import BotEnv
 from app.notifier import _escape_markdown as _esc
 
@@ -54,7 +56,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 log = logging.getLogger(__name__)
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
-_EXEC_TIMEOUT = 600  # seconds — sync can take a while
+_YEAR_BUTTON_COUNT = 3   # number of recent years offered in the yearly backup keyboard
+_MONTH_BUTTON_COUNT = 4  # number of recent months offered in the monthly backup keyboard
 
 # Set TELEGRAM_VERIFY_SSL=false to disable SSL verification (e.g. behind a corporate proxy).
 _SSL_VERIFY: bool = os.environ.get("TELEGRAM_VERIFY_SSL", "true").strip().lower() != "false"
@@ -243,14 +246,25 @@ class TelegramBot:
             return
 
         parts = data.split(_CB_SEP)
-        # Encoded format: "<cmd>:<instance>" or "<cmd>:<param>:<instance>"
+        # Encoded format: "<cmd>:<param>" (backup_yearly) or "<cmd>:<instance>" (sync)
         if len(parts) < 2:
             log.warning("Malformed callback_data: %r", data)
             return
 
         cmd = parts[0]
-        instance_key = parts[-1].lower()
 
+        if cmd == "backup_yearly":
+            year = parts[1]
+            self._launch_backup_yearly(year)
+            return
+
+        if cmd == "backup_monthly":
+            period = parts[1]
+            self._launch_backup_monthly(period)
+            return
+
+        # All remaining cmds (sync) use instance routing.
+        instance_key = parts[-1].lower()
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
             self._send_message(f"❓ Unknown instance: `{_esc(instance_key)}`")
@@ -307,13 +321,18 @@ class TelegramBot:
         if not self._cfg.backup_container:
             self._send_message("🚫 Backup service is not configured\\.")
             return
-        param = args[0] if args else None
-        label = _esc(f"Monthly backup ({param or 'previous month'})")
+        if args:
+            self._launch_backup_monthly(args[0])
+        else:
+            self._send_message("📦 *Monthly backup* — Choose month:", keyboard=self._month_buttons())
+
+    def _launch_backup_monthly(self, period: str) -> None:
+        label = _esc(f"Monthly backup ({period})")
         self._send_message(f"📦 *{label}*\\.\\.\\.")
-        app_args = ["backup", "monthly"] + ([param] if param else [])
         threading.Thread(
             target=_docker_exec_silent,
-            args=(self._cfg.backup_container, app_args),
+            args=(self._cfg.backup_container, ["backup", "monthly", period]),
+            kwargs={"on_error": self._send_message},
             daemon=True,
         ).start()
 
@@ -321,15 +340,30 @@ class TelegramBot:
         if not self._cfg.backup_container:
             self._send_message("🚫 Backup service is not configured\\.")
             return
-        param = args[0] if args else None
-        label = _esc(f"Yearly backup ({param or 'previous year'})")
+        if args:
+            self._launch_backup_yearly(args[0])
+        else:
+            self._send_message("📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons())
+
+    def _launch_backup_yearly(self, year: str) -> None:
+        label = _esc(f"Yearly backup ({year})")
         self._send_message(f"📆 *{label}*\\.\\.\\.")
-        app_args = ["backup", "yearly"] + ([param] if param else [])
         threading.Thread(
             target=_docker_exec_silent,
-            args=(self._cfg.backup_container, app_args),
+            args=(self._cfg.backup_container, ["backup", "yearly", year]),
+            kwargs={"on_error": self._send_message},
             daemon=True,
         ).start()
+
+    def _year_buttons(self) -> list[list[dict]]:
+        """Inline keyboard with the most recent years (previous year first)."""
+        current_year = datetime.datetime.now(tz=datetime.timezone.utc).year
+        years = [current_year - i for i in range(1, _YEAR_BUTTON_COUNT + 1)]
+        buttons = [
+            {"text": str(y), "callback_data": f"backup_yearly{_CB_SEP}{y}"}
+            for y in years
+        ]
+        return [buttons]
 
     # ------------------------------------------------------------------
     # Execution
@@ -340,6 +374,7 @@ class TelegramBot:
         threading.Thread(
             target=_docker_exec_silent,
             args=(inst.container_name, ["sync"]),
+            kwargs={"on_error": self._send_message},
             daemon=True,
         ).start()
 
@@ -354,6 +389,23 @@ class TelegramBot:
             for inst in self._cfg.instances.values()
         ]
         return [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+
+    def _month_buttons(self) -> list[list[dict]]:
+        """Inline keyboard with the most recent months (previous month first)."""
+        today = datetime.datetime.now(tz=datetime.timezone.utc).date()
+        months = []
+        year, month = today.year, today.month
+        for _ in range(_MONTH_BUTTON_COUNT):
+            month -= 1
+            if month == 0:
+                month = 12
+                year -= 1
+            months.append(f"{year}-{month:02d}")
+        buttons = [
+            {"text": m, "callback_data": f"backup_monthly{_CB_SEP}{m}"}
+            for m in months
+        ]
+        return [buttons]
 
     # ------------------------------------------------------------------
     # Telegram API helpers
@@ -396,34 +448,39 @@ class TelegramBot:
 # Docker helpers
 # ---------------------------------------------------------------------------
 
-def _docker_exec_silent(container_name: str, app_args: list[str]) -> None:
-    """Run `docker exec <container> python -m app <app_args>` and log the result.
+def _docker_exec_silent(
+    container_name: str,
+    app_args: list[str],
+    on_error: Callable[[str], None] | None = None,
+) -> None:
+    """Run `python -m app <app_args>` inside a container via the Docker SDK.
 
-    Does NOT send any Telegram message — the container's own Notifier handles that.
+    Does NOT send any Telegram message on success — the container's own Notifier
+    handles that. On failure, calls `on_error(message)` if provided.
     """
-    cmd = ["docker", "exec", container_name, "python", "-m", "app"] + app_args
-    log.info("Executing: %s", " ".join(cmd))
+    cmd = ["python", "-m", "app"] + app_args
+    log.info("Executing: docker exec %s %s", container_name, " ".join(cmd))
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=_EXEC_TIMEOUT,
-            check=False,
-        )
-        if result.returncode == 0:
+        client = docker.from_env()
+        container = client.containers.get(container_name)
+        env = container.attrs["Config"]["Env"]
+        exit_code, output = container.exec_run(cmd, environment=env)
+        if exit_code == 0:
             log.info("docker exec finished successfully for container %s", container_name)
         else:
+            details = output.decode(errors="replace").strip() if output else ""
             log.warning(
                 "docker exec exited with code %s for container %s:\n%s",
-                result.returncode,
+                exit_code,
                 container_name,
-                (result.stdout + result.stderr).strip(),
+                details,
             )
-    except subprocess.TimeoutExpired:
-        log.warning("docker exec timed out after %ss for container %s", _EXEC_TIMEOUT, container_name)
+            if on_error:
+                on_error(f"❌ Command failed on `{container_name}` \\(exit {exit_code}\\)\\.")
     except Exception as exc:  # noqa: BLE001
         log.warning("docker exec failed for container %s: %s", container_name, exc)
+        if on_error:
+            on_error(f"❌ Could not exec on `{container_name}`: {exc}")
 
 
 # ---------------------------------------------------------------------------

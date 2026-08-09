@@ -68,6 +68,7 @@ jobs:
           context: .
           file: docker/app/Dockerfile
           push: true
+          no-cache: true
           build-args: |
             BASE_TAG=${{ steps.meta.outputs.version }}
           tags: |

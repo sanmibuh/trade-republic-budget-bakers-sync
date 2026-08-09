@@ -9,7 +9,7 @@ Technical reference for developers and AI assistants. Covers module design, data
 ```
 app/
   __main__.py       # CLI entry point — click group with `sync`, `backup`, and `bot` subcommands
-  config.py         # Config dataclass — reads all env vars in one place
+  config.py         # Config and BackupConfig dataclasses — reads all env vars in one place
   persistence.py    # EventRepository (SQLite dedup)
   tr_mapper.py      # TR event → BudgetBakers record mapping
   tr_client.py      # TRClient — pytr wrapper: login, 2FA, timeline fetch
@@ -21,7 +21,7 @@ app/
   main.py           # Sync orchestrator: wires all modules, minimal logic
 
 docker/
-  base/Dockerfile   # python:3.11-slim + git + docker CLI + pip deps; published as python-trade-republic
+  base/Dockerfile   # python:3.11-slim + git + pip deps (incl. docker SDK); published as python-trade-republic
   app/Dockerfile    # installs cron, copies app code + entrypoint.sh
   app/entrypoint.sh # MODE=sync|backup|bot; one-shot if schedule not set
 ```
@@ -117,17 +117,21 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - Yearly cleanup removes the 12 monthly files whose period is covered by the yearly backup.
 
 ### Telegram bot
-- `app/bot.py`: long-polling bot dispatching commands to Docker containers via `docker exec`.
+- `app/bot.py`: long-polling bot dispatching commands to Docker containers via the Docker SDK (`docker` Python package).
 - `BotConfig` reads `INSTANCES` (sync instances), `CONTAINER_PREFIX`, and `BACKUP_SERVICE` from env.
 - `CONTAINER_PREFIX` must match the Docker Compose project `name:` field (e.g. `tr-sync`) — fixed in `docker-compose.yml` via `name: tr-sync` so it never changes regardless of the directory name.
 - Container naming: sync → `{prefix}-sync-{name}-1`, backup → `{prefix}-{backup_service}-1`.
 - Backup commands (`/backup_monthly`, `/backup_yearly`) execute directly on the backup container — no instance picker.
 - Sync commands (`/sync`) show an inline keyboard to pick the instance.
-- The Docker socket (`/var/run/docker.sock`) is required for `docker exec`.
-- Base URL: `{base_url}/v1/api/{resource}`
-- Pagination via `nextOffset` in the response dict; plain list responses have no pagination.
-- `_get_all()` handles both response shapes: plain `list` (no pagination) and `{"data": [...], "nextOffset": N}`.
-- `_collect_page()` is a `@staticmethod` extracted from `_get_all` to keep cognitive complexity ≤ 15: appends items from a paginated dict page into the results list and returns the next offset.
+- The Docker socket (`/var/run/docker.sock`) is mounted into the bot container; the Docker SDK communicates with it directly (no docker CLI binary required).
+- `_docker_exec_silent` accepts an optional `on_error` callback — called with an error message string when the exec fails or exits non-zero. The bot passes `self._send_message` so the user receives a Telegram notification on failure.
+
+### Config — environment variables
+- `Config.from_env()` — full config for the **sync** command. Requires `PHONE_NUMBER`, `PIN`, `WALLET_API_KEY`, `WALLET_CASH_ACCOUNT_ID`, `WALLET_PORTFOLIO_ACCOUNT_ID`.
+- `BackupConfig.from_env()` — minimal config for the **backup** command. Only requires `WALLET_API_KEY`. Does not validate sync-only credentials, so the backup container can run without them.
+- Both share optional fields: `OWNER_NAME` (default `"Backup"`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DATA_DIR`.
+- `BotEnv.from_env()` — config for the **bot** command. Reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `INSTANCES`, `CONTAINER_PREFIX`, `BACKUP_SERVICE`.
+- All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
 ### OWNER_NAME
 - `OWNER_NAME` is optional — defaults to `"Backup"` when not set.
@@ -149,7 +153,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 
 | Image | Base | Published on |
 |---|---|---|
-| `ghcr.io/sanmibuh/python-trade-republic` | `python:3.11-slim` + git + docker CLI + pip deps | `v3.0.0` |
+| `ghcr.io/sanmibuh/python-trade-republic` | `python:3.11-slim` + git + pip deps (incl. docker SDK) | `v5.0.0` |
 | `ghcr.io/sanmibuh/tr-wallet-sync` | `python-trade-republic` + app code + cron | Minor/patch releases |
 
 `cron` is intentionally installed only in the app image (`docker/app/Dockerfile`), not in the base image — it is an app concern.
@@ -193,10 +197,10 @@ When working with an AI assistant: **always ask for tests before implementation*
 
 ## Test suite
 
-323 tests across 11 files — all passing.
+344 tests across 11 files — all passing.
 
 ```
-tests/test_config.py          # Config.from_env, OWNER_NAME default, _required_env
+tests/test_config.py          # Config, BackupConfig, BotEnv — from_env, required/optional fields
 tests/test_persistence.py     # EventRepository, dedup_event_id, mark_processed, purge
 tests/test_tr_mapper.py       # _HANDLERS, IBAN extraction, label_ids, filter_by_lookback, _gross_tax_note
 tests/test_wallet_client.py   # post_records batching; _get_all + _collect_page pagination branches
@@ -226,7 +230,7 @@ make test
 | `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions |
 | `app/tr_mapper.py` | `_HANDLERS`, `_ZERO_AMOUNT_TYPES`, `KNOWN_EVENT_TYPES`, `_make_record` |
 | `app/persistence.py` | `EventRepository`, `dedup_event_id`; `INSERT OR IGNORE` |
-| `app/config.py` | `Config` dataclass; `label_ids: dict[str, str]`; `_read_label_ids()` |
+| `app/config.py` | `Config` (sync) and `BackupConfig` (backup) dataclasses; `BotEnv`; `_read_label_ids()` |
 | `app/wallet_client.py` | `post_records` (sync) + `_get_all`/`_collect_page` + `get_*` (backup) |
 | `app/logging_setup.py` | `setup_logging(data_dir)` for daemon; `configure_logging()` for CLI entry points |
 | `docker/app/entrypoint.sh` | `MODE=sync\|backup\|bot`; cron or one-shot depending on schedule vars |
