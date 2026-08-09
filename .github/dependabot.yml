@@ -9,3 +9,7 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "deps"
+    groups:
+      pip-dependencies:
+        patterns:
+          - "*"
