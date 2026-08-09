@@ -168,13 +168,93 @@ _PREFIXED_TYPES: frozenset[str] = frozenset({
     "TRADING_SAVINGSPLAN_EXECUTED",
 })
 
+_BANK_DIRECTION: dict[str, str] = {
+    "BANK_TRANSACTION_INCOMING": "From",
+    "BANK_TRANSACTION_OUTGOING": "To",
+}
 
-def _event_note(event: dict[str, Any], event_type: str) -> str:
+_ORIGIN_REF_KEYS: tuple[str, ...] = ("relatedId", "originalId", "originEventId", "referenceId")
+
+
+def _gross_tax_note(gross: str | None, tax: str | None) -> str | None:
+    """Return a 'gross X, tax Y' fragment, or None if no gross is available."""
+    if gross and tax:
+        return f"gross {gross}, tax {tax}"
+    if gross:
+        return f"gross {gross}"
+    return None
+
+
+def _note_extras(event: dict[str, Any], event_type: str) -> list[str]:
+    """Return additional note fragments for event types that append detail rows.
+
+    Currently handles:
+    - Investment types: appends Transaktion (units × price).
+    - SAVEBACK_AGGREGATE: appends Transaktion + gross/tax.
+    - Interest types: appends gross accrued + tax withheld.
+    """
+    details = event.get("details") or {}
+
+    if event_type in ("TRADING_SAVINGSPLAN_EXECUTED", "SPARE_CHANGE_AGGREGATE"):
+        txn = _extract_detail_row(details, "Transaktion")
+        return [txn] if txn else []
+
+    if event_type == "SAVEBACK_AGGREGATE":
+        parts: list[str] = []
+        txn = _extract_detail_row(details, "Transaktion")
+        if txn:
+            parts.append(txn)
+        gt = _gross_tax_note(
+            _extract_detail_row(details, "Angefallen"),
+            _extract_detail_row(details, "Steuern"),
+        )
+        if gt:
+            parts.append(gt)
+        return parts
+
+    if event_type in ("INTEREST_PAYMENT", "INTEREST_PAYOUT"):
+        gt = _gross_tax_note(
+            _extract_detail_row(details, "Angesammelt"),
+            _extract_detail_row(details, "Steuern"),
+        )
+        return [gt] if gt else []
+
+    return []
+
+
+def _build_note(event: dict[str, Any], event_type: str) -> str:
+    """Build the full note/description for a TR event — single source of truth.
+
+    Resolution order:
+    1. Bank transactions → directional prefix ("From: X" / "To: X").
+    2. Unknown refund types → "Refund: X" + optional origin reference.
+    3. Known prefixed types → "{Label}: {title}".
+    4. Everything else → raw title, mapped label, event_type, or generic fallback.
+    In all cases, detail extras (Transaktion, gross/tax) are appended when present.
+    """
     tr_title = str(_get_first_match(event, "title", "name", "description") or "").strip()
+
+    # 1. Bank transactions: directional prefix, no further extras
+    direction = _BANK_DIRECTION.get(event_type)
+    if direction is not None:
+        return f"{direction}: {tr_title}" if tr_title else direction
+
+    # 2. Unknown refund types: "Refund: X" + optional origin reference
+    if "REFUND" in event_type and event_type not in _HANDLERS:
+        base = f"Refund: {tr_title}" if tr_title else "Refund"
+        origin_ref = _get_first_match(event, *_ORIGIN_REF_KEYS)
+        return f"{base} (ref: {origin_ref})" if origin_ref else base
+
+    # 3–4. Base note
     mapped = _EVENT_TITLES.get(event_type, "")
     if event_type in _PREFIXED_TYPES and mapped and tr_title:
-        return f"{mapped}: {tr_title}"
-    return tr_title or mapped or event_type or "Trade Republic event"
+        base = f"{mapped}: {tr_title}"
+    else:
+        base = tr_title or mapped or event_type or "Trade Republic event"
+
+    # Append detail extras (Transaktion, gross/tax) for types that need them
+    extras = _note_extras(event, event_type)
+    return f"{base} · {' · '.join(extras)}" if extras else base
 
 
 def _make_record(
@@ -208,7 +288,10 @@ def _make_record(
 
 
 # ---------------------------------------------------------------------------
-# Event type handlers (one function per behaviour)
+# Event type handlers — responsible only for record structure
+# (account selection, payment type, counter-party).
+# Note/description is always pre-built by _build_note before reaching here.
+# Adding a new event type = add one line in _HANDLERS + one handler if needed.
 # ---------------------------------------------------------------------------
 
 def _handle_cash(
@@ -225,56 +308,11 @@ def _handle_transfer_to_portfolio(
     return [_make_record(cash_account_id, amount, note, record_date, transfer_account_id=portfolio_account_id)]
 
 
-def _handle_investment(
-    event: dict[str, Any], amount: Decimal, note: str, record_date: str,
-    cash_account_id: str, portfolio_account_id: str,
-) -> list[dict[str, Any]]:
-    """Transfer to portfolio with Transaktion (units × price) appended to note."""
-    details = event.get("details") or {}
-    txn = _extract_detail_row(details, "Transaktion")
-    full_note = f"{note} · {txn}" if txn else note
-    return [_make_record(cash_account_id, amount, full_note, record_date, transfer_account_id=portfolio_account_id)]
-
-
 def _handle_saveback(
     event: dict[str, Any], amount: Decimal, note: str, record_date: str,
     cash_account_id: str, portfolio_account_id: str,
 ) -> list[dict[str, Any]]:
     return [_make_record(portfolio_account_id, amount, note, record_date)]
-
-
-def _gross_tax_note(gross: str | None, tax: str | None) -> str | None:
-    """Return a 'gross X, tax Y' fragment, or None if no gross is available."""
-    if gross and tax:
-        return f"gross {gross}, tax {tax}"
-    if gross:
-        return f"gross {gross}"
-    return None
-
-
-def _handle_saveback_aggregate(
-    event: dict[str, Any], amount: Decimal, note: str, record_date: str,
-    cash_account_id: str, portfolio_account_id: str,
-) -> list[dict[str, Any]]:
-    """Transfer to portfolio with Transaktion + gross + tax appended to note."""
-    details = event.get("details") or {}
-    parts = [p for p in [
-        _extract_detail_row(details, "Transaktion"),
-        _gross_tax_note(_extract_detail_row(details, "Angefallen"), _extract_detail_row(details, "Steuern")),
-    ] if p]
-    full_note = f"{note} · {' · '.join(parts)}" if parts else note
-    return [_make_record(cash_account_id, amount, full_note, record_date, transfer_account_id=portfolio_account_id)]
-
-
-def _handle_interest(
-    event: dict[str, Any], amount: Decimal, note: str, record_date: str,
-    cash_account_id: str, portfolio_account_id: str,
-) -> list[dict[str, Any]]:
-    """Cash credit with gross accrued + tax withheld appended to note."""
-    details = event.get("details") or {}
-    gt = _gross_tax_note(_extract_detail_row(details, "Angesammelt"), _extract_detail_row(details, "Steuern"))
-    full_note = f"{note} · {gt}" if gt else note
-    return [_make_record(cash_account_id, amount, full_note, record_date)]
 
 
 def _handle_card(
@@ -288,18 +326,13 @@ def _handle_bank_transaction(
     event: dict[str, Any], amount: Decimal, note: str, record_date: str,
     cash_account_id: str, portfolio_account_id: str,
 ) -> list[dict[str, Any]]:
-    event_type = str(_get_first_match(event, "eventType", "type", "event_type") or "").upper()
+    """Cash record with an unpaired transfer and optional IBAN counter-party."""
     tr_title = str(_get_first_match(event, "title", "name", "description") or "").strip()
-    direction = "From" if event_type == "BANK_TRANSACTION_INCOMING" else "To"
-    transfer_note = f"{direction}: {tr_title}" if tr_title else note
-
-    # Prefer full IBAN from details; fall back to counterparty name
     details = event.get("details") or {}
     iban = _extract_iban_from_details(details)
     counter_party = iban or tr_title or None
-
     return [_make_record(
-        cash_account_id, amount, transfer_note, record_date,
+        cash_account_id, amount, note, record_date,
         payment_type="transfer",
         counter_party=counter_party,
         unpaired_transfer=True,
@@ -317,15 +350,15 @@ _EventHandler = Callable[
 ]
 
 _HANDLERS: dict[str, _EventHandler] = {
-    "INTEREST_PAYMENT":                         _handle_interest,
-    "INTEREST_PAYOUT":                          _handle_interest,
+    "INTEREST_PAYMENT":                         _handle_cash,
+    "INTEREST_PAYOUT":                          _handle_cash,
     "PAYMENT_INBOUND":                          _handle_cash,
     "BUY_ORDER":                                _handle_transfer_to_portfolio,
     "SELL_ORDER":                               _handle_transfer_to_portfolio,
     "SAVINGS_PLAN":                             _handle_transfer_to_portfolio,
-    "TRADING_SAVINGSPLAN_EXECUTED":             _handle_investment,
-    "SAVEBACK_AGGREGATE":                       _handle_saveback_aggregate,
-    "SPARE_CHANGE_AGGREGATE":                   _handle_investment,
+    "TRADING_SAVINGSPLAN_EXECUTED":             _handle_transfer_to_portfolio,
+    "SAVEBACK_AGGREGATE":                       _handle_transfer_to_portfolio,
+    "SPARE_CHANGE_AGGREGATE":                   _handle_transfer_to_portfolio,
     "SAVEBACK":                                 _handle_saveback,
     "CARD_TRANSACTION":                         _handle_card,
     "BANK_TRANSACTION_INCOMING":                _handle_bank_transaction,
@@ -369,7 +402,7 @@ def build_records_for_event(
         return []
 
     record_date = normalize_event_time(event)
-    note = _event_note(event, event_type)
+    note = _build_note(event, event_type)
     handler = _HANDLERS.get(event_type)
     if handler is None:
         log.warning("Unknown TR event type %r — falling back to cash handler", event_type)

@@ -6,11 +6,6 @@ Pending ideas and improvements, roughly ordered by impact. No fixed dates or pri
 
 ## Sync
 
-### Better handling of unknown event types
-Currently, unknown event types (e.g. `CARD_REFUND`) trigger an ⚠️ notification and are processed with the default cash handler. Two improvements:
-- **Prefill the description** as `Refund: <original title>` instead of the raw event title.
-- **Link to the original transaction**: investigate whether the Trade Republic API includes a reference to the origin transaction in the refund event, and if so, surface it in the description or as a note.
-
 ### Reduce notification noise on sync
 Every sync run sends two separate messages: a _"fetched N events"_ summary and a _"success, saved M"_ confirmation. Merge them into a single message sent at the end, combining both period, fetch counts, and save results.
 
