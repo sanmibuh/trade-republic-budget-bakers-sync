@@ -44,9 +44,10 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp coverage.json /tmp/coverage.json
           git fetch origin ci-data
           git checkout ci-data
-          cp ${{ github.workspace }}/coverage.json ./coverage.json
+          cp /tmp/coverage.json ./coverage.json
           git add coverage.json
           git diff --cached --quiet || git commit -m "chore: update coverage from main@${{ github.sha }}"
           git push origin ci-data
