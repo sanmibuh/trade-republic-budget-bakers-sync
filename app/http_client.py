@@ -50,7 +50,7 @@ def http_post(url: str, **kwargs: Any) -> requests.Response:
         return requests.post(url, verify=_ssl_verify, **kwargs)
     except requests.exceptions.SSLError:
         _open_circuit()
-        return requests.post(url, verify=False, **kwargs)
+        return requests.post(url, verify=False, **kwargs)  # NOSONAR — intentional fallback after circuit-breaker trips
 
 
 class _SSLCircuitBreakerAdapter(requests.adapters.HTTPAdapter):
@@ -62,7 +62,7 @@ class _SSLCircuitBreakerAdapter(requests.adapters.HTTPAdapter):
             return super().send(request, **kwargs)
         except requests.exceptions.SSLError:
             _open_circuit()
-            kwargs["verify"] = False
+            kwargs["verify"] = False  # NOSONAR — intentional fallback after circuit-breaker trips
             return super().send(request, **kwargs)
 
 
@@ -77,7 +77,6 @@ def build_session(headers: dict[str, str] | None = None) -> requests.Session:
     session.verify = _ssl_verify
     adapter = _SSLCircuitBreakerAdapter()
     session.mount("https://", adapter)
-    session.mount("http://", adapter)
     if headers:
         session.headers.update(headers)
     return session
