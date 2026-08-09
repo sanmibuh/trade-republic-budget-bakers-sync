@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -129,46 +128,56 @@ def test_botconfig_from_env_instance_names_normalised(monkeypatch):
 # _docker_exec_silent
 # ---------------------------------------------------------------------------
 
-def _exec_result(returncode: int) -> MagicMock:
-    r = MagicMock()
-    r.returncode = returncode
-    r.stdout = "some output"
-    r.stderr = ""
-    return r
+def _make_docker_client(exit_code: int = 0, output: bytes = b"") -> MagicMock:
+    """Return a mock docker client where exec_run returns (exit_code, output)."""
+    container = MagicMock()
+    container.exec_run.return_value = (exit_code, output)
+    client = MagicMock()
+    client.containers.get.return_value = container
+    return client
 
 
 def test_docker_exec_silent_success():
-    with patch("app.bot.subprocess.run", return_value=_exec_result(0)) as mock_run:
+    client = _make_docker_client(0)
+    with patch("app.bot.docker.from_env", return_value=client):
         _docker_exec_silent("my-container", ["sync"])
-    cmd = mock_run.call_args.args[0]
-    assert "docker" in cmd
-    assert "exec" in cmd
-    assert "my-container" in cmd
-    assert "sync" in cmd
+    client.containers.get.assert_called_once_with("my-container")
+    args = client.containers.get.return_value.exec_run.call_args.args[0]
+    assert "python" in args
+    assert "-m" in args
+    assert "app" in args
+    assert "sync" in args
 
 
 def test_docker_exec_silent_failure_does_not_raise():
-    with patch("app.bot.subprocess.run", return_value=_exec_result(1)):
+    client = _make_docker_client(1, b"error output")
+    with patch("app.bot.docker.from_env", return_value=client):
         _docker_exec_silent("my-container", ["sync"])  # must not raise
 
 
-def test_docker_exec_silent_timeout_does_not_raise():
-    with patch("app.bot.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="docker", timeout=600)):
+def test_docker_exec_silent_container_not_found_does_not_raise():
+    import docker.errors
+    client = MagicMock()
+    client.containers.get.side_effect = docker.errors.NotFound("not found")
+    with patch("app.bot.docker.from_env", return_value=client):
         _docker_exec_silent("my-container", ["sync"])  # must not raise
 
 
 def test_docker_exec_silent_exception_does_not_raise():
-    with patch("app.bot.subprocess.run", side_effect=OSError("docker not found")):
+    client = MagicMock()
+    client.containers.get.side_effect = Exception("unexpected")
+    with patch("app.bot.docker.from_env", return_value=client):
         _docker_exec_silent("my-container", ["sync"])  # must not raise
 
 
 def test_docker_exec_silent_passes_app_command_args():
-    with patch("app.bot.subprocess.run", return_value=_exec_result(0)) as mock_run:
+    client = _make_docker_client(0)
+    with patch("app.bot.docker.from_env", return_value=client):
         _docker_exec_silent("my-container", ["backup", "monthly", "2026-07"])
-    cmd = mock_run.call_args.args[0]
-    assert "backup" in cmd
-    assert "monthly" in cmd
-    assert "2026-07" in cmd
+    args = client.containers.get.return_value.exec_run.call_args.args[0]
+    assert "backup" in args
+    assert "monthly" in args
+    assert "2026-07" in args
 
 
 # ---------------------------------------------------------------------------
