@@ -51,6 +51,7 @@ jobs:
           git add coverage.json
           git diff --cached --quiet || git commit -m "chore: update coverage from main@${{ github.sha }}"
           git push origin ci-data
+          git rm coverage.json
           git checkout main
 
       # ----------------------------------------------------------------
