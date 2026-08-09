@@ -67,7 +67,7 @@ class Config:
     @classmethod
     def from_env(cls) -> Config:
         return cls(
-            owner_name=_required_env("OWNER_NAME"),
+            owner_name=os.getenv("OWNER_NAME", "Backup"),
             phone_number=_required_env("PHONE_NUMBER"),
             pin=_required_env("PIN"),
             wallet_api_key=_required_env("WALLET_API_KEY"),
