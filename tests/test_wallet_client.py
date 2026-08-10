@@ -26,6 +26,18 @@ def _mock_response(status_code: int, body: dict):
 # WalletClient.post_records
 # ---------------------------------------------------------------------------
 
+def test_post_records_url_uses_api_base():
+    """post_records must POST to the same /v1/api base as GET endpoints."""
+    client = _make_client()
+    results = [{"inputIndex": 0, "success": True}]
+    client.session.post = MagicMock(return_value=_mock_response(200, {"results": results}))
+
+    client.post_records([{"accountId": "x"}])
+
+    url = client.session.post.call_args[0][0]
+    assert url == "https://example.com/wallet/v1/api/records"
+
+
 def test_post_records_empty_returns_empty():
     client = _make_client()
     assert client.post_records([]) == []

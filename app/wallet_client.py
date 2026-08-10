@@ -53,7 +53,7 @@ class WalletClient:
                 chunk_start, len(chunk),
             )
             response = self.session.post(
-                f"{self.base_url}/v1/api/records",
+                f"{self._get_base}/records",
                 params={"returnData": "false"},
                 json=chunk,
                 timeout=30,
