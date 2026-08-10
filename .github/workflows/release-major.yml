@@ -1,0 +1,59 @@
+name: Release major
+
+on:
+  workflow_dispatch:
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_RELEASE }}
+
+      - name: Calculate next major version
+        id: version
+        run: |
+          CURRENT=$(cat VERSION)
+          MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+          NEW="$((MAJOR + 1)).0.0"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+
+      - name: Update VERSION and docker-compose image tag
+        run: |
+          echo "${{ steps.version.outputs.new }}" > VERSION
+          sed -i "s|ghcr.io/sanmibuh/tr-wallet-sync:v${{ steps.version.outputs.current }}|ghcr.io/sanmibuh/tr-wallet-sync:v${{ steps.version.outputs.new }}|g" \
+            deploy/nas/current/docker-compose.yml
+
+      - name: Open PR
+        env:
+          GH_TOKEN: ${{ secrets.PAT_RELEASE }}
+        run: |
+          NEW="${{ steps.version.outputs.new }}"
+          CURRENT="${{ steps.version.outputs.current }}"
+          BRANCH="release-${NEW}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add VERSION deploy/nas/current/docker-compose.yml
+          git commit -m "[release-${NEW}]: chore: update version to ${NEW}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "[release-${NEW}]: chore: update version to ${NEW}" \
+            --body "## Release ${NEW} (major)
+
+          Bumps version \`${CURRENT}\` → \`${NEW}\` and updates the image tag in \`deploy/nas/current/docker-compose.yml\`.
+
+          **Merging this PR will:**
+          - Trigger \`release.yml\` → create tag \`v${NEW}\` + GitHub Release
+          - Trigger the Docker build workflows for both \`python-trade-republic\` and \`tr-wallet-sync:v${NEW}\`" \
+            --base main \
+            --head "$BRANCH"
