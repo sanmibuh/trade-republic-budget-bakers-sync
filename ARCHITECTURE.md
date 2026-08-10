@@ -174,6 +174,24 @@ Must rebuild the app image after any code change. Build and push are automated v
 
 Releases are triggered automatically by bumping the `VERSION` file and pushing to `main` — the `release.yml` workflow creates the tag and GitHub release, which in turn triggers the publish workflows.
 
+### Release workflows
+
+Three `workflow_dispatch` workflows are available from the GitHub Actions UI (or `gh workflow run`). They require no inputs — the new version is calculated automatically from the current `VERSION` file:
+
+| Workflow | Trigger | Example (`6.1.0` → ) |
+|---|---|---|
+| `release-patch.yml` | bug fixes, minor tweaks | `6.1.1` |
+| `release-minor.yml` | new features, backwards-compatible | `6.2.0` |
+| `release-major.yml` | breaking changes, base image rebuild | `7.0.0` |
+
+Each workflow:
+1. Calculates the next version.
+2. Updates `VERSION`.
+3. Updates the image tag in `deploy/nas/current/docker-compose.yml`.
+4. Opens a PR `release-{version}` → `main` ready to review and merge.
+
+Merging the PR triggers `release.yml`, which creates the tag and GitHub Release, which in turn triggers the Docker image publish workflows.
+
 ---
 
 ## Data volume
