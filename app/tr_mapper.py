@@ -71,6 +71,21 @@ def _get_first_match(payload: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def extract_event_type(event: dict[str, Any]) -> str:
+    """Return the event type string from an event dict, always uppercased.
+
+    Checks ``eventType``, ``type``, and ``event_type`` in order, skipping
+    falsy values.  Returns an empty string if none are present or all are falsy.
+    """
+    value = (
+        event.get("eventType")
+        or event.get("type")
+        or event.get("event_type")
+        or ""
+    )
+    return str(value).upper()
+
+
 def extract_amount(event: dict[str, Any], *keys: str) -> Decimal:
     value = _get_first_match(event, *keys)
     if isinstance(value, dict):
@@ -393,7 +408,7 @@ def build_records_for_event(
     Returns a list ready to be included in a POST /v1/api/records batch.
     Makes no HTTP calls.
     """
-    event_type = str(_get_first_match(event, "eventType", "type", "event_type") or "").upper()
+    event_type = extract_event_type(event)
     amount = extract_amount(event, "amount", "value", "grossAmount", "gross", "total")
 
     log.debug("Building record(s) for event type=%s amount=%s", event_type, amount)
