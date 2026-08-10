@@ -40,13 +40,15 @@ deploy/
     data/               # written by local runs (never committed)
   example/            # example config files (no secrets)
     docker-compose.yml
-    common.env.example
+    wallet.env.example
+    telegram.env.example
     sync-1.env.example
     sync-2.env.example
   nas/
     current/          # next version — rename to vXXX after deploy
       docker-compose.yml
-      common.env      # real credentials (never committed)
+      wallet.env      # real credentials (never committed)
+      telegram.env    # real credentials (never committed)
       sync-1.env      # per-account credentials (never committed)
       sync-2.env
       tr-sync.sh      # management script
@@ -69,12 +71,14 @@ Copy the contents of `deploy/example/` to a folder on the NAS (e.g. `/share/dock
 Rename the example files and fill in real values:
 
 ```sh
-cp common.env.example  common.env
-cp sync-1.env.example  sync-1.env
-cp sync-2.env.example  sync-2.env
+cp wallet.env.example   wallet.env
+cp telegram.env.example telegram.env
+cp sync-1.env.example   sync-1.env
+cp sync-2.env.example   sync-2.env
 ```
 
-- `common.env` — Telegram bot token, chat ID, Wallet API key
+- `wallet.env` — BudgetBakers Wallet API key (sync and backup services)
+- `telegram.env` — Telegram bot token and chat ID (all services)
 - `sync-1.env` — Trade Republic phone and PIN for account 1
 - `sync-2.env` — Trade Republic phone and PIN for account 2
 
