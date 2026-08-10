@@ -325,6 +325,56 @@ def test_handle_message_strips_bot_name_suffix():
     mock_sync.assert_called_once()
 
 
+def test_handle_message_deletes_code_message_for_privacy():
+    """The /code message carries a sensitive 2FA code and must be deleted."""
+    bot = _bot()
+    with (
+        patch.object(bot, "_cmd_code"),
+        patch.object(bot, "_delete_message") as mock_delete,
+    ):
+        bot._handle_message(
+            {"chat": {"id": 42}, "message_id": 555, "text": "/code david 123456"}
+        )
+    mock_delete.assert_called_once_with(555)
+
+
+def test_handle_message_does_not_delete_non_code_commands():
+    bot = _bot()
+    with (
+        patch.object(bot, "_cmd_sync"),
+        patch.object(bot, "_delete_message") as mock_delete,
+    ):
+        bot._handle_message({"chat": {"id": 42}, "message_id": 555, "text": "/sync"})
+    mock_delete.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._delete_message
+# ---------------------------------------------------------------------------
+
+def test_delete_message_calls_telegram_api():
+    bot = _bot()
+    with patch("app.bot.requests.post") as mock_post:
+        bot._delete_message(555)
+    mock_post.assert_called_once()
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["message_id"] == 555
+    assert str(payload["chat_id"]) == bot._cfg.chat_id
+
+
+def test_delete_message_does_not_raise_on_failure():
+    bot = _bot()
+    with patch("app.bot.requests.post", side_effect=requests.RequestException("fail")):
+        bot._delete_message(555)  # must not raise
+
+
+def test_delete_message_ignores_missing_id():
+    bot = _bot()
+    with patch("app.bot.requests.post") as mock_post:
+        bot._delete_message(None)
+    mock_post.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # TelegramBot._cmd_help
 # ---------------------------------------------------------------------------
