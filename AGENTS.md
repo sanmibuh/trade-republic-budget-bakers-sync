@@ -6,6 +6,10 @@ Instructions for AI assistants working on this project. Read this before making 
 
 ## Workflow
 
+### Commits
+- **Never create git commits.** The user reviews changes and commits manually.
+- Prepare each improvement as a clean, self-contained change ready to commit, then stop and wait.
+
 ### TDD — tests first, always
 1. Write the test and watch it fail before writing any implementation.
 2. Implement the minimum code to make it pass.
