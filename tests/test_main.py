@@ -830,3 +830,110 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
     notifier_instance.sync_complete.assert_called_once()
     _, kwargs = notifier_instance.sync_complete.call_args
     assert kwargs["excluded"] == 3
+
+
+# ---------------------------------------------------------------------------
+# run_login — on-demand re-authentication
+# ---------------------------------------------------------------------------
+
+def test_run_login_connects_and_returns_zero(tmp_path):
+    from unittest.mock import patch
+
+    from app.main import run_login
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.http_client.configure"),
+        patch("app.main.Notifier") as mock_notifier_cls,
+        patch("app.main.TRClient") as MockTR,
+        patch("app.main._build_code_provider", return_value=MagicMock()),
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        mock_cfg_cls.return_value = cfg
+        notifier_instance = mock_notifier_cls.return_value
+
+        result = run_login()
+
+    assert result == 0
+    MockTR.return_value.connect.assert_called_once()
+    kwargs = MockTR.return_value.connect.call_args.kwargs
+    assert kwargs["on_login_success"] == notifier_instance.login_success
+
+
+def test_run_login_session_expired_notifies_and_exits(tmp_path):
+    from unittest.mock import patch
+
+    from app.main import run_login
+    from app.tr_client import SessionExpiredError
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.http_client.configure"),
+        patch("app.main.Notifier") as mock_notifier_cls,
+        patch("app.main.TRClient") as MockTR,
+        patch("app.main._build_code_provider", return_value=None),
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        mock_cfg_cls.return_value = cfg
+        MockTR.return_value.connect.side_effect = SessionExpiredError("no provider")
+        notifier_instance = mock_notifier_cls.return_value
+
+        result = run_login()
+
+    assert result == 1
+    notifier_instance.authentication_required.assert_called_once()
+
+
+def test_run_login_login_failed_notifies_and_exits(tmp_path):
+    from unittest.mock import patch
+
+    from app.main import run_login
+    from app.tr_client import LoginFailedError
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.http_client.configure"),
+        patch("app.main.Notifier") as mock_notifier_cls,
+        patch("app.main.TRClient") as MockTR,
+        patch("app.main._build_code_provider", return_value=MagicMock()),
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        mock_cfg_cls.return_value = cfg
+        MockTR.return_value.connect.side_effect = LoginFailedError("bad code")
+        notifier_instance = mock_notifier_cls.return_value
+
+        result = run_login()
+
+    assert result == 1
+    notifier_instance.login_failed.assert_called_once()
+
+
+def test_run_login_unexpected_error_notifies_and_exits(tmp_path):
+    from unittest.mock import patch
+
+    from app.main import run_login
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.http_client.configure"),
+        patch("app.main.Notifier") as mock_notifier_cls,
+        patch("app.main.TRClient") as MockTR,
+        patch("app.main._build_code_provider", return_value=MagicMock()),
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        mock_cfg_cls.return_value = cfg
+        MockTR.return_value.connect.side_effect = RuntimeError("boom")
+        notifier_instance = mock_notifier_cls.return_value
+
+        result = run_login()
+
+    assert result == 1
+    notifier_instance.error.assert_called_once()

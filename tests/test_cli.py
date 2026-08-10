@@ -184,6 +184,43 @@ def test_backup_yearly_invalid_param_exits(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# login command
+# ---------------------------------------------------------------------------
+
+def test_login_help():
+    result = _runner().invoke(cli, ["login", "--help"])
+    assert result.exit_code == 0
+    assert "login" in result.output.lower()
+
+
+def test_login_calls_run_login():
+    with patch("app.main.run_login", return_value=0) as mock_run:
+        result = _runner().invoke(cli, ["login"])
+    assert result.exit_code == 0
+    mock_run.assert_called_once()
+
+
+def test_login_exits_with_return_code():
+    with patch("app.main.run_login", return_value=1):
+        result = _runner().invoke(cli, ["login"])
+    assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# submit-code command
+# ---------------------------------------------------------------------------
+
+def test_submit_code_writes_code_file(tmp_path):
+    from app.twofa import CODE_FILENAME
+
+    with patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)):
+        result = _runner().invoke(cli, ["submit-code", "123456"])
+
+    assert result.exit_code == 0
+    assert (tmp_path / CODE_FILENAME).read_text() == "123456"
+
+
+# ---------------------------------------------------------------------------
 # bot command
 # ---------------------------------------------------------------------------
 

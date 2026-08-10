@@ -105,6 +105,16 @@ class Notifier:
             "Run the bootstrap command again to retry\\."
         )
 
+    def login_code_request(self, instance: str) -> bool:
+        safe = self._safe_owner()
+        safe_instance = _escape_markdown(instance)
+        return self._send(
+            "🔐 *Trade Republic Sync: 2FA Code Required*\n\n"
+            f"Owner: *{safe}*\n"
+            "Reply with your authenticator code using:\n"
+            f"`/code {safe_instance} <code>`"
+        )
+
     def login_success(self) -> bool:
         safe = self._safe_owner()
         return self._send(

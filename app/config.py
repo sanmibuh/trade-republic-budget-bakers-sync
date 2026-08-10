@@ -91,19 +91,23 @@ class Config:
     telegram_chat_id: str | None
     lookback_days: int
     data_dir: Path
+    instance: str = ""
     allow_insecure_ssl: bool = False
     label_ids: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_env(cls) -> Config:
+        notifier_env = _read_notifier_env()
+        instance = os.getenv("INSTANCE", "").strip() or str(notifier_env["owner_name"]).lower()
         return cls(
-            **_read_notifier_env(),
+            **notifier_env,
             phone_number=_required_env("PHONE_NUMBER"),
             pin=_required_env("PIN"),
             wallet_api_key=_required_env("WALLET_API_KEY"),
             wallet_cash_account_id=_required_env("WALLET_CASH_ACCOUNT_ID"),
             wallet_portfolio_account_id=_required_env("WALLET_PORTFOLIO_ACCOUNT_ID"),
             lookback_days=_positive_int_env("LOOKBACK_DAYS", default=7),
+            instance=instance,
             label_ids=_read_label_ids(),
         )
 

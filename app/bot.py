@@ -146,6 +146,7 @@ class TelegramBot:
     def _register_commands(self) -> None:
         commands = [
             {"command": "sync",           "description": "Force Trade Republic sync (choose instance)"},
+            {"command": "login",          "description": "Renew Trade Republic 2FA session (choose instance)"},
             {"command": "status",         "description": "Show instances and backup service availability"},
             {"command": "help",           "description": "Show available commands"},
         ]
@@ -217,6 +218,8 @@ class TelegramBot:
             "help":           self._cmd_help,
             "status":         self._cmd_status,
             "sync":           self._cmd_sync,
+            "login":          self._cmd_login,
+            "code":           self._cmd_code,
             "backup_monthly": self._cmd_backup_monthly,
             "backup_yearly":  self._cmd_backup_yearly,
         }
@@ -270,6 +273,8 @@ class TelegramBot:
 
         if cmd == "sync":
             self._launch_sync(inst)
+        elif cmd == "login":
+            self._launch_login(inst)
         else:
             log.warning("Unknown callback cmd: %r", cmd)
 
@@ -281,6 +286,8 @@ class TelegramBot:
         lines = [
             "🤖 *Available commands*\n",
             "/sync — Force Trade Republic sync \\(choose instance\\)",
+            "/login — Renew Trade Republic 2FA session \\(choose instance\\)",
+            "/code `<instance> <code>` — Submit an authenticator code",
         ]
         if self._cfg.backup_container:
             lines += [
@@ -314,6 +321,33 @@ class TelegramBot:
     def _cmd_sync(self, _args: list[str]) -> None:
         buttons = self._instance_buttons("sync")
         self._send_message("🔄 *Sync* — Choose instance:", keyboard=buttons)
+
+    def _cmd_login(self, _args: list[str]) -> None:
+        buttons = self._instance_buttons("login")
+        self._send_message("🔐 *Login* — Choose instance to re\\-authenticate:", keyboard=buttons)
+
+    def _cmd_code(self, args: list[str]) -> None:
+        """Deliver an authenticator code to a waiting login process: /code <instance> <code>."""
+        if len(args) != 2:
+            self._send_message("Usage: `/code <instance> <code>` — e\\.g\\. `/code david 123456`")
+            return
+
+        instance_key, code = args[0].lower(), args[1]
+        inst = self._cfg.instances.get(instance_key)
+        if inst is None:
+            self._send_message(f"❓ Unknown instance: `{_esc(args[0])}`")
+            return
+        if not code.isdigit():
+            self._send_message("⚠️ The code must contain digits only\\.")
+            return
+
+        self._send_message(f"🔑 Sending code to *{_esc(inst.name)}*\\.\\.\\.")
+        threading.Thread(
+            target=_docker_exec_silent,
+            args=(inst.container_name, ["submit-code", code]),
+            kwargs={"on_error": self._send_message},
+            daemon=True,
+        ).start()
 
     def _cmd_backup_monthly(self, args: list[str]) -> None:
         if not self._cfg.backup_container:
@@ -372,6 +406,15 @@ class TelegramBot:
         threading.Thread(
             target=_docker_exec_silent,
             args=(inst.container_name, ["sync"]),
+            kwargs={"on_error": self._send_message},
+            daemon=True,
+        ).start()
+
+    def _launch_login(self, inst: InstanceConfig) -> None:
+        self._send_message(f"🔐 Re\\-authenticating *{_esc(inst.name)}*\\.\\.\\.")
+        threading.Thread(
+            target=_docker_exec_silent,
+            args=(inst.container_name, ["login"]),
             kwargs={"on_error": self._send_message},
             daemon=True,
         ).start()

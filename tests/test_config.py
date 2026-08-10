@@ -43,6 +43,30 @@ def test_owner_name_explicit(monkeypatch):
     assert cfg.owner_name == "David"
 
 
+def test_instance_defaults_to_lowercased_owner_name(monkeypatch):
+    """INSTANCE not set → derived from OWNER_NAME lowercased."""
+    for key, value in BASE_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("OWNER_NAME", "David")
+    monkeypatch.delenv("INSTANCE", raising=False)
+
+    cfg = Config.from_env()
+
+    assert cfg.instance == "david"
+
+
+def test_instance_explicit(monkeypatch):
+    """INSTANCE set explicitly is used as-is."""
+    for key, value in BASE_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("OWNER_NAME", "David")
+    monkeypatch.setenv("INSTANCE", "david-account")
+
+    cfg = Config.from_env()
+
+    assert cfg.instance == "david-account"
+
+
 def test_missing_required_env_raises(monkeypatch):
     """Missing a required env var raises ValueError."""
     for key, value in BASE_ENV.items():

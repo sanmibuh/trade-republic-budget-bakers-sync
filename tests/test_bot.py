@@ -246,6 +246,7 @@ def test_register_commands_includes_backup_when_configured():
     assert "backup_yearly" in cmd_names
     assert "status" in cmd_names
     assert "help" in cmd_names
+    assert "login" in cmd_names
 
 
 def test_register_commands_excludes_backup_when_not_configured():
@@ -731,6 +732,118 @@ def test_launch_sync_sends_ack_and_starts_thread():
     mock_send.assert_called_once()
     assert "David" in mock_send.call_args.args[0]
     mock_thread.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._cmd_login / _launch_login
+# ---------------------------------------------------------------------------
+
+def test_cmd_login_sends_keyboard_with_instances():
+    bot = _bot()
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_login([])
+    mock_send.assert_called_once()
+    keyboard = mock_send.call_args.kwargs["keyboard"]
+    all_buttons = [btn for row in keyboard for btn in row]
+    labels = [b["text"] for b in all_buttons]
+    assert "David" in labels
+    assert "Eli" in labels
+
+
+def test_login_buttons_callback_data_encodes_login_cmd():
+    bot = _bot()
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_login([])
+    keyboard = mock_send.call_args.kwargs["keyboard"]
+    cb_data = [b["callback_data"] for row in keyboard for b in row]
+    assert all(d.startswith("login:") for d in cb_data)
+
+
+def test_callback_query_login_dispatches_launch_login():
+    bot = _bot()
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_launch_login") as mock_login,
+    ):
+        bot._handle_callback_query({"id": "cq1", "data": "login:david", "message": {"chat": {"id": 42}}})
+    mock_login.assert_called_once()
+    assert mock_login.call_args.args[0].name == "David"
+
+
+def test_launch_login_sends_ack_and_starts_thread():
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch("app.bot._docker_exec_silent"),
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        mock_thread.return_value.start = MagicMock()
+        bot._launch_login(inst)
+    mock_send.assert_called_once()
+    assert "David" in mock_send.call_args.args[0]
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["args"] == (inst.container_name, ["login"])
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._cmd_code
+# ---------------------------------------------------------------------------
+
+def test_cmd_code_executes_submit_code_for_instance():
+    bot = _bot()
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch("app.bot._docker_exec_silent"),
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        mock_thread.return_value.start = MagicMock()
+        bot._cmd_code(["david", "123456"])
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["args"] == ("proj-sync-david-1", ["submit-code", "123456"])
+    mock_send.assert_called_once()
+
+
+def test_cmd_code_missing_args_sends_usage():
+    bot = _bot()
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        bot._cmd_code(["david"])
+    mock_thread.assert_not_called()
+    mock_send.assert_called_once()
+    assert "code" in mock_send.call_args.args[0].lower()
+
+
+def test_cmd_code_unknown_instance_sends_error():
+    bot = _bot()
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        bot._cmd_code(["nobody", "123456"])
+    mock_thread.assert_not_called()
+    mock_send.assert_called_once()
+    assert "nobody" in mock_send.call_args.args[0]
+
+
+def test_cmd_code_non_digit_code_sends_error():
+    bot = _bot()
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        bot._cmd_code(["david", "abc123"])
+    mock_thread.assert_not_called()
+    mock_send.assert_called_once()
+
+
+def test_handle_message_dispatches_code():
+    bot = _bot()
+    with patch.object(bot, "_cmd_code") as mock_code:
+        bot._handle_message({"chat": {"id": 42}, "text": "/code david 123456"})
+    mock_code.assert_called_once_with(["david", "123456"])
 
 
 # ---------------------------------------------------------------------------

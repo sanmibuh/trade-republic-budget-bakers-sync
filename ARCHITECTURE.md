@@ -14,6 +14,7 @@ app/
   persistence.py    # EventRepository (SQLite dedup)
   tr_mapper.py      # TR event → BudgetBakers record mapping
   tr_client.py      # TRClient — pytr wrapper: login, 2FA, timeline fetch
+  twofa.py          # 2FA code providers (terminal / Telegram) + selector
   wallet_client.py  # WalletClient — BudgetBakers HTTP API (POST records + GET backup)
   backup.py         # Backup logic: auto / monthly / yearly modes
   notifier.py       # Notifier — Telegram notifications (transversal)
@@ -84,7 +85,13 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - Python dict mutation by reference: `details` dict is populated inside `collected` after `tl_loop()` completes — no explicit merging needed.
 - `pytr` requires interactive 2FA on first login (push notification or authenticator code). Session is persisted to `/app/data` and reused automatically.
 - Trade Republic web-login sessions have a hard **24h cap** (`tr_refresh` cookie `exp = iat + 86400`); `GET /api/v1/auth/web/session` only rotates the short-lived `tr_session`, never the refresh token, so a session cannot be extended past 24h — re-authentication is unavoidable.
-- `TRClient.connect` only prompts for an authenticator code when a TTY is attached (`sys.stdin.isatty()`). Bootstrap runs interactively (`docker compose run -it`), so David's authenticator flow works; scheduled cron syncs have no TTY, so instead of crashing on `input()` (`EOFError`) and re-hitting the login endpoint every run (429 ban risk), `connect` raises `SessionExpiredError`. `main._fetch_events` maps it to `notifier.authentication_required()` and exits cleanly. Push-approval accounts (Eli, no authenticator) still complete automatically in cron if approved in the app in time.
+- `TRClient.connect` obtains the authenticator code from a `code_provider` (see `app/twofa.py`) instead of calling `input()` directly. `select_code_provider` picks the strategy: a TTY (interactive bootstrap, `docker compose run -it`) → `TerminalCodeProvider` (stdin); no TTY but Telegram configured → `TelegramCodeProvider`; neither → `None`, and `connect` raises `SessionExpiredError`. `main._fetch_events` maps that to `notifier.authentication_required()` and exits cleanly instead of crashing on `EOFError` and re-hitting the login endpoint every run (429 ban risk). Push-approval accounts (Eli, no authenticator) still complete automatically in cron if approved in the app in time.
+
+### 2FA via Telegram
+- `app/twofa.py` provides the authenticator-code strategies and `select_code_provider`.
+- `TelegramCodeProvider` sends a Telegram prompt (`notifier.login_code_request(instance)`) asking the user to reply with `/code <instance> <code>`, then polls `data_dir/.tr_2fa_code` (default 300s timeout, 3s poll) until the code file appears; it clears the file before prompting and after reading, raising `TimeoutError` on expiry.
+- Cross-container hand-off: the bot and the sync/login containers do **not** share the data volume. The `/code` bot command runs `python -m app submit-code <code>` inside the target container via the Docker SDK `exec_run`; `submit-code` writes the code to `data_dir/.tr_2fa_code`, which the waiting `TelegramCodeProvider` reads. pytr's v2 web login is stateful within a single process, so the login flow cannot be split across processes — the same process that starts the login must receive the code.
+- On-demand renewal: `/login` (bot) → `python -m app login` → `main.run_login()` triggers the 2FA flow explicitly. Scheduled cron syncs that hit an expired session trigger the same flow automatically (Eli via push, David via `/code`).
 
 ### Deduplication
 - `processed_events` table in SQLite: `(event_id, event_type, event_timestamp, amount, raw, synced_at)`.
@@ -98,10 +105,12 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `_make_record` accepts `label_ids: list[str] | None`; BudgetBakers API expects `labelIds` as a list.
 
 ### CLI entry point (`app/__main__.py`)
-- Single entry point via `python -m app` using **click** with three subcommands:
+- Single entry point via `python -m app` using **click** with subcommands:
   - `python -m app sync` — runs `main.run()`
   - `python -m app backup <mode> [param]` — dispatches to `backup.run_auto/run_monthly/run_yearly`
   - `python -m app bot` — starts the Telegram bot
+  - `python -m app login` — runs `main.run_login()`, an on-demand 2FA session renewal
+  - `python -m app submit-code <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting login/sync process to pick up
 - All imports inside command functions are deferred — startup is fast and dependencies are only loaded when needed.
 - `click.Choice(["auto", "monthly", "yearly"])` provides free input validation and help text.
 - `entrypoint.sh` and `tr-sync.sh` both use `python -m app <subcommand>` — single consistent interface.
@@ -127,6 +136,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - Container naming: sync → `{prefix}-sync-{name}-1`, backup → `{prefix}-{backup_service}-1`.
 - Backup commands (`/backup_monthly`, `/backup_yearly`) execute directly on the backup container — no instance picker.
 - Sync commands (`/sync`) show an inline keyboard to pick the instance.
+- `/login` renews an expired 2FA session on demand (instance picker); `/code <instance> <code>` forwards an authenticator code to the target container via `submit-code` (see *2FA via Telegram*).
 - The Docker socket (`/var/run/docker.sock`) is mounted into the bot container; the Docker SDK communicates with it directly (no docker CLI binary required).
 - `_docker_exec_silent` accepts an optional `on_error` callback — called with an error message string when the exec fails or exits non-zero. The bot passes `self._send_message` so the user receives a Telegram notification on failure.
 
@@ -134,6 +144,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `Config.from_env()` — full config for the **sync** command. Requires `PHONE_NUMBER`, `PIN`, `WALLET_API_KEY`, `WALLET_CASH_ACCOUNT_ID`, `WALLET_PORTFOLIO_ACCOUNT_ID`.
 - `BackupConfig.from_env()` — minimal config for the **backup** command. Only requires `WALLET_API_KEY`. Does not validate sync-only credentials, so the backup container can run without them.
 - Both share optional fields: `OWNER_NAME` (default `"Backup"`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DATA_DIR`, `ALLOW_INSECURE_SSL` (default `false`).
+- `Config.instance` — logical instance name used for the Telegram 2FA prompt/`/code` routing. Read from `INSTANCE`, defaulting to `OWNER_NAME` lowercased (e.g. `david`, `eli`), which already matches the container instance name, so it need not be set explicitly in compose.
 - `BotEnv.from_env()` — config for the **bot** command. Reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `INSTANCES`, `CONTAINER_PREFIX`, `BACKUP_SERVICE`.
 - All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
@@ -201,6 +212,7 @@ Merging the PR triggers `release.yml`, which creates the tag and GitHub Release,
 - `sync.db` — SQLite database with `processed_events` table (purged after 60 days)
 - `sync.log` — rotating log file
 - pytr session/cookie files (login state)
+- `.tr_2fa_code` — transient file where `submit-code` drops the authenticator code for a waiting login/sync process (created and removed within the login flow)
 - `backups/monthly/` — monthly JSON snapshots (permanent)
 - `backups/yearly/` — yearly JSON snapshots (permanent)
 
@@ -248,11 +260,12 @@ See `deploy/DEPLOY.md` for setup instructions.
 
 | File | Role |
 |---|---|
-| `app/__main__.py` | click CLI: `sync`, `backup`, and `bot` subcommands; single entry point |
+| `app/__main__.py` | click CLI: `sync`, `backup`, `bot`, `login`, `submit-code` subcommands; single entry point |
 | `app/http_client.py` | SSL circuit-breaker shared by notifier and wallet_client; `http_post`, `build_session` |
 | `app/main.py` | Sync orchestrator; passes `cfg.label_ids` to `build_records_for_event` |
 | `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |
-| `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions |
+| `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions; `connect` uses a `code_provider` |
+| `app/twofa.py` | 2FA code providers (`TerminalCodeProvider`, `TelegramCodeProvider`) + `select_code_provider`; `CODE_FILENAME` |
 | `app/tr_mapper.py` | `_build_note` (note/description), `_note_extras` (detail fragments), `_HANDLERS`, `KNOWN_EVENT_TYPES`, `_make_record` |
 | `app/persistence.py` | `EventRepository`, `dedup_event_id`; `INSERT OR IGNORE` |
 | `app/config.py` | `Config` (sync) and `BackupConfig` (backup) dataclasses; `BotEnv`; `_read_label_ids()` |

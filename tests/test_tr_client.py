@@ -53,11 +53,11 @@ def test_connect_does_not_notify_when_session_resumes(tmp_path):
 
 def test_connect_authenticator_flow(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
-    with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         patch("sys.stdin.isatty", return_value=True), \
-         patch("builtins.input", return_value="123456"):
+    code_provider = MagicMock()
+    code_provider.get_code.return_value = "123456"
+    with patch("pytr.api.TradeRepublicApi", return_value=pytr):
         client = _make_tr_client(tmp_path)
-        client.connect()
+        client.connect(code_provider=code_provider)
 
     pytr.initiate_weblogin.assert_called_once()
     pytr.complete_weblogin.assert_called_once_with(verify_code="123456")
@@ -68,75 +68,75 @@ def test_connect_authenticator_flow(tmp_path):
 
 def test_connect_authenticator_calls_on_login_required(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
+    code_provider = MagicMock()
+    code_provider.get_code.return_value = "123456"
     on_login_required = MagicMock()
-    with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         patch("sys.stdin.isatty", return_value=True), \
-         patch("builtins.input", return_value="123456"):
-        _make_tr_client(tmp_path).connect(on_login_required=on_login_required)
+    with patch("pytr.api.TradeRepublicApi", return_value=pytr):
+        _make_tr_client(tmp_path).connect(
+            on_login_required=on_login_required, code_provider=code_provider
+        )
     on_login_required.assert_called_once()
 
 
 def test_connect_authenticator_calls_on_login_success(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
+    code_provider = MagicMock()
+    code_provider.get_code.return_value = "123456"
     on_login_success = MagicMock()
-    with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         patch("sys.stdin.isatty", return_value=True), \
-         patch("builtins.input", return_value="123456"):
-        _make_tr_client(tmp_path).connect(on_login_success=on_login_success)
+    with patch("pytr.api.TradeRepublicApi", return_value=pytr):
+        _make_tr_client(tmp_path).connect(
+            on_login_success=on_login_success, code_provider=code_provider
+        )
     on_login_success.assert_called_once()
 
 
 def test_connect_authenticator_raises_login_failed_on_bad_code(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
     pytr.complete_weblogin.side_effect = Exception("VALIDATION_CODE_INVALID")
+    code_provider = MagicMock()
+    code_provider.get_code.return_value = "000000"
     tr_client = _make_tr_client(tmp_path)
     with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         patch("sys.stdin.isatty", return_value=True), \
-         patch("builtins.input", return_value="000000"):  # noqa: SIM117 — nested with required by S5778
-        with pytest.raises(LoginFailedError):
-            tr_client.connect()
+         pytest.raises(LoginFailedError):
+        tr_client.connect(code_provider=code_provider)
 
 
 def test_connect_authenticator_no_success_callback_on_failure(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
     pytr.complete_weblogin.side_effect = Exception("401")
+    code_provider = MagicMock()
+    code_provider.get_code.return_value = "000000"
     on_login_success = MagicMock()
     tr_client = _make_tr_client(tmp_path)
     with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         patch("sys.stdin.isatty", return_value=True), \
-         patch("builtins.input", return_value="000000"):  # noqa: SIM117 — nested with required by S5778
-        with pytest.raises(LoginFailedError):
-            tr_client.connect(on_login_success=on_login_success)
+         pytest.raises(LoginFailedError):
+        tr_client.connect(on_login_success=on_login_success, code_provider=code_provider)
     on_login_success.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# TRClient.connect — non-interactive authenticator (cron) bails out cleanly
+# TRClient.connect — no code provider (non-interactive) bails out cleanly
 # ---------------------------------------------------------------------------
 
-def test_connect_authenticator_non_interactive_raises_session_expired(tmp_path):
+def test_connect_authenticator_no_provider_raises_session_expired(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
     tr_client = _make_tr_client(tmp_path)
     with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         patch("sys.stdin.isatty", return_value=False), \
-         patch("builtins.input") as mock_input:  # noqa: SIM117 — nested with required by S5778
-        with pytest.raises(SessionExpiredError):
-            tr_client.connect()
+         pytest.raises(SessionExpiredError):
+        tr_client.connect(code_provider=None)
 
-    mock_input.assert_not_called()
     pytr.complete_weblogin.assert_not_called()
     pytr._await_weblogin_confirmation.assert_not_called()
     pytr.save_websession.assert_not_called()
 
 
-def test_connect_authenticator_non_interactive_no_success_callback(tmp_path):
+def test_connect_authenticator_no_provider_no_success_callback(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
     on_login_success = MagicMock()
     tr_client = _make_tr_client(tmp_path)
     with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         patch("sys.stdin.isatty", return_value=False):  # noqa: SIM117 — nested with required by S5778
-        with pytest.raises(SessionExpiredError):
-            tr_client.connect(on_login_success=on_login_success)
+         pytest.raises(SessionExpiredError):
+        tr_client.connect(on_login_success=on_login_success, code_provider=None)
     on_login_success.assert_not_called()
 
 

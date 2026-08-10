@@ -136,6 +136,15 @@ def test_notifier_login_failed_sends_message():
     mock_send.assert_called_once()
 
 
+def test_notifier_login_code_request_sends_message_with_instance():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = _make_notifier().login_code_request("david")
+    assert result is True
+    mock_send.assert_called_once()
+    sent = mock_send.call_args.kwargs["message"]
+    assert "/code david" in sent
+
+
 def test_notifier_authentication_required_sends_message():
     with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
         result = _make_notifier().authentication_required()

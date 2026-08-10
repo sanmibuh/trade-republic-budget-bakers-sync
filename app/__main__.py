@@ -32,6 +32,35 @@ def sync() -> None:
 
 
 @cli.command()
+def login() -> None:
+    """Re-authenticate with Trade Republic on demand (renew the 2FA session).
+
+    Resumes the saved session if still valid; otherwise runs the full login.
+    For authenticator accounts the code is requested via Telegram (reply with
+    /code <instance> <code>); for push accounts, approve the request in the app.
+    """
+    from app.main import run_login
+
+    sys.exit(run_login())
+
+
+@cli.command(name="submit-code")
+@click.argument("code")
+def submit_code(code: str) -> None:
+    """Write an authenticator CODE for a waiting login process to pick up.
+
+    Used by the Telegram bot (the /code command) to deliver the 2FA code into
+    the sync container, where the blocked login process is polling for it.
+    """
+    from app.config import Config
+    from app.twofa import CODE_FILENAME
+
+    cfg = Config.from_env()
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    (cfg.data_dir / CODE_FILENAME).write_text(code.strip())
+
+
+@cli.command()
 @click.argument("mode", type=click.Choice(["auto", "monthly", "yearly"]))
 @click.argument("param", required=False, default=None)
 def backup(mode: str, param: str | None) -> None:

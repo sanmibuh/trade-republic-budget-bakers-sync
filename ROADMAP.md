@@ -63,13 +63,6 @@ Today the `Notifier` sends one message per run. Add an optional aggregated summa
 
 ## Bot
 
-### 2FA via Telegram bot
-Evaluate whether the bot can handle the Trade Republic 2FA flow for authenticator accounts (David). Sessions expire on a hard 24h cap, so at least once a day a scheduled sync fails with `SessionExpiredError` and the user must re-run the interactive bootstrap on the NAS. Instead, the bot could:
-- Notify Telegram when a sync bails out with a session-expired error (already sends `authentication_required`; make it actionable).
-- Provide an ad-hoc `/login <instance>` command that triggers the 2FA flow on demand and prompts the user for the authenticator code, forwarding it to the container (e.g. via `container.exec_run` writing to the process stdin, or a small login endpoint the container polls).
-
-Security considerations must be assessed carefully — the bot would be transmitting sensitive 2FA codes over Telegram.
-
 ### Real `/status` command
 `_cmd_status` (`app/bot.py:296`) only lists the configured container names. Enhance it via the Docker SDK to report whether each container is actually `running`, its last run outcome (parse the tail of `sync.log`), and the number of events synced recently.
 

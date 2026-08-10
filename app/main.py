@@ -19,6 +19,7 @@ from app.tr_mapper import (
     extract_event_type,
     filter_by_lookback,
 )
+from app.twofa import select_code_provider
 from app.wallet_client import WalletClient
 
 try:
@@ -52,6 +53,20 @@ class _Batch:
 # Private steps
 # ---------------------------------------------------------------------------
 
+def _build_code_provider(cfg: Config, notifier: Notifier) -> Any:
+    """Choose how the authenticator 2FA code is obtained for this environment."""
+    import sys
+
+    telegram_configured = bool(cfg.telegram_bot_token and cfg.telegram_chat_id)
+    return select_code_provider(
+        data_dir=cfg.data_dir,
+        notifier=notifier,
+        instance=cfg.instance,
+        isatty=sys.stdin.isatty(),
+        telegram_configured=telegram_configured,
+    )
+
+
 def _fetch_events(
     cfg: Config,
     notifier: Notifier,
@@ -66,6 +81,7 @@ def _fetch_events(
         tr_client.connect(
             on_login_required=notifier.login_required,
             on_login_success=notifier.login_success,
+            code_provider=_build_code_provider(cfg, notifier),
         )
         log.info("Trade Republic session established")
         events = tr_client.fetch_timeline_events(since=since)
@@ -224,6 +240,47 @@ def run() -> int:
             if not sent:
                 log.warning("sync_complete notification not sent (no credentials or request failed)")
 
+    return 0
+
+
+def run_login() -> int:
+    """Re-authenticate with Trade Republic on demand and persist the session.
+
+    Used by the ``login`` command (triggered by the Telegram ``/login`` command).
+    Resumes the session if still valid; otherwise runs the full 2FA login using
+    the Telegram-based authenticator-code flow (or a push approval for accounts
+    without an authenticator). Returns 0 on success, 1 on a recoverable failure.
+    """
+    cfg = Config.from_env()
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
+
+    http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
+    setup_logging(cfg.data_dir)
+    log.info("Starting on-demand login for owner: %s", cfg.owner_name)
+
+    notifier = Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)
+
+    try:
+        tr_client = TRClient(cfg.phone_number, cfg.pin, cfg.data_dir)
+        tr_client.connect(
+            on_login_required=notifier.login_required,
+            on_login_success=notifier.login_success,
+            code_provider=_build_code_provider(cfg, notifier),
+        )
+    except LoginFailedError:
+        log.exception("Login failed")
+        notifier.login_failed()
+        return 1
+    except SessionExpiredError:
+        log.warning("Session expired and no code provider available — bootstrap required")
+        notifier.authentication_required()
+        return 1
+    except Exception as exc:
+        log.exception("Unexpected error during on-demand login")
+        notifier.error(exc)
+        return 1
+
+    log.info("On-demand login completed successfully")
     return 0
 
 

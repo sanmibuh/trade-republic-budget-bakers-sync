@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -48,8 +47,16 @@ class TRClient:
         self,
         on_login_required: Any = None,
         on_login_success: Any = None,
+        code_provider: Any = None,
     ) -> None:
-        """Establish a Trade Republic session (resume or full 2FA login)."""
+        """Establish a Trade Republic session (resume or full 2FA login).
+
+        ``code_provider`` supplies the authenticator code when Trade Republic
+        requires one (its ``get_code()`` returns the code as a string). When it
+        is ``None`` and an authenticator code is required, ``SessionExpiredError``
+        is raised instead of blocking — this is the case for a scheduled sync
+        with no terminal and no Telegram fallback configured.
+        """
         from pytr.api import TradeRepublicApi
 
         client = TradeRepublicApi(
@@ -75,16 +82,16 @@ class TRClient:
             client.initiate_weblogin()
 
             if client.weblogin_needs_authenticator:
-                if not sys.stdin.isatty():
+                if code_provider is None:
                     log.warning(
-                        "Authenticator 2FA code required but no interactive terminal "
-                        "is available — run the bootstrap command to renew the session"
+                        "Authenticator 2FA code required but no code provider is "
+                        "available — run the bootstrap command to renew the session"
                     )
                     raise SessionExpiredError(
-                        "Authenticator code required but no interactive terminal available"
+                        "Authenticator code required but no code provider available"
                     )
-                log.info("Enter the code from your authenticator app:")
-                code = input().strip()
+                log.info("Obtaining authenticator code")
+                code = code_provider.get_code()
                 log.debug("Submitting authenticator code")
                 client.complete_weblogin(verify_code=code)
                 log.debug("Polling login process for CONFIRMED status")
