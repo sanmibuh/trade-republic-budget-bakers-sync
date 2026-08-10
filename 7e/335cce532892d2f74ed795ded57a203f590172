@@ -1,0 +1,21 @@
+app/twofa.py
+  s_b0c0f766a52c1c::t_f3a184150c0f37 1-108
+tests/test_twofa.py
+  s_b0c0f766a52c1c::t_31ae5fd19ba665 1-196
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "7e335cce532892d2f74ed795ded57a203f590172",
+  "prompts": {},
+  "sessions": {
+    "s_b0c0f766a52c1c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0138e6ba7ffeUeW5p68T8e76yQ",
+        "model": "claude-opus-4.8"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
