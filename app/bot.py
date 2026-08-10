@@ -415,7 +415,12 @@ class TelegramBot:
         threading.Thread(
             target=_docker_exec_silent,
             args=(inst.container_name, ["login"]),
-            kwargs={"on_error": self._send_message},
+            kwargs={
+                "on_error": self._send_message,
+                "on_success": lambda: self._send_message(
+                    f"✅ *{_esc(inst.name)}* session is ready\\."
+                ),
+            },
             daemon=True,
         ).start()
 
@@ -493,11 +498,14 @@ def _docker_exec_silent(
     container_name: str,
     app_args: list[str],
     on_error: Callable[[str], None] | None = None,
+    on_success: Callable[[], None] | None = None,
 ) -> None:
     """Run `python -m app <app_args>` inside a container via the Docker SDK.
 
-    Does NOT send any Telegram message on success — the container's own Notifier
-    handles that. On failure, calls `on_error(message)` if provided.
+    Does NOT send any Telegram message on success by default — the container's
+    own Notifier handles that. Callers that need explicit success feedback (e.g.
+    `login`, which may finish silently by resuming a still-valid session) can
+    pass `on_success`. On failure, calls `on_error(message)` if provided.
     """
     cmd = ["python", "-m", "app"] + app_args
     log.info("Executing: docker exec %s %s", container_name, " ".join(cmd))
@@ -508,6 +516,8 @@ def _docker_exec_silent(
         exit_code, output = container.exec_run(cmd, environment=env)
         if exit_code == 0:
             log.info("docker exec finished successfully for container %s", container_name)
+            if on_success:
+                on_success()
         else:
             details = output.decode(errors="replace").strip() if output else ""
             log.warning(
