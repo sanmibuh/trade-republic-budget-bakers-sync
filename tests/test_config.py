@@ -127,3 +127,68 @@ def test_backup_config_telegram_fields_optional(monkeypatch):
 
     assert cfg.telegram_bot_token is None
     assert cfg.telegram_chat_id is None
+
+
+# ---------------------------------------------------------------------------
+# ALLOW_INSECURE_SSL parsing — tested via BackupConfig (minimal config)
+# ---------------------------------------------------------------------------
+
+def test_allow_insecure_ssl_default_false(monkeypatch):
+    monkeypatch.setenv("WALLET_API_KEY", "key")
+    monkeypatch.delenv("ALLOW_INSECURE_SSL", raising=False)
+    assert BackupConfig.from_env().allow_insecure_ssl is False
+
+
+def test_allow_insecure_ssl_true_values(monkeypatch):
+    monkeypatch.setenv("WALLET_API_KEY", "key")
+    for value in ("true", "True", "TRUE", "1", "yes", "YES"):
+        monkeypatch.setenv("ALLOW_INSECURE_SSL", value)
+        assert BackupConfig.from_env().allow_insecure_ssl is True, f"failed for {value!r}"
+
+
+def test_allow_insecure_ssl_false_values(monkeypatch):
+    monkeypatch.setenv("WALLET_API_KEY", "key")
+    for value in ("false", "False", "FALSE", "0", "no", "NO"):
+        monkeypatch.setenv("ALLOW_INSECURE_SSL", value)
+        assert BackupConfig.from_env().allow_insecure_ssl is False, f"failed for {value!r}"
+
+
+def test_allow_insecure_ssl_invalid_raises(monkeypatch):
+    monkeypatch.setenv("WALLET_API_KEY", "key")
+    monkeypatch.setenv("ALLOW_INSECURE_SSL", "maybe")
+    with pytest.raises(ValueError, match="ALLOW_INSECURE_SSL"):
+        BackupConfig.from_env()
+
+
+# ---------------------------------------------------------------------------
+# allow_insecure_ssl in Config and BackupConfig
+# ---------------------------------------------------------------------------
+
+def test_config_allow_insecure_ssl_defaults_to_false(monkeypatch):
+    for key, value in BASE_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("ALLOW_INSECURE_SSL", raising=False)
+
+    assert Config.from_env().allow_insecure_ssl is False
+
+
+def test_config_allow_insecure_ssl_true_when_set(monkeypatch):
+    for key, value in BASE_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("ALLOW_INSECURE_SSL", "true")
+
+    assert Config.from_env().allow_insecure_ssl is True
+
+
+def test_backup_config_allow_insecure_ssl_defaults_to_false(monkeypatch):
+    monkeypatch.setenv("WALLET_API_KEY", "key")
+    monkeypatch.delenv("ALLOW_INSECURE_SSL", raising=False)
+
+    assert BackupConfig.from_env().allow_insecure_ssl is False
+
+
+def test_backup_config_allow_insecure_ssl_true_when_set(monkeypatch):
+    monkeypatch.setenv("WALLET_API_KEY", "key")
+    monkeypatch.setenv("ALLOW_INSECURE_SSL", "true")
+
+    assert BackupConfig.from_env().allow_insecure_ssl is True

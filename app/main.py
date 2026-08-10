@@ -7,6 +7,7 @@ from typing import Any
 
 from requests import HTTPError
 
+from app import http_client
 from app.config import Config
 from app.logging_setup import setup_logging
 from app.notifier import Notifier
@@ -166,6 +167,7 @@ def run() -> int:
     cfg = Config.from_env()
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
 
+    http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     setup_logging(cfg.data_dir)
     log.info("Starting sync for owner: %s", cfg.owner_name)
 

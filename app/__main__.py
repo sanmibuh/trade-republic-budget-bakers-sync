@@ -66,11 +66,13 @@ def backup(mode: str, param: str | None) -> None:
         run_yearly,
     )
     from app.config import BackupConfig
+    from app.http_client import configure
     from app.notifier import Notifier
     from app.wallet_client import WalletClient
 
     cfg = BackupConfig.from_env()
     setup_logging(cfg.data_dir)
+    configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     client = WalletClient(api_key=cfg.wallet_api_key)
     notifier = Notifier(
         bot_token=cfg.telegram_bot_token,

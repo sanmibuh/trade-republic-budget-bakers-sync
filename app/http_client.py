@@ -27,9 +27,27 @@ log = logging.getLogger(__name__)
 # http_post or Session built by build_session.
 _ssl_verify: bool = True
 
+# Gate flag: the circuit-breaker only opens when this is True.
+# Set via configure() at application startup from ALLOW_INSECURE_SSL env var.
+_allow_insecure_ssl: bool = False
+
+
+def configure(*, allow_insecure_ssl: bool) -> None:
+    """Configure the SSL circuit-breaker policy.
+
+    Must be called once at application startup, after reading config.
+    Resets any previously tripped circuit-breaker state.
+    """
+    global _allow_insecure_ssl, _ssl_verify
+    _allow_insecure_ssl = allow_insecure_ssl
+    _ssl_verify = True  # reset any previously tripped state
+
 
 def _open_circuit() -> None:
-    """Flip the circuit-breaker and emit the one-time warning."""
+    """Flip the circuit-breaker and emit the one-time warning.
+
+    No-op when ``_allow_insecure_ssl`` is False — the SSLError propagates instead.
+    """
     global _ssl_verify
     if _ssl_verify:
         log.warning(
@@ -44,11 +62,15 @@ def http_post(url: str, **kwargs: Any) -> requests.Response:
 
     On the first ``SSLError`` with ``verify=True`` the circuit is tripped,
     ``_ssl_verify`` is set to ``False``, and the request is retried once.
+    Only activates when ``_allow_insecure_ssl`` is True; otherwise the
+    ``SSLError`` propagates immediately.
     Subsequent calls skip the first attempt entirely.
     """
     try:
         return requests.post(url, verify=_ssl_verify, **kwargs)
     except requests.exceptions.SSLError:
+        if not _allow_insecure_ssl:
+            raise
         _open_circuit()
         return requests.post(url, verify=False, **kwargs)  # NOSONAR — intentional fallback after circuit-breaker trips
 
@@ -61,6 +83,8 @@ class _SSLCircuitBreakerAdapter(requests.adapters.HTTPAdapter):
         try:
             return super().send(request, **kwargs)
         except requests.exceptions.SSLError:
+            if not _allow_insecure_ssl:
+                raise
             _open_circuit()
             kwargs["verify"] = False  # NOSONAR — intentional fallback after circuit-breaker trips
             return super().send(request, **kwargs)

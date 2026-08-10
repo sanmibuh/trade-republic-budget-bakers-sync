@@ -50,6 +50,18 @@ def _read_label_ids() -> dict[str, str]:
     }
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in ("true", "1", "yes"):
+        return True
+    if normalized in ("false", "0", "no"):
+        return False
+    raise ValueError(f"{name} must be a boolean (true/false/1/0/yes/no), got: {raw!r}")
+
+
 def _read_notifier_env() -> dict[str, object]:
     """Read env vars shared by Config and BackupConfig."""
     return {
@@ -57,6 +69,7 @@ def _read_notifier_env() -> dict[str, object]:
         "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
         "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID"),
         "data_dir": Path(os.getenv("DATA_DIR", "/app/data")),
+        "allow_insecure_ssl": _bool_env("ALLOW_INSECURE_SSL", default=False),
     }
 
 
@@ -74,6 +87,7 @@ class Config:
     telegram_chat_id: str | None
     lookback_days: int
     data_dir: Path
+    allow_insecure_ssl: bool = False
     label_ids: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -99,6 +113,7 @@ class BackupConfig:
     telegram_bot_token: str | None
     telegram_chat_id: str | None
     data_dir: Path
+    allow_insecure_ssl: bool = False
 
     @classmethod
     def from_env(cls) -> BackupConfig:

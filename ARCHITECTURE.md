@@ -131,7 +131,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 ### Config — environment variables
 - `Config.from_env()` — full config for the **sync** command. Requires `PHONE_NUMBER`, `PIN`, `WALLET_API_KEY`, `WALLET_CASH_ACCOUNT_ID`, `WALLET_PORTFOLIO_ACCOUNT_ID`.
 - `BackupConfig.from_env()` — minimal config for the **backup** command. Only requires `WALLET_API_KEY`. Does not validate sync-only credentials, so the backup container can run without them.
-- Both share optional fields: `OWNER_NAME` (default `"Backup"`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DATA_DIR`.
+- Both share optional fields: `OWNER_NAME` (default `"Backup"`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DATA_DIR`, `ALLOW_INSECURE_SSL` (default `false`).
 - `BotEnv.from_env()` — config for the **bot** command. Reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `INSTANCES`, `CONTAINER_PREFIX`, `BACKUP_SERVICE`.
 - All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
@@ -142,10 +142,12 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 
 ### SSL circuit-breaker (`app/http_client.py`)
 - `_ssl_verify: bool = True` — module-level flag shared across all HTTP calls.
-- `http_post(url, **kwargs)` — wraps `requests.post`; on the first `SSLError` with `verify=True` it logs a one-time warning, flips `_ssl_verify = False`, and retries immediately.
+- `_allow_insecure_ssl: bool = False` — gate flag. The circuit-breaker only opens when this is `True`.
+- `configure(allow_insecure_ssl)` — called once at startup from `main.run()` and the `backup` CLI command. Resets any previously tripped state.
+- `http_post(url, **kwargs)` — wraps `requests.post`; on `SSLError`, only falls back to `verify=False` when `_allow_insecure_ssl` is `True`. Otherwise the error propagates.
 - `build_session(headers)` — returns a `requests.Session` with a custom `_SSLCircuitBreakerAdapter` that applies the same fallback logic per-request.
-- Both `notifier.py` (Telegram) and `wallet_client.py` (BudgetBakers) use this module — the flag is shared, so a broken certificate on either endpoint trips the circuit for all subsequent calls.
-- `verify=False` is never hardcoded at the call site; it only activates after a real failure.
+- Both `notifier.py` (Telegram) and `wallet_client.py` (BudgetBakers) use this module — the flag is shared.
+- Controlled via `ALLOW_INSECURE_SSL` env var (default `false`). Set to `true` only in environments with broken certificate chains (e.g. corporate VPN).
 
 ### BudgetBakers API — POST (sync)
 - `POST /v1/api/records` — max 20 records per request.
