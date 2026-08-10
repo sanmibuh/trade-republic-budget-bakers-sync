@@ -187,8 +187,7 @@ Three `workflow_dispatch` workflows are available from the GitHub Actions UI (or
 Each workflow:
 1. Calculates the next version.
 2. Updates `VERSION`.
-3. Updates the image tag in `deploy/nas/current/docker-compose.yml`.
-4. Opens a PR `release-{version}` → `main` ready to review and merge.
+3. Opens a PR `release-{version}` → `main` ready to review and merge.
 
 Merging the PR triggers `release.yml`, which creates the tag and GitHub Release, which in turn triggers the Docker image publish workflows.
 
