@@ -174,20 +174,20 @@ Must rebuild the app image after any code change. Build and push are automated v
 
 Releases are triggered automatically by bumping the `VERSION` file and pushing to `main` — the `release.yml` workflow creates the tag and GitHub release, which in turn triggers the publish workflows.
 
-### Release workflows
+### Release workflow
 
-Three `workflow_dispatch` workflows are available from the GitHub Actions UI (or `gh workflow run`). They require no inputs — the new version is calculated automatically from the current `VERSION` file:
+`prepare-release.yml` — disponible desde GitHub Actions UI o `gh workflow run`. Muestra un desplegable para elegir el tipo de bump. No requiere introducir la versión manualmente — se calcula sola desde `VERSION`:
 
-| Workflow | Trigger | Example (`6.1.0` → ) |
-|---|---|---|
-| `release-patch.yml` | bug fixes, minor tweaks | `6.1.1` |
-| `release-minor.yml` | new features, backwards-compatible | `6.2.0` |
-| `release-major.yml` | breaking changes, base image rebuild | `7.0.0` |
+| Bump | Ejemplo (`6.1.0` → ) |
+|---|---|
+| `patch` — bug fixes, tweaks | `6.1.1` |
+| `minor` — nuevas features, backwards-compatible | `6.2.0` |
+| `major` — breaking changes, rebuild de imagen base | `7.0.0` |
 
-Each workflow:
-1. Calculates the next version.
-2. Updates `VERSION`.
-3. Opens a PR `release-{version}` → `main` ready to review and merge.
+El workflow:
+1. Calcula la siguiente versión.
+2. Actualiza `VERSION`.
+3. Abre un PR `release-{version}` → `main` listo para revisar y mergear.
 
 Merging the PR triggers `release.yml`, which creates the tag and GitHub Release, which in turn triggers the Docker image publish workflows.
 
