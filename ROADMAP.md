@@ -13,8 +13,5 @@ Evaluate whether the bot can handle the Trade Republic 2FA flow: when a containe
 
 ## Deploy
 
-### Health checks in docker-compose
-Services have no `healthcheck` defined. Docker cannot tell whether a container is actually working or hung. Add a minimal check (e.g. verify the cron process is alive).
-
 ### Separate Telegram credentials from sync env
 `common.env` includes `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, which `sync-david` and `sync-eli` do not need (only the bot uses them for notifications, and only when set). Split into a `telegram.env` mounted only by the bot and, optionally, the sync services.
