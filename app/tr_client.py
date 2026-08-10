@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,17 @@ log = logging.getLogger(__name__)
 
 class LoginFailedError(Exception):
     """Raised when the interactive Trade Republic 2FA login fails."""
+
+
+class SessionExpiredError(Exception):
+    """Raised when a non-interactive run needs a 2FA authenticator code.
+
+    The saved session could not be resumed and Trade Republic requires an
+    authenticator code, but there is no terminal to prompt on (e.g. a scheduled
+    cron sync). Rather than crashing on ``input()`` — which also hammers the
+    login endpoint on every run and risks a rate-limit ban — we bail out cleanly
+    so the caller can notify the user to run the interactive bootstrap.
+    """
 
 
 class TRClient:
@@ -63,6 +75,14 @@ class TRClient:
             client.initiate_weblogin()
 
             if client.weblogin_needs_authenticator:
+                if not sys.stdin.isatty():
+                    log.warning(
+                        "Authenticator 2FA code required but no interactive terminal "
+                        "is available — run the bootstrap command to renew the session"
+                    )
+                    raise SessionExpiredError(
+                        "Authenticator code required but no interactive terminal available"
+                    )
                 log.info("Enter the code from your authenticator app:")
                 code = input().strip()
                 log.debug("Submitting authenticator code")
@@ -78,7 +98,7 @@ class TRClient:
                 client.save_websession()
 
             log.info("Login completed, session saved")
-        except LoginFailedError:
+        except (LoginFailedError, SessionExpiredError):
             raise
         except Exception as exc:
             log.exception("Login failed with exception")

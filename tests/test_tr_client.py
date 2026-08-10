@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.tr_client import LoginFailedError, TRClient
+from app.tr_client import LoginFailedError, SessionExpiredError, TRClient
 
 
 def _make_pytr_client(*, needs_authenticator: bool = True, resume: bool = False) -> MagicMock:
@@ -54,6 +54,7 @@ def test_connect_does_not_notify_when_session_resumes(tmp_path):
 def test_connect_authenticator_flow(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
     with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
+         patch("sys.stdin.isatty", return_value=True), \
          patch("builtins.input", return_value="123456"):
         client = _make_tr_client(tmp_path)
         client.connect()
@@ -69,6 +70,7 @@ def test_connect_authenticator_calls_on_login_required(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
     on_login_required = MagicMock()
     with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
+         patch("sys.stdin.isatty", return_value=True), \
          patch("builtins.input", return_value="123456"):
         _make_tr_client(tmp_path).connect(on_login_required=on_login_required)
     on_login_required.assert_called_once()
@@ -78,6 +80,7 @@ def test_connect_authenticator_calls_on_login_success(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
     on_login_success = MagicMock()
     with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
+         patch("sys.stdin.isatty", return_value=True), \
          patch("builtins.input", return_value="123456"):
         _make_tr_client(tmp_path).connect(on_login_success=on_login_success)
     on_login_success.assert_called_once()
@@ -88,6 +91,7 @@ def test_connect_authenticator_raises_login_failed_on_bad_code(tmp_path):
     pytr.complete_weblogin.side_effect = Exception("VALIDATION_CODE_INVALID")
     tr_client = _make_tr_client(tmp_path)
     with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
+         patch("sys.stdin.isatty", return_value=True), \
          patch("builtins.input", return_value="000000"):  # noqa: SIM117 — nested with required by S5778
         with pytest.raises(LoginFailedError):
             tr_client.connect()
@@ -99,8 +103,39 @@ def test_connect_authenticator_no_success_callback_on_failure(tmp_path):
     on_login_success = MagicMock()
     tr_client = _make_tr_client(tmp_path)
     with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
+         patch("sys.stdin.isatty", return_value=True), \
          patch("builtins.input", return_value="000000"):  # noqa: SIM117 — nested with required by S5778
         with pytest.raises(LoginFailedError):
+            tr_client.connect(on_login_success=on_login_success)
+    on_login_success.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# TRClient.connect — non-interactive authenticator (cron) bails out cleanly
+# ---------------------------------------------------------------------------
+
+def test_connect_authenticator_non_interactive_raises_session_expired(tmp_path):
+    pytr = _make_pytr_client(needs_authenticator=True)
+    tr_client = _make_tr_client(tmp_path)
+    with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
+         patch("sys.stdin.isatty", return_value=False), \
+         patch("builtins.input") as mock_input:  # noqa: SIM117 — nested with required by S5778
+        with pytest.raises(SessionExpiredError):
+            tr_client.connect()
+
+    mock_input.assert_not_called()
+    pytr.complete_weblogin.assert_not_called()
+    pytr._await_weblogin_confirmation.assert_not_called()
+    pytr.save_websession.assert_not_called()
+
+
+def test_connect_authenticator_non_interactive_no_success_callback(tmp_path):
+    pytr = _make_pytr_client(needs_authenticator=True)
+    on_login_success = MagicMock()
+    tr_client = _make_tr_client(tmp_path)
+    with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
+         patch("sys.stdin.isatty", return_value=False):  # noqa: SIM117 — nested with required by S5778
+        with pytest.raises(SessionExpiredError):
             tr_client.connect(on_login_success=on_login_success)
     on_login_success.assert_not_called()
 
