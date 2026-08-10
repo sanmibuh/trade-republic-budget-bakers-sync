@@ -12,7 +12,7 @@ from app.config import Config
 from app.logging_setup import setup_logging
 from app.notifier import Notifier
 from app.persistence import EventRepository, dedup_event_id
-from app.tr_client import LoginFailedError, TRClient
+from app.tr_client import LoginFailedError, SessionExpiredError, TRClient
 from app.tr_mapper import (
     KNOWN_EVENT_TYPES,
     build_records_for_event,
@@ -73,6 +73,10 @@ def _fetch_events(
     except LoginFailedError:
         log.exception("Login failed")
         notifier.login_failed()
+        raise SystemExit(1) from None
+    except SessionExpiredError:
+        log.warning("Session expired and no interactive terminal available — bootstrap required")
+        notifier.authentication_required()
         raise SystemExit(1) from None
     except AuthenticationError:
         log.exception("Authentication error")

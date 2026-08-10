@@ -83,6 +83,8 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `TRClient.fetch_timeline_events` uses `pytr.timeline.Timeline` with an `event_callback`.
 - Python dict mutation by reference: `details` dict is populated inside `collected` after `tl_loop()` completes — no explicit merging needed.
 - `pytr` requires interactive 2FA on first login (push notification or authenticator code). Session is persisted to `/app/data` and reused automatically.
+- Trade Republic web-login sessions have a hard **24h cap** (`tr_refresh` cookie `exp = iat + 86400`); `GET /api/v1/auth/web/session` only rotates the short-lived `tr_session`, never the refresh token, so a session cannot be extended past 24h — re-authentication is unavoidable.
+- `TRClient.connect` only prompts for an authenticator code when a TTY is attached (`sys.stdin.isatty()`). Bootstrap runs interactively (`docker compose run -it`), so David's authenticator flow works; scheduled cron syncs have no TTY, so instead of crashing on `input()` (`EOFError`) and re-hitting the login endpoint every run (429 ban risk), `connect` raises `SessionExpiredError`. `main._fetch_events` maps it to `notifier.authentication_required()` and exits cleanly. Push-approval accounts (Eli, no authenticator) still complete automatically in cron if approved in the app in time.
 
 ### Deduplication
 - `processed_events` table in SQLite: `(event_id, event_type, event_timestamp, amount, raw, synced_at)`.

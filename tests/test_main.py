@@ -438,6 +438,26 @@ def test_fetch_events_login_failed_exits():
     notifier.login_failed.assert_called_once()
 
 
+def test_fetch_events_session_expired_exits():
+    from unittest.mock import patch
+
+    from app.main import _fetch_events
+    from app.tr_client import SessionExpiredError
+
+    cfg = MagicMock()
+    notifier = MagicMock()
+    since = datetime.now(timezone.utc)
+
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.connect.side_effect = SessionExpiredError("needs bootstrap")
+        with pytest.raises(SystemExit) as exc_info:
+            _fetch_events(cfg, notifier, since)
+
+    assert exc_info.value.code == 1
+    notifier.authentication_required.assert_called_once()
+    notifier.login_failed.assert_not_called()
+
+
 def test_fetch_events_http_401_exits():
     from unittest.mock import patch
 
