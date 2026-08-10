@@ -201,6 +201,13 @@ def _gross_tax_note(gross: str | None, tax: str | None) -> str | None:
     return None
 
 
+# Detail row titles used in TR timeline event payloads (German locale).
+_DETAIL_TRANSACTION = "Transaktion"
+_DETAIL_TAX = "Steuern"
+_DETAIL_GROSS_SAVEBACK = "Angefallen"
+_DETAIL_GROSS_INTEREST = "Angesammelt"
+
+
 def _note_extras(event: dict[str, Any], event_type: str) -> list[str]:
     """Return additional note fragments for event types that append detail rows.
 
@@ -212,17 +219,17 @@ def _note_extras(event: dict[str, Any], event_type: str) -> list[str]:
     details = event.get("details") or {}
 
     if event_type in ("TRADING_SAVINGSPLAN_EXECUTED", "SPARE_CHANGE_AGGREGATE"):
-        txn = _extract_detail_row(details, "Transaktion")
+        txn = _extract_detail_row(details, _DETAIL_TRANSACTION)
         return [txn] if txn else []
 
     if event_type == "SAVEBACK_AGGREGATE":
         parts: list[str] = []
-        txn = _extract_detail_row(details, "Transaktion")
+        txn = _extract_detail_row(details, _DETAIL_TRANSACTION)
         if txn:
             parts.append(txn)
         gt = _gross_tax_note(
-            _extract_detail_row(details, "Angefallen"),
-            _extract_detail_row(details, "Steuern"),
+            _extract_detail_row(details, _DETAIL_GROSS_SAVEBACK),
+            _extract_detail_row(details, _DETAIL_TAX),
         )
         if gt:
             parts.append(gt)
@@ -230,8 +237,8 @@ def _note_extras(event: dict[str, Any], event_type: str) -> list[str]:
 
     if event_type in ("INTEREST_PAYMENT", "INTEREST_PAYOUT"):
         gt = _gross_tax_note(
-            _extract_detail_row(details, "Angesammelt"),
-            _extract_detail_row(details, "Steuern"),
+            _extract_detail_row(details, _DETAIL_GROSS_INTEREST),
+            _extract_detail_row(details, _DETAIL_TAX),
         )
         return [gt] if gt else []
 
