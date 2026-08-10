@@ -79,7 +79,7 @@ class _SSLCircuitBreakerAdapter(requests.adapters.HTTPAdapter):
     """Transport adapter that applies the SSL circuit-breaker to every request."""
 
     def send(self, request, **kwargs):  # type: ignore[override]
-        kwargs.setdefault("verify", _ssl_verify)
+        kwargs["verify"] = _ssl_verify  # always use current circuit state, not session.verify
         try:
             return super().send(request, **kwargs)
         except requests.exceptions.SSLError:

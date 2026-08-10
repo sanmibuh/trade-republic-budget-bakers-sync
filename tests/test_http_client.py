@@ -176,6 +176,47 @@ def test_build_session_ssl_circuit_breaker_on_request(monkeypatch):
     assert http_client_module._ssl_verify is False
 
 
+def test_adapter_uses_current_circuit_state_not_session_verify(monkeypatch):
+    """Adapter must use _ssl_verify, not session.verify, so tripped circuit is honoured
+    even on sessions that were built before the circuit opened."""
+    _reset_state()
+    http_client_module._allow_insecure_ssl = True
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.url = "https://example.com"
+    mock_response.history = []
+    mock_response.is_redirect = False
+    mock_response.headers = {}
+
+    import requests.adapters
+
+    verify_values: list = []
+
+    def fake_base_send(self_adapter, request, **kwargs):
+        verify_values.append(kwargs.get("verify"))
+        if verify_values[-1] is not False:
+            raise requests.exceptions.SSLError("cert verify failed")
+        return mock_response
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", fake_base_send)
+
+    # Build session while circuit is closed (verify=True)
+    session = build_session()
+    assert session.verify is True
+
+    # Manually trip the circuit (simulates another request having already opened it)
+    http_client_module._ssl_verify = False
+
+    # This request should use verify=False from the module state, NOT verify=True from session
+    result = session.get("https://example.com")
+
+    assert result is mock_response
+    # Must NOT have retried — first attempt should already use verify=False
+    assert verify_values == [False], f"Expected [False], got {verify_values}"
+    _reset_state()
+
+
 # ---------------------------------------------------------------------------
 # configure()
 # ---------------------------------------------------------------------------
