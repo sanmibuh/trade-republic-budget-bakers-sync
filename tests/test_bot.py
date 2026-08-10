@@ -204,6 +204,22 @@ def test_docker_exec_silent_success_does_not_call_on_error():
     on_error.assert_not_called()
 
 
+def test_docker_exec_silent_success_calls_on_success():
+    on_success = MagicMock()
+    client = _make_docker_client(0)
+    with patch("app.bot.docker.from_env", return_value=client):
+        _docker_exec_silent("my-container", ["login"], on_success=on_success)
+    on_success.assert_called_once()
+
+
+def test_docker_exec_silent_failure_does_not_call_on_success():
+    on_success = MagicMock()
+    client = _make_docker_client(1, b"boom")
+    with patch("app.bot.docker.from_env", return_value=client):
+        _docker_exec_silent("my-container", ["login"], on_success=on_success)
+    on_success.assert_not_called()
+
+
 def test_docker_exec_silent_container_not_found_does_not_raise():
     import docker.errors
     client = MagicMock()
@@ -784,6 +800,23 @@ def test_launch_login_sends_ack_and_starts_thread():
     assert "David" in mock_send.call_args.args[0]
     mock_thread.assert_called_once()
     assert mock_thread.call_args.kwargs["args"] == (inst.container_name, ["login"])
+
+
+def test_launch_login_reports_success_via_on_success():
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch("app.bot._docker_exec_silent"),
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        mock_thread.return_value.start = MagicMock()
+        bot._launch_login(inst)
+        on_success = mock_thread.call_args.kwargs["kwargs"]["on_success"]
+        mock_send.reset_mock()
+        on_success()
+    mock_send.assert_called_once()
+    assert "David" in mock_send.call_args.args[0]
 
 
 # ---------------------------------------------------------------------------
