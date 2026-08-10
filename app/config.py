@@ -23,6 +23,10 @@ def _positive_int_env(name: str, default: int) -> int:
     return value
 
 
+# Default owner name used when OWNER_NAME env var is not set.
+# The backup service intentionally omits OWNER_NAME; sync services set it explicitly.
+_DEFAULT_OWNER_NAME = "Backup"
+
 # Event types that support optional label assignment via LABEL_<EVENT_TYPE> env vars.
 LABELABLE_EVENT_TYPES: tuple[str, ...] = (
     "BANK_TRANSACTION_INCOMING",
@@ -65,7 +69,7 @@ def _bool_env(name: str, default: bool) -> bool:
 def _read_notifier_env() -> dict[str, object]:
     """Read env vars shared by Config and BackupConfig."""
     return {
-        "owner_name": os.getenv("OWNER_NAME", "Backup"),
+        "owner_name": os.getenv("OWNER_NAME", _DEFAULT_OWNER_NAME),
         "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
         "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID"),
         "data_dir": Path(os.getenv("DATA_DIR", "/app/data")),
