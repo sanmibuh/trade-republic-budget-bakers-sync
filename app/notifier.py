@@ -218,16 +218,3 @@ class Notifier:
             lines.append(f"File: `{_escape_markdown(filename)}`")
         return self._send("\n".join(lines))
 
-
-def notify_sync_complete(
-    bot_token: str | None,
-    chat_id: str | None,
-    owner_name: str,
-    synced: int,
-    failed: int,
-    skipped: int,
-    excluded: int = 0,
-) -> bool:
-    return Notifier(bot_token, chat_id, owner_name).sync_complete(
-        synced=synced, failed=failed, skipped=skipped, excluded=excluded
-    )
