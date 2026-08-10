@@ -124,6 +124,29 @@ def test_botconfig_from_env_instance_names_normalised(monkeypatch):
     assert "eli" in cfg.instances
 
 
+def test_botconfig_telegram_verify_ssl_default_true(monkeypatch):
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    cfg = BotConfig.from_env()
+    assert cfg.telegram_verify_ssl is True
+
+
+def test_botconfig_telegram_verify_ssl_false(monkeypatch):
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("TELEGRAM_VERIFY_SSL", "false")
+    cfg = BotConfig.from_env()
+    assert cfg.telegram_verify_ssl is False
+
+
+def test_botconfig_telegram_verify_ssl_invalid(monkeypatch):
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("TELEGRAM_VERIFY_SSL", "maybe")
+    with pytest.raises(ValueError, match="TELEGRAM_VERIFY_SSL"):
+        BotConfig.from_env()
+
+
 # ---------------------------------------------------------------------------
 # _docker_exec_silent
 # ---------------------------------------------------------------------------

@@ -132,6 +132,7 @@ class BotEnv:
     instances_raw: str
     container_prefix: str
     backup_service: str
+    telegram_verify_ssl: bool = True
 
     @classmethod
     def from_env(cls) -> BotEnv:
@@ -141,4 +142,5 @@ class BotEnv:
             instances_raw=_required_env("INSTANCES"),
             container_prefix=_required_env("CONTAINER_PREFIX"),
             backup_service=os.getenv("BACKUP_SERVICE", "backup").strip(),
+            telegram_verify_ssl=_bool_env("TELEGRAM_VERIFY_SSL", default=True),
         )
