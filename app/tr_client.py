@@ -63,7 +63,7 @@ class TRClient:
             client.initiate_weblogin()
 
             if client.weblogin_needs_authenticator:
-                print("Enter the code from your authenticator app: ", end="", flush=True)
+                log.info("Enter the code from your authenticator app:")
                 code = input().strip()
                 log.debug("Submitting authenticator code")
                 client.complete_weblogin(verify_code=code)
@@ -74,7 +74,6 @@ class TRClient:
                 client.save_websession()
             else:
                 log.info("Waiting for push notification approval in Trade Republic app...")
-                print("Waiting for you to approve the login in the Trade Republic app...")
                 client.complete_weblogin()
                 client.save_websession()
 
