@@ -92,6 +92,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `TelegramCodeProvider` sends a Telegram prompt (`notifier.login_code_request(instance)`) asking the user to reply with `/code <instance> <code>`, then polls `data_dir/.tr_2fa_code` (default 300s timeout, 3s poll) until the code file appears; it clears the file before prompting and after reading, raising `TimeoutError` on expiry.
 - Cross-container hand-off: the bot and the sync/login containers do **not** share the data volume. The `/code` bot command runs `python -m app submit-code <code>` inside the target container via the Docker SDK `exec_run`; `submit-code` writes the code to `data_dir/.tr_2fa_code`, which the waiting `TelegramCodeProvider` reads. pytr's v2 web login is stateful within a single process, so the login flow cannot be split across processes — the same process that starts the login must receive the code.
 - On-demand renewal: `/login` (bot) → `python -m app login` → `main.run_login()` triggers the 2FA flow explicitly. Scheduled cron syncs that hit an expired session trigger the same flow automatically (Eli via push, David via `/code`).
+- `run()` (sync) and `run_login()` share two helpers to avoid divergence: `_prepare(cfg)` (data dir + SSL circuit-breaker + logging + `Notifier`) and `_connect(cfg, notifier)` (builds the `TRClient`, selects the code provider via `_build_code_provider`, and establishes the session).
 
 ### Deduplication
 - `processed_events` table in SQLite: `(event_id, event_type, event_timestamp, amount, raw, synced_at)`.
@@ -262,7 +263,7 @@ See `deploy/DEPLOY.md` for setup instructions.
 |---|---|
 | `app/__main__.py` | click CLI: `sync`, `backup`, `bot`, `login`, `submit-code` subcommands; single entry point |
 | `app/http_client.py` | SSL circuit-breaker shared by notifier and wallet_client; `http_post`, `build_session` |
-| `app/main.py` | Sync orchestrator; passes `cfg.label_ids` to `build_records_for_event` |
+| `app/main.py` | Sync orchestrator (`run`) + on-demand login (`run_login`); shared `_prepare` (bootstrap) and `_connect` (TR session) helpers; passes `cfg.label_ids` to `build_records_for_event` |
 | `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |
 | `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions; `connect` uses a `code_provider` |
 | `app/twofa.py` | 2FA code providers (`TerminalCodeProvider`, `TelegramCodeProvider`) + `select_code_provider`; `CODE_FILENAME` |

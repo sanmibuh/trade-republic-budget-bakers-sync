@@ -937,3 +937,64 @@ def test_run_login_unexpected_error_notifies_and_exits(tmp_path):
 
     assert result == 1
     notifier_instance.error.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _prepare — shared bootstrap
+# ---------------------------------------------------------------------------
+
+def test_prepare_configures_environment_and_returns_notifier(tmp_path):
+    from unittest.mock import patch
+
+    from app.main import _prepare
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path / "data"
+    cfg.allow_insecure_ssl = True
+    cfg.telegram_bot_token = "tok"
+    cfg.telegram_chat_id = "chat"
+    cfg.owner_name = "David"
+
+    with (
+        patch("app.main.http_client.configure") as mock_configure,
+        patch("app.main.setup_logging") as mock_setup,
+        patch("app.main.Notifier") as mock_notifier_cls,
+    ):
+        notifier = _prepare(cfg)
+
+    assert cfg.data_dir.is_dir()
+    mock_configure.assert_called_once_with(allow_insecure_ssl=True)
+    mock_setup.assert_called_once_with(cfg.data_dir)
+    mock_notifier_cls.assert_called_once_with("tok", "chat", "David")
+    assert notifier is mock_notifier_cls.return_value
+
+
+# ---------------------------------------------------------------------------
+# _connect — shared TR client creation + login
+# ---------------------------------------------------------------------------
+
+def test_connect_builds_client_and_calls_connect_with_code_provider():
+    from unittest.mock import patch
+
+    from app.main import _connect
+
+    cfg = MagicMock()
+    cfg.phone_number = "+49123"
+    cfg.pin = "1234"
+    cfg.data_dir = "/data"
+    notifier = MagicMock()
+    provider = MagicMock()
+
+    with (
+        patch("app.main.TRClient") as MockTR,
+        patch("app.main._build_code_provider", return_value=provider) as mock_build,
+    ):
+        result = _connect(cfg, notifier)
+
+    MockTR.assert_called_once_with("+49123", "1234", "/data")
+    mock_build.assert_called_once_with(cfg, notifier)
+    kwargs = MockTR.return_value.connect.call_args.kwargs
+    assert kwargs["on_login_required"] == notifier.login_required
+    assert kwargs["on_login_success"] == notifier.login_success
+    assert kwargs["code_provider"] is provider
+    assert result is MockTR.return_value

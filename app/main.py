@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -19,7 +20,11 @@ from app.tr_mapper import (
     extract_event_type,
     filter_by_lookback,
 )
-from app.twofa import select_code_provider
+from app.twofa import (
+    TelegramCodeProvider,
+    TerminalCodeProvider,
+    select_code_provider,
+)
 from app.wallet_client import WalletClient
 
 try:
@@ -53,10 +58,22 @@ class _Batch:
 # Private steps
 # ---------------------------------------------------------------------------
 
-def _build_code_provider(cfg: Config, notifier: Notifier) -> Any:
-    """Choose how the authenticator 2FA code is obtained for this environment."""
-    import sys
+def _prepare(cfg: Config) -> Notifier:
+    """Shared bootstrap for the sync/login entry points.
 
+    Ensures the data dir exists, configures the SSL circuit-breaker and logging,
+    and returns a ready-to-use ``Notifier``.
+    """
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
+    setup_logging(cfg.data_dir)
+    return Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)
+
+
+def _build_code_provider(
+    cfg: Config, notifier: Notifier
+) -> TerminalCodeProvider | TelegramCodeProvider | None:
+    """Choose how the authenticator 2FA code is obtained for this environment."""
     telegram_configured = bool(cfg.telegram_bot_token and cfg.telegram_chat_id)
     return select_code_provider(
         data_dir=cfg.data_dir,
@@ -65,6 +82,17 @@ def _build_code_provider(cfg: Config, notifier: Notifier) -> Any:
         isatty=sys.stdin.isatty(),
         telegram_configured=telegram_configured,
     )
+
+
+def _connect(cfg: Config, notifier: Notifier) -> TRClient:
+    """Create a ``TRClient`` and establish a session (resume or full 2FA login)."""
+    tr_client = TRClient(cfg.phone_number, cfg.pin, cfg.data_dir)
+    tr_client.connect(
+        on_login_required=notifier.login_required,
+        on_login_success=notifier.login_success,
+        code_provider=_build_code_provider(cfg, notifier),
+    )
+    return tr_client
 
 
 def _fetch_events(
@@ -77,12 +105,7 @@ def _fetch_events(
     Raises SystemExit(1) on recoverable auth errors; re-raises on unexpected ones.
     """
     try:
-        tr_client = TRClient(cfg.phone_number, cfg.pin, cfg.data_dir)
-        tr_client.connect(
-            on_login_required=notifier.login_required,
-            on_login_success=notifier.login_success,
-            code_provider=_build_code_provider(cfg, notifier),
-        )
+        tr_client = _connect(cfg, notifier)
         log.info("Trade Republic session established")
         events = tr_client.fetch_timeline_events(since=since)
         log.info("Fetched %d timeline events", len(events))
@@ -188,13 +211,9 @@ def _process_results(
 
 def run() -> int:
     cfg = Config.from_env()
-    cfg.data_dir.mkdir(parents=True, exist_ok=True)
-
-    http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
-    setup_logging(cfg.data_dir)
+    notifier = _prepare(cfg)
     log.info("Starting sync for owner: %s", cfg.owner_name)
 
-    notifier = Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)
     since = datetime.now(timezone.utc) - timedelta(days=cfg.lookback_days)
 
     with EventRepository(cfg.data_dir / "sync.db") as repo:
@@ -252,21 +271,11 @@ def run_login() -> int:
     without an authenticator). Returns 0 on success, 1 on a recoverable failure.
     """
     cfg = Config.from_env()
-    cfg.data_dir.mkdir(parents=True, exist_ok=True)
-
-    http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
-    setup_logging(cfg.data_dir)
+    notifier = _prepare(cfg)
     log.info("Starting on-demand login for owner: %s", cfg.owner_name)
 
-    notifier = Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)
-
     try:
-        tr_client = TRClient(cfg.phone_number, cfg.pin, cfg.data_dir)
-        tr_client.connect(
-            on_login_required=notifier.login_required,
-            on_login_success=notifier.login_success,
-            code_provider=_build_code_provider(cfg, notifier),
-        )
+        _connect(cfg, notifier)
     except LoginFailedError:
         log.exception("Login failed")
         notifier.login_failed()
