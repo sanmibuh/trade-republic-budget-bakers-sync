@@ -13,8 +13,41 @@ from app.tr_mapper import (
     _to_decimal,
     build_records_for_event,
     extract_amount,
+    extract_event_type,
     normalize_event_time,
 )
+
+# ---------------------------------------------------------------------------
+# extract_event_type
+# ---------------------------------------------------------------------------
+
+def test_extract_event_type_reads_eventType():
+    assert extract_event_type({"eventType": "BUY_ORDER"}) == "BUY_ORDER"
+
+
+def test_extract_event_type_reads_type():
+    assert extract_event_type({"type": "SELL_ORDER"}) == "SELL_ORDER"
+
+
+def test_extract_event_type_reads_event_type():
+    assert extract_event_type({"event_type": "CARD_TRANSACTION"}) == "CARD_TRANSACTION"
+
+
+def test_extract_event_type_prefers_eventType_over_type():
+    assert extract_event_type({"eventType": "BUY_ORDER", "type": "OTHER"}) == "BUY_ORDER"
+
+
+def test_extract_event_type_returns_uppercase():
+    assert extract_event_type({"eventType": "buy_order"}) == "BUY_ORDER"
+
+
+def test_extract_event_type_missing_returns_empty():
+    assert extract_event_type({}) == ""
+
+
+def test_extract_event_type_none_value_falls_through():
+    assert extract_event_type({"eventType": None, "type": "SELL_ORDER"}) == "SELL_ORDER"
+
 
 # ---------------------------------------------------------------------------
 # _to_decimal

@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import datetime
 import logging
-import os
 import threading
 import time
 from collections.abc import Callable
@@ -51,16 +50,11 @@ import docker
 from app.config import BotEnv
 from app.notifier import _escape_markdown as _esc
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 log = logging.getLogger(__name__)
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 _YEAR_BUTTON_COUNT = 3   # number of recent years offered in the yearly backup keyboard
 _MONTH_BUTTON_COUNT = 4  # number of recent months offered in the monthly backup keyboard
-
-# Set TELEGRAM_VERIFY_SSL=false to disable SSL verification (e.g. behind a corporate proxy).
-_SSL_VERIFY: bool = os.environ.get("TELEGRAM_VERIFY_SSL", "true").strip().lower() != "false"
 
 # Separator used inside callback_data to encode command + param + instance.
 # Must not appear in instance names or period params (YYYY-MM / YYYY contain only digits and hyphens).
@@ -83,6 +77,7 @@ class BotConfig:
     chat_id: str
     instances: dict[str, InstanceConfig] = field(default_factory=dict)
     backup_container: str | None = None  # None means backup commands are disabled
+    telegram_verify_ssl: bool = True
 
     @classmethod
     def from_env(cls) -> BotConfig:
@@ -103,6 +98,7 @@ class BotConfig:
             chat_id=env.chat_id,
             instances=instances,
             backup_container=backup_container,
+            telegram_verify_ssl=env.telegram_verify_ssl,
         )
 
 
@@ -122,6 +118,8 @@ class TelegramBot:
         self._cfg = cfg
         self._api = _TELEGRAM_API.format(token=cfg.bot_token)
         self._offset = 0
+        if not cfg.telegram_verify_ssl:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # ------------------------------------------------------------------
     # Public
@@ -161,7 +159,7 @@ class TelegramBot:
                 f"{self._api}/setMyCommands",
                 json={"commands": commands},
                 timeout=10,
-                verify=_SSL_VERIFY,
+                verify=self._cfg.telegram_verify_ssl,
             )
             resp.raise_for_status()
             log.info("Telegram commands registered successfully")
@@ -181,7 +179,7 @@ class TelegramBot:
                 "allowed_updates": ["message", "callback_query"],
             },
             timeout=40,
-            verify=_SSL_VERIFY,
+            verify=self._cfg.telegram_verify_ssl,
         )
         resp.raise_for_status()
         for update in resp.json().get("result", []):
@@ -425,7 +423,7 @@ class TelegramBot:
                 f"{self._api}/sendMessage",
                 json=payload,
                 timeout=20,
-                verify=_SSL_VERIFY,
+                verify=self._cfg.telegram_verify_ssl,
             )
             resp.raise_for_status()
         except requests.RequestException as exc:
@@ -438,7 +436,7 @@ class TelegramBot:
                 f"{self._api}/answerCallbackQuery",
                 json={"callback_query_id": callback_query_id},
                 timeout=10,
-                verify=_SSL_VERIFY,
+                verify=self._cfg.telegram_verify_ssl,
             )
         except requests.RequestException as exc:
             log.warning("Failed to answer callback query: %s", exc)

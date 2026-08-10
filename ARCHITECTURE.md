@@ -10,6 +10,7 @@ Technical reference for developers and AI assistants. Covers module design, data
 app/
   __main__.py       # CLI entry point — click group with `sync`, `backup`, and `bot` subcommands
   config.py         # Config and BackupConfig dataclasses — reads all env vars in one place
+  http_client.py    # Shared HTTP helpers: ssl circuit-breaker, http_post, build_session
   persistence.py    # EventRepository (SQLite dedup)
   tr_mapper.py      # TR event → BudgetBakers record mapping
   tr_client.py      # TRClient — pytr wrapper: login, 2FA, timeline fetch
@@ -130,7 +131,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 ### Config — environment variables
 - `Config.from_env()` — full config for the **sync** command. Requires `PHONE_NUMBER`, `PIN`, `WALLET_API_KEY`, `WALLET_CASH_ACCOUNT_ID`, `WALLET_PORTFOLIO_ACCOUNT_ID`.
 - `BackupConfig.from_env()` — minimal config for the **backup** command. Only requires `WALLET_API_KEY`. Does not validate sync-only credentials, so the backup container can run without them.
-- Both share optional fields: `OWNER_NAME` (default `"Backup"`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DATA_DIR`.
+- Both share optional fields: `OWNER_NAME` (default `"Backup"`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DATA_DIR`, `ALLOW_INSECURE_SSL` (default `false`).
 - `BotEnv.from_env()` — config for the **bot** command. Reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `INSTANCES`, `CONTAINER_PREFIX`, `BACKUP_SERVICE`.
 - All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
@@ -139,11 +140,19 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - Sync services (`sync-david`, `sync-eli`) set it explicitly for per-owner notifications.
 - The backup service omits it; notifications show `"Backup"` as the owner.
 
+### SSL circuit-breaker (`app/http_client.py`)
+- `_ssl_verify: bool = True` — module-level flag shared across all HTTP calls.
+- `_allow_insecure_ssl: bool = False` — gate flag. The circuit-breaker only opens when this is `True`.
+- `configure(allow_insecure_ssl)` — called once at startup from `main.run()` and the `backup` CLI command. Resets any previously tripped state.
+- `http_post(url, **kwargs)` — wraps `requests.post`; on `SSLError`, only falls back to `verify=False` when `_allow_insecure_ssl` is `True`. Otherwise the error propagates.
+- `build_session(headers)` — returns a `requests.Session` with a custom `_SSLCircuitBreakerAdapter` that applies the same fallback logic per-request.
+- Both `notifier.py` (Telegram) and `wallet_client.py` (BudgetBakers) use this module — the flag is shared.
+- Controlled via `ALLOW_INSECURE_SSL` env var (default `false`). Set to `true` only in environments with broken certificate chains (e.g. corporate VPN).
+
 ### BudgetBakers API — POST (sync)
 - `POST /v1/api/records` — max 20 records per request.
 - `paymentType` is required on every record.
 - `labelIds` is a list (even for a single label).
-- `verify=False` + `InsecureRequestWarning` suppressed (self-signed cert on some deployments).
 
 ### Known limitations
 - TR CSV export has raw terminal descriptors (e.g. `"ETAM LINGERIE BUENOS A"`) but the pytr WebSocket API only exposes normalized merchant names (e.g. `"Etam"`). No fix possible without combining CSV + API sources.
@@ -221,6 +230,7 @@ See `deploy/DEPLOY.md` for setup instructions.
 | File | Role |
 |---|---|
 | `app/__main__.py` | click CLI: `sync`, `backup`, and `bot` subcommands; single entry point |
+| `app/http_client.py` | SSL circuit-breaker shared by notifier and wallet_client; `http_post`, `build_session` |
 | `app/main.py` | Sync orchestrator; passes `cfg.label_ids` to `build_records_for_event` |
 | `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |
 | `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions |

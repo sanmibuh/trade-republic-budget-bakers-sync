@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import logging
+from typing import TypedDict
 
 import requests
-import urllib3
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from app.http_client import http_post
 
 log = logging.getLogger(__name__)
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
+
+
+class _FetchContext(TypedDict):
+    since: str
+    until: str
+    fetched: int
+    new: int
+    skipped: int
 
 
 def _escape_markdown(value: str) -> str:
@@ -23,18 +31,14 @@ def send_telegram_message(bot_token: str | None, chat_id: str | None, message: s
     if not bot_token or not chat_id:
         return False
 
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "MarkdownV2",
+        "disable_web_page_preview": True,
+    }
     try:
-        response = requests.post(
-            TELEGRAM_API.format(token=bot_token),
-            json={
-                "chat_id": chat_id,
-                "text": message,
-                "parse_mode": "MarkdownV2",
-                "disable_web_page_preview": True,
-            },
-            timeout=20,
-            verify=False,
-        )
+        response = http_post(TELEGRAM_API.format(token=bot_token), json=payload, timeout=20)
         response.raise_for_status()
     except requests.HTTPError as exc:
         log.warning(
@@ -62,6 +66,7 @@ class Notifier:
         self._bot_token = bot_token
         self._chat_id = chat_id
         self._owner_name = owner_name
+        self._fetch_context: _FetchContext | None = None
 
     def _send(self, message: str) -> bool:
         return send_telegram_message(
@@ -125,15 +130,14 @@ class Notifier:
         fetched: int,
         new: int,
         skipped: int,
-    ) -> bool:
-        safe = self._safe_owner()
-        safe_since = _escape_markdown(since)
-        safe_until = _escape_markdown(until)
-        return self._send(
-            f"📥 *Trade Republic Sync: {safe}*\n\n"
-            f"Period: `{safe_since}` → `{safe_until}`\n"
-            f"Fetched: *{fetched}* events\n"
-            f"New: *{new}* · Skipped \\(already synced\\): *{skipped}*"
+    ) -> None:
+        """Buffer fetch context to be included in the final sync_complete message."""
+        self._fetch_context = _FetchContext(
+            since=since,
+            until=until,
+            fetched=fetched,
+            new=new,
+            skipped=skipped,
         )
 
     def unknown_event_type(self, event_type: str) -> bool:
@@ -164,8 +168,18 @@ class Notifier:
             icon, status = "⚠️", "Partial"
         lines = [
             f"{icon} *Trade Republic Sync: {safe} — {_escape_markdown(status)}*\n",
-            f"Saved: *{synced}* · Failed: *{_escape_markdown(str(failed))}* · Skipped: *{skipped}*",
         ]
+        if self._fetch_context is not None:
+            ctx = self._fetch_context
+            safe_since = _escape_markdown(ctx["since"])
+            safe_until = _escape_markdown(ctx["until"])
+            lines.append(
+                f"Period: `{safe_since}` → `{safe_until}`\n"
+                f"Fetched: *{ctx['fetched']}* · New: *{ctx['new']}* · Already synced: *{ctx['skipped']}*\n"
+            )
+        lines.append(
+            f"Saved: *{synced}* · Failed: *{_escape_markdown(str(failed))}* · Skipped: *{skipped}*"
+        )
         if excluded:
             lines.append(f"Excluded \\(zero amount\\): *{excluded}*")
         return self._send("\n".join(lines))
@@ -204,16 +218,3 @@ class Notifier:
             lines.append(f"File: `{_escape_markdown(filename)}`")
         return self._send("\n".join(lines))
 
-
-def notify_sync_complete(
-    bot_token: str | None,
-    chat_id: str | None,
-    owner_name: str,
-    synced: int,
-    failed: int,
-    skipped: int,
-    excluded: int = 0,
-) -> bool:
-    return Notifier(bot_token, chat_id, owner_name).sync_complete(
-        synced=synced, failed=failed, skipped=skipped, excluded=excluded
-    )

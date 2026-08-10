@@ -3,10 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import requests
-import urllib3
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from app.http_client import build_session
 
 log = logging.getLogger(__name__)
 
@@ -19,10 +16,8 @@ class WalletClient:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self._get_base = f"{self.base_url}/v1/api"
-        self.session = requests.Session()
-        self.session.verify = False
-        self.session.headers.update(
-            {
+        self.session = build_session(
+            headers={
                 "Authorization": "Bearer " + api_key,
                 "Content-Type": "application/json",
                 "Accept": "application/json",
@@ -58,7 +53,7 @@ class WalletClient:
                 chunk_start, len(chunk),
             )
             response = self.session.post(
-                f"{self.base_url}/v1/api/records",
+                f"{self._get_base}/records",
                 params={"returnData": "false"},
                 json=chunk,
                 timeout=30,

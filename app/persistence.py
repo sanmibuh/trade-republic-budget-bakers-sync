@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from app.tr_mapper import normalize_event_time
+from app.tr_mapper import extract_event_type, normalize_event_time
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def dedup_event_id(event: dict[str, Any]) -> str:
 
     seed = "|".join(
         [
-            str(event.get("eventType") or event.get("type") or event.get("event_type") or ""),
+            extract_event_type(event),
             normalize_event_time(event),
             str(event.get("amount") or event.get("value") or ""),
             str(event.get("title") or event.get("name") or event.get("description") or ""),
@@ -101,9 +101,7 @@ class EventRepository:
 
     def mark_processed(self, event: dict[str, Any]) -> None:
         eid = dedup_event_id(event)
-        event_type = str(
-            event.get("eventType") or event.get("type") or event.get("event_type") or ""
-        )
+        event_type = extract_event_type(event)
         event_timestamp = normalize_event_time(event)
         amount = str(event.get("amount") or event.get("value") or "")
         try:

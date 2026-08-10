@@ -7,12 +7,18 @@ from typing import Any
 
 from requests import HTTPError
 
+from app import http_client
 from app.config import Config
 from app.logging_setup import setup_logging
 from app.notifier import Notifier
 from app.persistence import EventRepository, dedup_event_id
 from app.tr_client import LoginFailedError, TRClient
-from app.tr_mapper import KNOWN_EVENT_TYPES, build_records_for_event, filter_by_lookback
+from app.tr_mapper import (
+    KNOWN_EVENT_TYPES,
+    build_records_for_event,
+    extract_event_type,
+    filter_by_lookback,
+)
 from app.wallet_client import WalletClient
 
 try:
@@ -100,9 +106,7 @@ def _build_batch(
     excluded_count = 0
 
     for event_idx, event in enumerate(new_events):
-        event_type = str(
-            event.get("eventType") or event.get("type") or event.get("event_type") or ""
-        ).upper()
+        event_type = extract_event_type(event)
         if event_type and event_type not in KNOWN_EVENT_TYPES:
             log.warning("Unknown TR event type %r — notifying and falling back to cash handler", event_type)
             notifier.unknown_event_type(event_type)
@@ -166,6 +170,7 @@ def run() -> int:
     cfg = Config.from_env()
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
 
+    http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     setup_logging(cfg.data_dir)
     log.info("Starting sync for owner: %s", cfg.owner_name)
 

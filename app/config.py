@@ -23,6 +23,10 @@ def _positive_int_env(name: str, default: int) -> int:
     return value
 
 
+# Default owner name used when OWNER_NAME env var is not set.
+# The backup service intentionally omits OWNER_NAME; sync services set it explicitly.
+_DEFAULT_OWNER_NAME = "Backup"
+
 # Event types that support optional label assignment via LABEL_<EVENT_TYPE> env vars.
 LABELABLE_EVENT_TYPES: tuple[str, ...] = (
     "BANK_TRANSACTION_INCOMING",
@@ -50,13 +54,26 @@ def _read_label_ids() -> dict[str, str]:
     }
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in ("true", "1", "yes"):
+        return True
+    if normalized in ("false", "0", "no"):
+        return False
+    raise ValueError(f"{name} must be a boolean (true/false/1/0/yes/no), got: {raw!r}")
+
+
 def _read_notifier_env() -> dict[str, object]:
     """Read env vars shared by Config and BackupConfig."""
     return {
-        "owner_name": os.getenv("OWNER_NAME", "Backup"),
+        "owner_name": os.getenv("OWNER_NAME", _DEFAULT_OWNER_NAME),
         "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
         "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID"),
         "data_dir": Path(os.getenv("DATA_DIR", "/app/data")),
+        "allow_insecure_ssl": _bool_env("ALLOW_INSECURE_SSL", default=False),
     }
 
 
@@ -74,6 +91,7 @@ class Config:
     telegram_chat_id: str | None
     lookback_days: int
     data_dir: Path
+    allow_insecure_ssl: bool = False
     label_ids: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -99,6 +117,7 @@ class BackupConfig:
     telegram_bot_token: str | None
     telegram_chat_id: str | None
     data_dir: Path
+    allow_insecure_ssl: bool = False
 
     @classmethod
     def from_env(cls) -> BackupConfig:
@@ -117,6 +136,7 @@ class BotEnv:
     instances_raw: str
     container_prefix: str
     backup_service: str
+    telegram_verify_ssl: bool = True
 
     @classmethod
     def from_env(cls) -> BotEnv:
@@ -126,4 +146,5 @@ class BotEnv:
             instances_raw=_required_env("INSTANCES"),
             container_prefix=_required_env("CONTAINER_PREFIX"),
             backup_service=os.getenv("BACKUP_SERVICE", "backup").strip(),
+            telegram_verify_ssl=_bool_env("TELEGRAM_VERIFY_SSL", default=True),
         )
