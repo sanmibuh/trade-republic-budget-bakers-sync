@@ -173,6 +173,19 @@ Then copy the new version contents into a fresh `current/` when preparing the ne
 
 ## Session expired (re-login)
 
+Trade Republic sessions expire on a hard 24h cap, so a scheduled sync will eventually fail with a session-expired error. Two ways to renew:
+
+**From Telegram (no SSH needed):**
+
+1. Send `/login` to the bot and pick the instance (or wait for the automatic prompt when a cron sync bails out).
+2. The bot replies asking for the authenticator code. Reply with:
+   ```
+   /code <instance> <code>
+   ```
+   e.g. `/code david 123456`. Push-approval accounts (no authenticator) just approve in the app — no code needed.
+
+**From the NAS (interactive bootstrap):**
+
 ```sh
 ./tr-sync.sh bootstrap sync-1   # renew 2FA login for account 1
 ```

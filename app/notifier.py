@@ -27,6 +27,16 @@ def _escape_markdown(value: str) -> str:
     return escaped
 
 
+def _escape_code(value: str) -> str:
+    """Escape a value for a MarkdownV2 inline-code span.
+
+    Inside `` `...` `` only backslash and backtick are special; every other
+    character (``-``, ``.``, ``_`` …) is rendered literally, so escaping them
+    the normal way would show the backslashes to the user.
+    """
+    return value.replace("\\", "\\\\").replace("`", "\\`")
+
+
 def send_telegram_message(bot_token: str | None, chat_id: str | None, message: str) -> bool:
     if not bot_token or not chat_id:
         return False
@@ -103,6 +113,16 @@ class Notifier:
             f"Owner: *{safe}*\n"
             "The 2FA code was incorrect or the login request was rejected\\.\n"
             "Run the bootstrap command again to retry\\."
+        )
+
+    def login_code_request(self, instance: str) -> bool:
+        safe = self._safe_owner()
+        safe_instance = _escape_code(instance)
+        return self._send(
+            "🔐 *Trade Republic Sync: 2FA Code Required*\n\n"
+            f"Owner: *{safe}*\n"
+            "Reply with your authenticator code using:\n"
+            f"`/code {safe_instance} <code>`"
         )
 
     def login_success(self) -> bool:

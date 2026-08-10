@@ -830,3 +830,171 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
     notifier_instance.sync_complete.assert_called_once()
     _, kwargs = notifier_instance.sync_complete.call_args
     assert kwargs["excluded"] == 3
+
+
+# ---------------------------------------------------------------------------
+# run_login — on-demand re-authentication
+# ---------------------------------------------------------------------------
+
+def test_run_login_connects_and_returns_zero(tmp_path):
+    from unittest.mock import patch
+
+    from app.main import run_login
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.http_client.configure"),
+        patch("app.main.Notifier") as mock_notifier_cls,
+        patch("app.main.TRClient") as MockTR,
+        patch("app.main._build_code_provider", return_value=MagicMock()),
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        mock_cfg_cls.return_value = cfg
+        notifier_instance = mock_notifier_cls.return_value
+
+        result = run_login()
+
+    assert result == 0
+    MockTR.return_value.connect.assert_called_once()
+    kwargs = MockTR.return_value.connect.call_args.kwargs
+    assert kwargs["on_login_success"] == notifier_instance.login_success
+
+
+def test_run_login_session_expired_notifies_and_exits(tmp_path):
+    from unittest.mock import patch
+
+    from app.main import run_login
+    from app.tr_client import SessionExpiredError
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.http_client.configure"),
+        patch("app.main.Notifier") as mock_notifier_cls,
+        patch("app.main.TRClient") as MockTR,
+        patch("app.main._build_code_provider", return_value=None),
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        mock_cfg_cls.return_value = cfg
+        MockTR.return_value.connect.side_effect = SessionExpiredError("no provider")
+        notifier_instance = mock_notifier_cls.return_value
+
+        result = run_login()
+
+    assert result == 1
+    notifier_instance.authentication_required.assert_called_once()
+
+
+def test_run_login_login_failed_notifies_and_exits(tmp_path):
+    from unittest.mock import patch
+
+    from app.main import run_login
+    from app.tr_client import LoginFailedError
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.http_client.configure"),
+        patch("app.main.Notifier") as mock_notifier_cls,
+        patch("app.main.TRClient") as MockTR,
+        patch("app.main._build_code_provider", return_value=MagicMock()),
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        mock_cfg_cls.return_value = cfg
+        MockTR.return_value.connect.side_effect = LoginFailedError("bad code")
+        notifier_instance = mock_notifier_cls.return_value
+
+        result = run_login()
+
+    assert result == 1
+    notifier_instance.login_failed.assert_called_once()
+
+
+def test_run_login_unexpected_error_notifies_and_exits(tmp_path):
+    from unittest.mock import patch
+
+    from app.main import run_login
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.http_client.configure"),
+        patch("app.main.Notifier") as mock_notifier_cls,
+        patch("app.main.TRClient") as MockTR,
+        patch("app.main._build_code_provider", return_value=MagicMock()),
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        mock_cfg_cls.return_value = cfg
+        MockTR.return_value.connect.side_effect = RuntimeError("boom")
+        notifier_instance = mock_notifier_cls.return_value
+
+        result = run_login()
+
+    assert result == 1
+    notifier_instance.error.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _prepare — shared bootstrap
+# ---------------------------------------------------------------------------
+
+def test_prepare_configures_environment_and_returns_notifier(tmp_path):
+    from unittest.mock import patch
+
+    from app.main import _prepare
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path / "data"
+    cfg.allow_insecure_ssl = True
+    cfg.telegram_bot_token = "tok"
+    cfg.telegram_chat_id = "chat"
+    cfg.owner_name = "David"
+
+    with (
+        patch("app.main.http_client.configure") as mock_configure,
+        patch("app.main.setup_logging") as mock_setup,
+        patch("app.main.Notifier") as mock_notifier_cls,
+    ):
+        notifier = _prepare(cfg)
+
+    assert cfg.data_dir.is_dir()
+    mock_configure.assert_called_once_with(allow_insecure_ssl=True)
+    mock_setup.assert_called_once_with(cfg.data_dir)
+    mock_notifier_cls.assert_called_once_with("tok", "chat", "David")
+    assert notifier is mock_notifier_cls.return_value
+
+
+# ---------------------------------------------------------------------------
+# _connect — shared TR client creation + login
+# ---------------------------------------------------------------------------
+
+def test_connect_builds_client_and_calls_connect_with_code_provider():
+    from unittest.mock import patch
+
+    from app.main import _connect
+
+    cfg = MagicMock()
+    cfg.phone_number = "+49123"
+    cfg.pin = "1234"
+    cfg.data_dir = "/data"
+    notifier = MagicMock()
+    provider = MagicMock()
+
+    with (
+        patch("app.main.TRClient") as MockTR,
+        patch("app.main._build_code_provider", return_value=provider) as mock_build,
+    ):
+        result = _connect(cfg, notifier)
+
+    MockTR.assert_called_once_with("+49123", "1234", "/data")
+    mock_build.assert_called_once_with(cfg, notifier)
+    kwargs = MockTR.return_value.connect.call_args.kwargs
+    assert kwargs["on_login_required"] == notifier.login_required
+    assert kwargs["on_login_success"] == notifier.login_success
+    assert kwargs["code_provider"] is provider
+    assert result is MockTR.return_value

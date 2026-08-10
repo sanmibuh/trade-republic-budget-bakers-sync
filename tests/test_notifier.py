@@ -136,6 +136,26 @@ def test_notifier_login_failed_sends_message():
     mock_send.assert_called_once()
 
 
+def test_notifier_login_code_request_sends_message_with_instance():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = _make_notifier().login_code_request("david")
+    assert result is True
+    mock_send.assert_called_once()
+    sent = mock_send.call_args.kwargs["message"]
+    assert "/code david" in sent
+
+
+def test_notifier_login_code_request_does_not_backslash_escape_instance():
+    """Instance sits inside an inline-code span; MarkdownV2 shows backslashes
+    literally there, so a hyphenated instance must NOT be escaped (the user
+    copies it verbatim into /code)."""
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().login_code_request("sync-1")
+    sent = mock_send.call_args.kwargs["message"]
+    assert "/code sync-1 " in sent
+    assert "sync\\-1" not in sent
+
+
 def test_notifier_authentication_required_sends_message():
     with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
         result = _make_notifier().authentication_required()
