@@ -25,11 +25,8 @@ jobs:
           echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
 
-      - name: Update VERSION and docker-compose image tag
-        run: |
-          echo "${{ steps.version.outputs.new }}" > VERSION
-          sed -i "s|ghcr.io/sanmibuh/tr-wallet-sync:v${{ steps.version.outputs.current }}|ghcr.io/sanmibuh/tr-wallet-sync:v${{ steps.version.outputs.new }}|g" \
-            deploy/nas/current/docker-compose.yml
+      - name: Update VERSION
+        run: echo "${{ steps.version.outputs.new }}" > VERSION
 
       - name: Open PR
         env:
