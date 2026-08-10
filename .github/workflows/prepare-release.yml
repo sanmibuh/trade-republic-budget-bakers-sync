@@ -1,7 +1,16 @@
-name: Release minor
+name: Prepare release PR
 
 on:
   workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 jobs:
   prepare-release:
@@ -16,13 +25,20 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.PAT_RELEASE }}
 
-      - name: Calculate next minor version
+      - name: Calculate next version
         id: version
         run: |
           CURRENT=$(cat VERSION)
           MAJOR=$(echo "$CURRENT" | cut -d. -f1)
           MINOR=$(echo "$CURRENT" | cut -d. -f2)
-          NEW="$MAJOR.$((MINOR + 1)).0"
+          PATCH=$(echo "$CURRENT" | cut -d. -f3)
+
+          case "${{ inputs.bump }}" in
+            major) NEW="$((MAJOR + 1)).0.0" ;;
+            minor) NEW="$MAJOR.$((MINOR + 1)).0" ;;
+            patch) NEW="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+          esac
+
           echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
 
@@ -35,6 +51,7 @@ jobs:
         run: |
           NEW="${{ steps.version.outputs.new }}"
           CURRENT="${{ steps.version.outputs.current }}"
+          BUMP="${{ inputs.bump }}"
           BRANCH="release-${NEW}"
 
           git config user.name  "github-actions[bot]"
@@ -42,16 +59,22 @@ jobs:
           git checkout -b "$BRANCH"
           git add VERSION
           git commit -m "[release-${NEW}]: chore: update version to ${NEW}"
-          git push origin "$BRANCH"
+          git push origin "$BRANCH" --force-with-lease 2>/dev/null || git push origin "$BRANCH" --force
+
+          if [ "$BUMP" = "major" ]; then
+            DOCKER_NOTE="- Trigger the Docker build workflows for both \`python-trade-republic\` and \`tr-wallet-sync:v${NEW}\`"
+          else
+            DOCKER_NOTE="- Trigger the Docker image publish workflow for \`tr-wallet-sync:v${NEW}\`"
+          fi
 
           gh pr create \
             --title "[release-${NEW}]: chore: update version to ${NEW}" \
-            --body "## Release ${NEW} (minor)
+            --body "## Release ${NEW} (${BUMP})
 
-          Bumps version \`${CURRENT}\` → \`${NEW}\` and updates the image tag in \`deploy/nas/current/docker-compose.yml\`.
+          Bumps version \`${CURRENT}\` → \`${NEW}\`.
 
           **Merging this PR will:**
           - Trigger \`release.yml\` → create tag \`v${NEW}\` + GitHub Release
-          - Trigger the Docker image publish workflow for \`tr-wallet-sync:v${NEW}\`" \
+          ${DOCKER_NOTE}" \
             --base main \
             --head "$BRANCH"
