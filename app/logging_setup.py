@@ -4,6 +4,13 @@ import logging
 import logging.handlers
 from pathlib import Path
 
+_LOG_FMT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+_DATE_FMT = "%Y-%m-%d %H:%M:%S"
+
+
+def _make_formatter() -> logging.Formatter:
+    return logging.Formatter(fmt=_LOG_FMT, datefmt=_DATE_FMT)
+
 
 def setup_logging(log_dir: Path) -> logging.Logger:
     """Configure root logger: DEBUG to rotating file, INFO to console."""
@@ -13,10 +20,7 @@ def setup_logging(log_dir: Path) -> logging.Logger:
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
 
-    fmt = logging.Formatter(
-        fmt="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    fmt = _make_formatter()
 
     # Rotating file: 5 MB per file, keep 5 backups → max 25 MB on disk
     fh = logging.handlers.RotatingFileHandler(
@@ -42,11 +46,7 @@ def configure_logging() -> None:
     if root.handlers:
         return  # already configured
     root.setLevel(logging.DEBUG)
-    fmt = logging.Formatter(
-        fmt="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
-    ch.setFormatter(fmt)
+    ch.setFormatter(_make_formatter())
     root.addHandler(ch)
