@@ -13,12 +13,13 @@ Also includes a **wallet backup** feature that saves full JSON snapshots of your
 ### 1. Copy the example config
 
 ```sh
-cp deploy/example/docker-compose.yml  docker-compose.yml
-cp deploy/example/common.env.example  common.env
-cp deploy/example/sync-1.env.example  sync-1.env
+cp deploy/example/docker-compose.yml   docker-compose.yml
+cp deploy/example/wallet.env.example   wallet.env
+cp deploy/example/telegram.env.example telegram.env
+cp deploy/example/sync-1.env.example   sync-1.env
 ```
 
-Fill in `common.env` (Wallet API key, Telegram credentials) and `sync-1.env` (Trade Republic phone + PIN). Update `WALLET_CASH_ACCOUNT_ID` and `WALLET_PORTFOLIO_ACCOUNT_ID` in `docker-compose.yml`.
+Fill in `wallet.env` (Wallet API key), `telegram.env` (Telegram credentials) and `sync-1.env` (Trade Republic phone + PIN). Update `WALLET_CASH_ACCOUNT_ID` and `WALLET_PORTFOLIO_ACCOUNT_ID` in `docker-compose.yml`.
 
 ### 2. First-time login (interactive 2FA)
 
@@ -175,7 +176,7 @@ services:
     image: ghcr.io/sanmibuh/tr-wallet-sync:<tag>
     entrypoint: ["python", "-m", "app", "bot"]
     env_file:
-      - common.env
+      - telegram.env
     environment:
       # Comma-separated list of sync instance names (without "sync-" prefix)
       INSTANCES: "1,2"

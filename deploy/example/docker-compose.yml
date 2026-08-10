@@ -26,7 +26,8 @@ services:
   sync-1:
     <<: [*common, *healthcheck-cron]
     env_file:
-      - common.env
+      - wallet.env
+      - telegram.env
       - sync-1.env
     environment:
       <<: *sync-env
@@ -40,7 +41,8 @@ services:
   sync-2:
     <<: [*common, *healthcheck-cron]
     env_file:
-      - common.env
+      - wallet.env
+      - telegram.env
       - sync-2.env
     environment:
       <<: *sync-env
@@ -54,7 +56,8 @@ services:
   backup:
     <<: [*common, *healthcheck-cron]
     env_file:
-      - common.env
+      - wallet.env
+      - telegram.env
     environment:
       MODE: backup
       BACKUP_SCHEDULE: "0 3 * * *"
@@ -73,7 +76,7 @@ services:
       start_period: 20s
     entrypoint: ["python", "-m", "app", "bot"]
     env_file:
-      - common.env
+      - telegram.env
     environment:
       # Comma-separated list of sync instance names (must match service names without "sync-" prefix)
       INSTANCES: "1,2"
