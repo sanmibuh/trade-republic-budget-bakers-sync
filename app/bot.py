@@ -229,6 +229,11 @@ class TelegramBot:
             return
         handler(args)
 
+        # The /code message contains a sensitive 2FA code — remove it from the
+        # chat history as soon as it has been dispatched.
+        if raw_cmd == "code":
+            self._delete_message(message.get("message_id"))
+
     def _handle_callback_query(self, cq: dict) -> None:
         """Handle inline keyboard button taps."""
         cq_id = cq.get("id", "")
@@ -488,6 +493,20 @@ class TelegramBot:
             )
         except requests.RequestException as exc:
             log.warning("Failed to answer callback query: %s", exc)
+
+    def _delete_message(self, message_id: int | None) -> None:
+        """Delete a message from the chat (used to purge sensitive 2FA codes)."""
+        if message_id is None:
+            return
+        try:
+            requests.post(
+                f"{self._api}/deleteMessage",
+                json={"chat_id": self._cfg.chat_id, "message_id": message_id},
+                timeout=10,
+                verify=self._cfg.telegram_verify_ssl,
+            )
+        except requests.RequestException as exc:
+            log.warning("Failed to delete message %s: %s", message_id, exc)
 
 
 # ---------------------------------------------------------------------------
