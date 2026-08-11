@@ -9,6 +9,7 @@ from app.bot import (
     BotConfig,
     InstanceConfig,
     TelegramBot,
+    _docker_check_session,
     _docker_exec_silent,
 )
 
@@ -1205,3 +1206,92 @@ def test_send_message_no_parse_mode_omits_field():
         bot._send_message("plain text", parse_mode=None)
     payload = mock_post.call_args.kwargs["json"]
     assert "parse_mode" not in payload
+
+
+# ---------------------------------------------------------------------------
+# _docker_check_session
+# ---------------------------------------------------------------------------
+
+def test_docker_check_session_returns_true_when_exit_zero():
+    """Exit code 0 from check-session → session is valid."""
+    client = _make_docker_client(exit_code=0)
+    with patch("app.bot.docker.from_env", return_value=client):
+        result = _docker_check_session("my-container")
+    assert result is True
+
+
+def test_docker_check_session_returns_false_when_exit_nonzero():
+    """Non-zero exit from check-session → session needs renewal."""
+    client = _make_docker_client(exit_code=1)
+    with patch("app.bot.docker.from_env", return_value=client):
+        result = _docker_check_session("my-container")
+    assert result is False
+
+
+def test_docker_check_session_returns_none_on_exception():
+    """If the container is unreachable, return None (unknown state)."""
+    client = MagicMock()
+    client.containers.get.side_effect = Exception("not found")
+    with patch("app.bot.docker.from_env", return_value=client):
+        result = _docker_check_session("my-container")
+    assert result is None
+
+
+def test_docker_check_session_invokes_check_session_command():
+    """The exec must call `python -m app check-session`."""
+    client = _make_docker_client(exit_code=0)
+    with patch("app.bot.docker.from_env", return_value=client):
+        _docker_check_session("my-container")
+    cmd = client.containers.get.return_value.exec_run.call_args.args[0]
+    assert cmd == ["python", "-m", "app", "check-session"]
+
+
+# ---------------------------------------------------------------------------
+# _cmd_status — auth state decoration
+# ---------------------------------------------------------------------------
+
+def test_cmd_status_shows_checkmark_for_authenticated_instance():
+    """✅ icon when the session check passes for an instance."""
+    bot = _bot()
+    with (
+        patch("app.bot._docker_check_session", return_value=True),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._cmd_status([])
+    msg = mock_send.call_args.args[0]
+    assert "✅" in msg
+
+
+def test_cmd_status_shows_warning_for_unauthenticated_instance():
+    """⚠️ icon when the session check fails for an instance."""
+    bot = _bot()
+    with (
+        patch("app.bot._docker_check_session", return_value=False),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._cmd_status([])
+    msg = mock_send.call_args.args[0]
+    assert "⚠️" in msg
+
+
+def test_cmd_status_shows_question_mark_for_unavailable_instance():
+    """❓ icon when the container is unreachable."""
+    bot = _bot()
+    with (
+        patch("app.bot._docker_check_session", return_value=None),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._cmd_status([])
+    msg = mock_send.call_args.args[0]
+    assert "❓" in msg
+
+
+def test_cmd_status_checks_each_instance():
+    """_docker_check_session must be called once per configured instance."""
+    bot = _bot()
+    with (
+        patch("app.bot._docker_check_session", return_value=True) as mock_check,
+        patch.object(bot, "_send_message"),
+    ):
+        bot._cmd_status([])
+    assert mock_check.call_count == len(bot._cfg.instances)

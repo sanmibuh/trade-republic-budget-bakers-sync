@@ -60,6 +60,20 @@ def submit_code(code: str) -> None:
     (cfg.data_dir / CODE_FILENAME).write_text(code.strip())
 
 
+@cli.command(name="check-session")
+def check_session() -> None:
+    """Exit 0 if a saved Trade Republic session exists, 1 if login is required.
+
+    Used by the Telegram bot to report per-instance authentication state in
+    /status without making any network calls.
+    """
+    from app.config import read_data_dir
+
+    data_dir = read_data_dir()
+    credentials = data_dir / "credentials.json"
+    sys.exit(0 if credentials.exists() else 1)
+
+
 @cli.command()
 @click.argument("mode", type=click.Choice(["auto", "monthly", "yearly"]))
 @click.argument("param", required=False, default=None)

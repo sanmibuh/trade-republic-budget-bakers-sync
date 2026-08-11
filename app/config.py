@@ -77,6 +77,11 @@ def _read_notifier_env() -> dict[str, object]:
     }
 
 
+def read_data_dir() -> Path:
+    """Return the data directory path from the DATA_DIR environment variable."""
+    return Path(os.getenv("DATA_DIR", "/app/data"))
+
+
 @dataclass(frozen=True)
 class Config:
     """Full config for the sync command. Requires Trade Republic and Wallet credentials."""

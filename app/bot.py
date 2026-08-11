@@ -323,8 +323,15 @@ class TelegramBot:
 
         lines = ["📋 *Instance status*\n"]
         for inst in self._cfg.instances.values():
+            auth = _docker_check_session(inst.container_name)
+            if auth is True:
+                icon = "✅"
+            elif auth is False:
+                icon = "⚠️"
+            else:
+                icon = "❓"
             lines.append(
-                f"• *{_esc(inst.name)}* — `{_esc(inst.container_name)}`"
+                f"• *{_esc(inst.name)}* — `{_esc(inst.container_name)}` {icon}"
             )
 
         if self._cfg.backup_container:
@@ -550,6 +557,26 @@ class TelegramBot:
 # ---------------------------------------------------------------------------
 # Docker helpers
 # ---------------------------------------------------------------------------
+
+def _docker_check_session(container_name: str) -> bool | None:
+    """Check whether the saved Trade Republic session is valid for *container_name*.
+
+    Runs ``python -m app check-session`` inside the container via the Docker SDK.
+
+    Returns:
+        True   — credentials file present (session was saved).
+        False  — credentials file absent (login required).
+        None   — container unreachable or exec failed unexpectedly.
+    """
+    try:
+        client = docker.from_env()
+        container = client.containers.get(container_name)
+        exit_code, _ = container.exec_run(["python", "-m", "app", "check-session"])
+        return exit_code == 0
+    except Exception as exc:  # noqa: BLE001
+        log.debug("check-session exec failed for %s: %s", container_name, exc)
+        return None
+
 
 def _docker_logs_today(container_name: str, since: datetime.datetime) -> str:
     """Return stdout/stderr logs for *container_name* since *since* (UTC datetime)."""
