@@ -61,7 +61,9 @@ def _yearly_path(data_dir: Path, year: int) -> Path:
 
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+    tmp.replace(path)
     log.info("Written %s", path)
 
 
@@ -221,7 +223,7 @@ def run_auto(
 def _parse_monthly_param(param: str | None) -> tuple[int, int]:
     """Parse an optional YYYY-MM string. Returns (year, month); raises ValueError on bad input."""
     if param is not None:
-        parsed = datetime.strptime(param, "%Y-%m")  # noqa: DTZ007 — only year/month needed, no tz
+        parsed = datetime.strptime(param, "%Y-%m")  # noqa: DTZ007  # only year/month needed, no tz
         return parsed.year, parsed.month
     return _previous_month(datetime.now(timezone.utc).date())
 

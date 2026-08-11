@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,6 +12,7 @@ from app.backup import (
     _parse_monthly_param,
     _parse_yearly_param,
     _previous_month,
+    _write_json,
     _year_range,
     run_auto,
     run_monthly,
@@ -332,3 +334,72 @@ def test_run_auto_february_yearly_idempotent(tmp_path):
 
     # Second run: only 2 more calls (feb + jan), not yearly again
     assert second_call_count - first_call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# _write_json — atomic write
+# ---------------------------------------------------------------------------
+
+def test_write_json_creates_file_with_correct_content(tmp_path):
+    path = tmp_path / "sub" / "out.json"
+    payload = {"foo": "bar", "nums": [1, 2, 3]}
+
+    _write_json(path, payload)
+
+    assert path.exists()
+    assert json.loads(path.read_text()) == payload
+
+
+def test_write_json_no_tmp_file_remains(tmp_path):
+    path = tmp_path / "out.json"
+    _write_json(path, {"x": 1})
+
+    tmp = path.with_suffix(".tmp")
+    assert not tmp.exists()
+
+
+def test_write_json_uses_tmp_then_rename(tmp_path, monkeypatch):
+    """Atomic write must rename a .tmp file into the final path."""
+    path = tmp_path / "out.json"
+    replaced_sources: list[str] = []
+
+    original_replace = Path.replace
+
+    def capturing_replace(self: Path, target: Path) -> Path:
+        replaced_sources.append(self.name)
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", capturing_replace)
+    _write_json(path, {"v": 1})
+
+    assert any(".tmp" in src for src in replaced_sources), (
+        "_write_json must rename a .tmp file into the final path"
+    )
+    assert json.loads(path.read_text()) == {"v": 1}
+
+
+def test_write_json_atomic_preserves_original_when_rename_fails(tmp_path, monkeypatch):
+    """If rename fails after tmp write, the pre-existing file must remain intact."""
+    path = tmp_path / "out.json"
+    original = {"original": True}
+    path.write_text(json.dumps(original))
+
+    def failing_replace(self: Path, _target: Path) -> Path:
+        raise OSError("rename failed")
+
+    monkeypatch.setattr(Path, "replace", failing_replace)
+
+    with pytest.raises(OSError):
+        _write_json(path, {"new": True})
+
+    assert json.loads(path.read_text()) == original, (
+        "original file must be untouched when rename fails"
+    )
+
+
+def test_write_json_overwrites_existing_file(tmp_path):
+    path = tmp_path / "out.json"
+    _write_json(path, {"v": 1})
+    _write_json(path, {"v": 2})
+
+    assert json.loads(path.read_text()) == {"v": 2}
