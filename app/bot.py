@@ -69,6 +69,12 @@ _CB_SEP = ":"
 
 _MAX_LOG_CHARS = 3800  # safe limit below Telegram's 4096-char message cap
 
+# Icons used in backup ACK messages — must stay in sync with _backup_type_buttons().
+_BACKUP_ICONS: dict[str, str] = {
+    "monthly": "📅",
+    "yearly":  "📆",
+}
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -277,13 +283,11 @@ class TelegramBot:
             return
 
         if cmd == "backup_yearly":
-            year = parts[1]
-            self._launch_backup_yearly(year)
+            self._launch_backup("yearly", parts[1])
             return
 
         if cmd == "backup_monthly":
-            period = parts[1]
-            self._launch_backup_monthly(period)
+            self._launch_backup("monthly", parts[1])
             return
 
         # All remaining cmds (sync) use instance routing.
@@ -356,16 +360,13 @@ class TelegramBot:
         self._send_message("\n".join(lines))
 
     def _cmd_sync(self, _args: list[str]) -> None:
-        buttons = self._instance_buttons("sync")
-        self._send_message("🔄 *Sync* — Choose instance:", keyboard=buttons)
+        self._pick_instance("sync", "🔄 *Sync* — Choose instance:")
 
     def _cmd_login(self, _args: list[str]) -> None:
-        buttons = self._instance_buttons("login")
-        self._send_message("🔐 *Login* — Choose instance to re\\-authenticate:", keyboard=buttons)
+        self._pick_instance("login", "🔐 *Login* — Choose instance to re\\-authenticate:")
 
     def _cmd_logs(self, _args: list[str]) -> None:
-        buttons = self._instance_buttons("logs")
-        self._send_message("📋 *Logs* — Choose instance:", keyboard=buttons)
+        self._pick_instance("logs", "📋 *Logs* — Choose instance:")
 
     def _cmd_code(self, args: list[str]) -> None:
         """Deliver an authenticator code to a waiting login process: /code <instance> <code>."""
@@ -383,12 +384,7 @@ class TelegramBot:
             return
 
         self._send_message(f"🔑 Sending code to *{_esc(inst.name)}*\\.\\.\\.")
-        threading.Thread(
-            target=_docker_exec_silent,
-            args=(inst.container_name, ["submit-code", code]),
-            kwargs={"on_error": self._send_message},
-            daemon=True,
-        ).start()
+        self._exec_in_thread(inst.container_name, ["submit-code", code], on_error=self._send_message)
 
     def _cmd_backup(self, args: list[str]) -> None:
         if not self._cfg.backup_container:
@@ -403,12 +399,12 @@ class TelegramBot:
 
         if type_arg == "monthly":
             if period_arg:
-                self._launch_backup_monthly(period_arg)
+                self._launch_backup("monthly", period_arg)
             else:
                 self._send_message("📅 *Monthly backup* — Choose month:", keyboard=self._month_buttons())
         elif type_arg == "yearly":
             if period_arg:
-                self._launch_backup_yearly(period_arg)
+                self._launch_backup("yearly", period_arg)
             else:
                 self._send_message("📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons())
         else:
@@ -416,25 +412,13 @@ class TelegramBot:
                 f"⚠️ Unknown backup type: `{_esc(type_arg)}`\\. Use `monthly` or `yearly`\\."
             )
 
-    def _launch_backup_monthly(self, period: str) -> None:
-        label = _esc(f"Monthly backup ({period})")
-        self._send_message(f"📦 *{label}*\\.\\.\\.")
-        threading.Thread(
-            target=_docker_exec_silent,
-            args=(self._cfg.backup_container, ["backup", "monthly", period]),
-            kwargs={"on_error": self._send_message},
-            daemon=True,
-        ).start()
-
-    def _launch_backup_yearly(self, year: str) -> None:
-        label = _esc(f"Yearly backup ({year})")
-        self._send_message(f"📆 *{label}*\\.\\.\\.")
-        threading.Thread(
-            target=_docker_exec_silent,
-            args=(self._cfg.backup_container, ["backup", "yearly", year]),
-            kwargs={"on_error": self._send_message},
-            daemon=True,
-        ).start()
+    def _launch_backup(self, mode: str, period: str) -> None:
+        icon = _BACKUP_ICONS.get(mode, "📦")
+        label = _esc(f"{mode.capitalize()} backup ({period})")
+        self._send_message(f"{icon} *{label}*\\.\\.\\.")
+        self._exec_in_thread(
+            self._cfg.backup_container, ["backup", mode, period], on_error=self._send_message
+        )
 
     def _backup_type_buttons(self) -> list[list[dict]]:
         """Inline keyboard with Monthly and Yearly type-selection buttons."""
@@ -459,26 +443,15 @@ class TelegramBot:
 
     def _launch_sync(self, inst: InstanceConfig) -> None:
         self._send_message(f"▶️ Executing *sync* for *{_esc(inst.name)}*\\.\\.\\.")
-        threading.Thread(
-            target=_docker_exec_silent,
-            args=(inst.container_name, ["sync"]),
-            kwargs={"on_error": self._send_message},
-            daemon=True,
-        ).start()
+        self._exec_in_thread(inst.container_name, ["sync"], on_error=self._send_message)
 
     def _launch_login(self, inst: InstanceConfig) -> None:
         self._send_message(f"🔐 Re\\-authenticating *{_esc(inst.name)}*\\.\\.\\.")
-        threading.Thread(
-            target=_docker_exec_silent,
-            args=(inst.container_name, ["login"]),
-            kwargs={
-                "on_error": self._send_message,
-                "on_success": lambda: self._send_message(
-                    f"✅ *{_esc(inst.name)}* session is ready\\."
-                ),
-            },
-            daemon=True,
-        ).start()
+        self._exec_in_thread(
+            inst.container_name, ["login"],
+            on_error=self._send_message,
+            on_success=lambda: self._send_message(f"✅ *{_esc(inst.name)}* session is ready\\."),
+        )
 
     def _fetch_and_send_logs(self, inst: InstanceConfig) -> None:
         """Fetch today's logs for *inst* and send them to Telegram."""
@@ -505,6 +478,10 @@ class TelegramBot:
     # ------------------------------------------------------------------
     # Keyboard builder
     # ------------------------------------------------------------------
+
+    def _pick_instance(self, cmd: str, prompt: str) -> None:
+        """Send *prompt* with an instance-picker inline keyboard for *cmd*."""
+        self._send_message(prompt, keyboard=self._instance_buttons(cmd))
 
     def _instance_buttons(self, cmd: str) -> list[list[dict]]:
         """Build an inline keyboard row with one button per sync instance."""
@@ -534,6 +511,21 @@ class TelegramBot:
     # ------------------------------------------------------------------
     # Telegram API helpers
     # ------------------------------------------------------------------
+
+    def _exec_in_thread(
+        self,
+        container_name: str,
+        app_args: list[str],
+        on_error: Callable[[str], None] | None = None,
+        on_success: Callable[[], None] | None = None,
+    ) -> None:
+        """Launch ``_docker_exec_silent`` for *container_name* in a daemon thread."""
+        threading.Thread(
+            target=_docker_exec_silent,
+            args=(container_name, app_args),
+            kwargs={"on_error": on_error, "on_success": on_success},
+            daemon=True,
+        ).start()
 
     def _send_message(self, text: str, keyboard: list[list[dict]] | None = None, parse_mode: str | None = "MarkdownV2") -> None:
         payload: dict = {

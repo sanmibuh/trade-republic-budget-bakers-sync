@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 import requests
 
 from app.bot import (
+    _BACKUP_ICONS,
     BotConfig,
     InstanceConfig,
     TelegramBot,
@@ -453,14 +454,14 @@ def test_cmd_backup_monthly_with_period_executes_directly():
     bot = _bot(backup_container="proj-backup-1")
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_exec_in_thread") as mock_exec,
     ):
-        mock_thread.return_value.start = MagicMock()
         bot._cmd_backup(["monthly", "2026-07"])
     _, kwargs = mock_send.call_args
     assert kwargs.get("keyboard") is None
-    mock_thread.assert_called_once()
-    assert mock_thread.call_args.kwargs["args"] == ("proj-backup-1", ["backup", "monthly", "2026-07"])
+    mock_exec.assert_called_once_with(
+        "proj-backup-1", ["backup", "monthly", "2026-07"], on_error=ANY
+    )
 
 
 def test_cmd_backup_yearly_with_year_executes_directly():
@@ -468,14 +469,14 @@ def test_cmd_backup_yearly_with_year_executes_directly():
     bot = _bot(backup_container="proj-backup-1")
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_exec_in_thread") as mock_exec,
     ):
-        mock_thread.return_value.start = MagicMock()
         bot._cmd_backup(["yearly", "2025"])
     _, kwargs = mock_send.call_args
     assert kwargs.get("keyboard") is None
-    mock_thread.assert_called_once()
-    assert mock_thread.call_args.kwargs["args"] == ("proj-backup-1", ["backup", "yearly", "2025"])
+    mock_exec.assert_called_once_with(
+        "proj-backup-1", ["backup", "yearly", "2025"], on_error=ANY
+    )
 
 
 def test_cmd_backup_unknown_type_sends_error():
@@ -543,87 +544,135 @@ def test_callback_query_backup_type_yearly_shows_year_keyboard():
 
 
 def test_callback_query_backup_monthly_dispatches_launch():
-    """backup_monthly:YYYY-MM callback should trigger _launch_backup_monthly."""
+    """backup_monthly:YYYY-MM callback should trigger _launch_backup("monthly", period)."""
     bot = _bot(backup_container="proj-backup-1")
     with (
         patch.object(bot, "_answer_callback_query"),
-        patch.object(bot, "_launch_backup_monthly") as mock_launch,
+        patch.object(bot, "_launch_backup") as mock_launch,
     ):
         bot._handle_callback_query({
             "id": "cq1",
             "data": "backup_monthly:2026-07",
             "message": {"chat": {"id": 42}},
         })
-    mock_launch.assert_called_once_with("2026-07")
+    mock_launch.assert_called_once_with("monthly", "2026-07")
 
 
 def test_launch_backup_monthly_sends_ack_and_starts_thread():
     bot = _bot(backup_container="proj-backup-1")
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot._docker_exec_silent"),
-        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_exec_in_thread"),
     ):
-        mock_thread.return_value.start = MagicMock()
-        bot._launch_backup_monthly("2026-07")
+        bot._launch_backup("monthly", "2026-07")
     mock_send.assert_called_once()
     assert "2026" in mock_send.call_args.args[0]
-    mock_thread.assert_called_once()
 
 
 def test_launch_backup_monthly_executes_correct_args():
     bot = _bot(backup_container="proj-backup-1")
     with (
         patch.object(bot, "_send_message"),
-        patch("app.bot._docker_exec_silent"),
-        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_exec_in_thread") as mock_exec,
     ):
-        mock_thread.return_value.start = MagicMock()
-        bot._launch_backup_monthly("2026-07")
-    _, kwargs = mock_thread.call_args
-    assert kwargs["args"] == ("proj-backup-1", ["backup", "monthly", "2026-07"])
+        bot._launch_backup("monthly", "2026-07")
+    mock_exec.assert_called_once_with(
+        "proj-backup-1", ["backup", "monthly", "2026-07"], on_error=ANY
+    )
 
 
 def test_callback_query_backup_yearly_dispatches_launch():
-    """backup_yearly:<year> callback should trigger _launch_backup_yearly."""
+    """backup_yearly:<year> callback should trigger _launch_backup("yearly", year)."""
     bot = _bot(backup_container="proj-backup-1")
     with (
         patch.object(bot, "_answer_callback_query"),
-        patch.object(bot, "_launch_backup_yearly") as mock_launch,
+        patch.object(bot, "_launch_backup") as mock_launch,
     ):
         bot._handle_callback_query({
             "id": "cq1",
             "data": "backup_yearly:2025",
             "message": {"chat": {"id": 42}},
         })
-    mock_launch.assert_called_once_with("2025")
+    mock_launch.assert_called_once_with("yearly", "2025")
 
 
 def test_launch_backup_yearly_sends_ack_and_starts_thread():
     bot = _bot(backup_container="proj-backup-1")
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot._docker_exec_silent"),
-        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_exec_in_thread"),
     ):
-        mock_thread.return_value.start = MagicMock()
-        bot._launch_backup_yearly("2025")
+        bot._launch_backup("yearly", "2025")
     mock_send.assert_called_once()
     assert "2025" in mock_send.call_args.args[0]
-    mock_thread.assert_called_once()
 
 
 def test_launch_backup_yearly_executes_correct_args():
     bot = _bot(backup_container="proj-backup-1")
     with (
         patch.object(bot, "_send_message"),
-        patch("app.bot._docker_exec_silent"),
-        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_exec_in_thread") as mock_exec,
     ):
+        bot._launch_backup("yearly", "2024")
+    mock_exec.assert_called_once_with(
+        "proj-backup-1", ["backup", "yearly", "2024"], on_error=ANY
+    )
+
+
+# ---------------------------------------------------------------------------
+# _BACKUP_ICONS — consistent icon mapping
+# ---------------------------------------------------------------------------
+
+def test_backup_icons_has_monthly_and_yearly():
+    assert "monthly" in _BACKUP_ICONS
+    assert "yearly" in _BACKUP_ICONS
+
+
+def test_launch_backup_uses_correct_icon_for_monthly():
+    bot = _bot(backup_container="proj-backup-1")
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_exec_in_thread"),
+    ):
+        bot._launch_backup("monthly", "2026-07")
+    assert _BACKUP_ICONS["monthly"] in mock_send.call_args.args[0]
+
+
+def test_launch_backup_uses_correct_icon_for_yearly():
+    bot = _bot(backup_container="proj-backup-1")
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_exec_in_thread"),
+    ):
+        bot._launch_backup("yearly", "2025")
+    assert _BACKUP_ICONS["yearly"] in mock_send.call_args.args[0]
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._exec_in_thread
+# ---------------------------------------------------------------------------
+
+def test_exec_in_thread_starts_daemon_thread():
+    """_exec_in_thread must start a daemon thread targeting _docker_exec_silent."""
+    bot = _bot()
+    with patch("app.bot.threading.Thread") as mock_thread:
         mock_thread.return_value.start = MagicMock()
-        bot._launch_backup_yearly("2024")
-    _, kwargs = mock_thread.call_args
-    assert kwargs["args"] == ("proj-backup-1", ["backup", "yearly", "2024"])
+        bot._exec_in_thread("my-container", ["sync"], on_error=None)
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["daemon"] is True
+    mock_thread.return_value.start.assert_called_once()
+
+
+def test_exec_in_thread_passes_on_error_and_on_success():
+    on_error = MagicMock()
+    on_success = MagicMock()
+    bot = _bot()
+    with patch("app.bot.threading.Thread") as mock_thread:
+        mock_thread.return_value.start = MagicMock()
+        bot._exec_in_thread("c", ["login"], on_error=on_error, on_success=on_success)
+    kwargs = mock_thread.call_args.kwargs
+    assert kwargs["kwargs"]["on_error"] is on_error
+    assert kwargs["kwargs"]["on_success"] is on_success
 
 
 # ---------------------------------------------------------------------------
@@ -734,14 +783,24 @@ def test_launch_sync_sends_ack_and_starts_thread():
     inst = bot._cfg.instances["david"]
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot._docker_exec_silent"),
-        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_exec_in_thread"),
     ):
-        mock_thread.return_value.start = MagicMock()
         bot._launch_sync(inst)
     mock_send.assert_called_once()
     assert "David" in mock_send.call_args.args[0]
-    mock_thread.assert_called_once()
+
+
+def test_launch_sync_passes_correct_args_to_exec():
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+    ):
+        bot._launch_sync(inst)
+    mock_exec.assert_called_once_with(
+        inst.container_name, ["sync"], on_error=ANY
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -785,15 +844,25 @@ def test_launch_login_sends_ack_and_starts_thread():
     inst = bot._cfg.instances["david"]
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot._docker_exec_silent"),
-        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_exec_in_thread"),
     ):
-        mock_thread.return_value.start = MagicMock()
         bot._launch_login(inst)
     mock_send.assert_called_once()
     assert "David" in mock_send.call_args.args[0]
-    mock_thread.assert_called_once()
-    assert mock_thread.call_args.kwargs["args"] == (inst.container_name, ["login"])
+
+
+def test_launch_login_passes_correct_args_to_exec():
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+    ):
+        bot._launch_login(inst)
+    call_kwargs = mock_exec.call_args.kwargs
+    assert mock_exec.call_args.args == (inst.container_name, ["login"])
+    assert call_kwargs["on_error"] is not None
+    assert call_kwargs["on_success"] is not None
 
 
 def test_launch_login_reports_success_via_on_success():
@@ -801,12 +870,10 @@ def test_launch_login_reports_success_via_on_success():
     inst = bot._cfg.instances["david"]
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot._docker_exec_silent"),
-        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_exec_in_thread") as mock_exec,
     ):
-        mock_thread.return_value.start = MagicMock()
         bot._launch_login(inst)
-        on_success = mock_thread.call_args.kwargs["kwargs"]["on_success"]
+        on_success = mock_exec.call_args.kwargs["on_success"]
         mock_send.reset_mock()
         on_success()
     mock_send.assert_called_once()
@@ -821,13 +888,12 @@ def test_cmd_code_executes_submit_code_for_instance():
     bot = _bot()
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot._docker_exec_silent"),
-        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_exec_in_thread") as mock_exec,
     ):
-        mock_thread.return_value.start = MagicMock()
         bot._cmd_code(["david", "123456"])
-    mock_thread.assert_called_once()
-    assert mock_thread.call_args.kwargs["args"] == ("proj-sync-david-1", ["submit-code", "123456"])
+    mock_exec.assert_called_once_with(
+        "proj-sync-david-1", ["submit-code", "123456"], on_error=ANY
+    )
     mock_send.assert_called_once()
 
 
