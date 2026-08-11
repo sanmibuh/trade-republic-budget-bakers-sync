@@ -112,6 +112,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
   - `python -m app bot` — starts the Telegram bot
   - `python -m app login` — runs `main.run_login()`, an on-demand 2FA session renewal
   - `python -m app submit-code <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting login/sync process to pick up
+  - `python -m app check-session` — exits 0 if `credentials.json` exists in `DATA_DIR`, 1 otherwise; used by the bot's `/status` command to report per-instance auth state without network calls
 - All imports inside command functions are deferred — startup is fast and dependencies are only loaded when needed.
 - `click.Choice(["auto", "monthly", "yearly"])` provides free input validation and help text.
 - `entrypoint.sh` and `tr-sync.sh` both use `python -m app <subcommand>` — single consistent interface.
@@ -135,11 +136,13 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `BotConfig` reads `INSTANCES` (sync instances), `CONTAINER_PREFIX`, and `BACKUP_SERVICE` from env.
 - `CONTAINER_PREFIX` must match the Docker Compose project `name:` field (e.g. `tr-sync`) — fixed in `docker-compose.yml` via `name: tr-sync` so it never changes regardless of the directory name.
 - Container naming: sync → `{prefix}-sync-{name}-1`, backup → `{prefix}-{backup_service}-1`.
-- Backup commands (`/backup_monthly`, `/backup_yearly`) execute directly on the backup container — no instance picker.
-- Sync commands (`/sync`) show an inline keyboard to pick the instance.
+- Backup command (`/backup [monthly|yearly] [period]`) uses a two-step inline keyboard: first choose type (Monthly / Yearly), then choose the period. Direct args (`/backup monthly 2026-07`) skip the keyboards.
+- Sync/login/logs commands (`/sync`, `/login`, `/logs`) show an inline instance picker.
+- `/status` reports auth state per instance — ✅ session saved, ⚠️ needs login, ❓ container unreachable — by running `python -m app check-session` in each container via `_docker_check_session`.
 - `/login` renews an expired 2FA session on demand (instance picker); `/code <instance> <code>` forwards an authenticator code to the target container via `submit-code` (see *2FA via Telegram*).
 - The Docker socket (`/var/run/docker.sock`) is mounted into the bot container; the Docker SDK communicates with it directly (no docker CLI binary required).
-- `_docker_exec_silent` accepts an optional `on_error` callback — called with an error message string when the exec fails or exits non-zero. The bot passes `self._send_message` so the user receives a Telegram notification on failure.
+- `_docker_exec_silent` accepts optional `on_error` / `on_success` callbacks — the bot passes `self._send_message` so the user receives a Telegram notification on failure.
+- `_docker_check_session` runs `python -m app check-session` via `exec_run` and returns `True` / `False` / `None` (unreachable).
 
 ### Config — environment variables
 - `Config.from_env()` — full config for the **sync** command. Requires `PHONE_NUMBER`, `PIN`, `WALLET_API_KEY`, `WALLET_CASH_ACCOUNT_ID`, `WALLET_PORTFOLIO_ACCOUNT_ID`.
@@ -147,6 +150,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - Both share optional fields: `OWNER_NAME` (default `"Backup"`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DATA_DIR`, `ALLOW_INSECURE_SSL` (default `false`).
 - `Config.instance` — logical instance name used for the Telegram 2FA prompt/`/code` routing. Read from `INSTANCE`, defaulting to `OWNER_NAME` lowercased (e.g. `david`, `eli`), which already matches the container instance name, so it need not be set explicitly in compose.
 - `BotEnv.from_env()` — config for the **bot** command. Reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `INSTANCES`, `CONTAINER_PREFIX`, `BACKUP_SERVICE`.
+- `read_data_dir()` — standalone helper that returns the `DATA_DIR` path (default `/app/data`); used by `check-session` which only needs the data directory, not full credentials.
 - All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
 ### OWNER_NAME
@@ -261,7 +265,7 @@ See `deploy/DEPLOY.md` for setup instructions.
 
 | File | Role |
 |---|---|
-| `app/__main__.py` | click CLI: `sync`, `backup`, `bot`, `login`, `submit-code` subcommands; single entry point |
+| `app/__main__.py` | click CLI: `sync`, `backup`, `bot`, `login`, `submit-code`, `check-session` subcommands; single entry point |
 | `app/http_client.py` | SSL circuit-breaker shared by notifier and wallet_client; `http_post`, `build_session` |
 | `app/main.py` | Sync orchestrator (`run`) + on-demand login (`run_login`); shared `_prepare` (bootstrap) and `_connect` (TR session) helpers; passes `cfg.label_ids` to `build_records_for_event` |
 | `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |
@@ -269,7 +273,7 @@ See `deploy/DEPLOY.md` for setup instructions.
 | `app/twofa.py` | 2FA code providers (`TerminalCodeProvider`, `TelegramCodeProvider`) + `select_code_provider`; `CODE_FILENAME` |
 | `app/tr_mapper.py` | `_build_note` (note/description), `_note_extras` (detail fragments), `_HANDLERS`, `KNOWN_EVENT_TYPES`, `_make_record` |
 | `app/persistence.py` | `EventRepository`, `dedup_event_id`; `INSERT OR IGNORE` |
-| `app/config.py` | `Config` (sync) and `BackupConfig` (backup) dataclasses; `BotEnv`; `_read_label_ids()` |
+| `app/config.py` | `Config` (sync) and `BackupConfig` (backup) dataclasses; `BotEnv`; `read_data_dir()`; `_read_label_ids()` |
 | `app/wallet_client.py` | `post_records` (sync) + `_get_all`/`_collect_page` + `get_*` (backup) |
 | `app/logging_setup.py` | `setup_logging(data_dir)` for daemon; `configure_logging()` for CLI entry points |
 | `docker/app/entrypoint.sh` | `MODE=sync\|backup\|bot`; cron or one-shot depending on schedule vars |
