@@ -99,16 +99,17 @@ jobs:
             grep -E "^app/" | grep -v "100%" | sort -t'%' -k2 -n | head -5 > /tmp/coverage-gaps.txt || true
 
           # Ruff warnings (unfixable)
-          ruff check . --no-fix 2>&1 | tail -5 > /tmp/ruff-warnings.txt || true
-          RUFF_COUNT=$(ruff check . --no-fix 2>&1 | grep "Found" | grep -oP '\d+' | head -1 || echo "0")
+          ruff check . --no-fix 2>&1 > /tmp/ruff-output.txt || true
+          tail -5 /tmp/ruff-output.txt > /tmp/ruff-warnings.txt
+          RUFF_COUNT=$(grep "Found" /tmp/ruff-output.txt | grep -oP '\d+' | head -1 || echo "0")
 
           # TODOs and FIXMEs
+          TODO_COUNT=$(grep -rn "TODO\|FIXME\|HACK\|XXX" app/ --include="*.py" | wc -l | tr -d ' ')
           grep -rn "TODO\|FIXME\|HACK\|XXX" app/ --include="*.py" | head -10 > /tmp/todos.txt || true
-          TODO_COUNT=$(wc -l < /tmp/todos.txt | tr -d ' ')
 
           # Long functions (>20 lines)
-          python3 -c "
-          import ast, sys, pathlib
+          python3 - <<'PY' > /tmp/long-func-count.txt || echo "0" > /tmp/long-func-count.txt
+          import ast, pathlib
 
           long_funcs = []
           for p in pathlib.Path('app').rglob('*.py'):
@@ -120,16 +121,17 @@ jobs:
                   if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                       length = node.end_lineno - node.lineno + 1
                       if length > 20:
-                          long_funcs.append(f'{p}:{node.lineno} — {node.name}() ({length} lines)')
+                          long_funcs.append((length, f'{p}:{node.lineno} — {node.name}() ({length} lines)'))
 
+          long_funcs.sort(key=lambda item: -item[0])
           with open('/tmp/long-functions.txt', 'w') as f:
-              f.write('\n'.join(sorted(long_funcs, key=lambda x: -int(x.split('(')[1].split()[0])))[:10])
+              f.write('\n'.join(desc for _, desc in long_funcs[:10]))
           print(len(long_funcs))
-          " > /tmp/long-func-count.txt || echo "0" > /tmp/long-func-count.txt
+          PY
           LONG_FUNC_COUNT=$(cat /tmp/long-func-count.txt)
 
           # Missing docstrings on public functions
-          python3 -c "
+          python3 - <<'PY' > /tmp/docstring-count.txt || echo "0" > /tmp/docstring-count.txt
           import ast, pathlib
 
           missing = []
@@ -150,7 +152,7 @@ jobs:
           with open('/tmp/missing-docstrings.txt', 'w') as f:
               f.write('\n'.join(missing[:10]))
           print(len(missing))
-          " > /tmp/docstring-count.txt || echo "0" > /tmp/docstring-count.txt
+          PY
           DOCSTRING_COUNT=$(cat /tmp/docstring-count.txt)
 
           echo "ruff_count=${RUFF_COUNT}" >> "$GITHUB_OUTPUT"
@@ -304,7 +306,7 @@ jobs:
             LABELS="nightly-suggestion,documentation"
 
           else
-            echo "Nothing to suggest today. Code is clean! 🎉"
+            echo "Nothing to suggest today. Code is clean."
             exit 0
           fi
 
