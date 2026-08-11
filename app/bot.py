@@ -17,8 +17,7 @@ Container naming convention:
 
 Commands (registered via setMyCommands for Telegram autocomplete):
     /sync                              Force a Trade Republic sync — choose instance via inline buttons.
-    /backup_monthly [YYYY-MM]          Force monthly backup (runs on the backup service).
-    /backup_yearly  [YYYY]             Force yearly backup  (runs on the backup service).
+    /backup [monthly|yearly] [period]  Force a Wallet backup — guided by inline buttons if no args given.
     /status                            Show configured instances and backup service availability.
     /help                              Show available commands.
 
@@ -29,10 +28,18 @@ Interaction flow for /sync:
     4. Bot sends an ACK ("▶️ Executing sync for David...") and launches docker exec in background.
     5. The container's own Notifier sends the final Telegram result notification when done.
 
-Interaction flow for /backup_monthly / /backup_yearly:
-    1. User sends the command (with optional period param).
-    2. Bot sends an ACK and launches docker exec on the backup service directly.
-    3. The backup container's Notifier sends the result notification.
+Interaction flow for /backup (no args):
+    1. User sends /backup.
+    2. Bot asks "Monthly or Yearly?" via inline keyboard.
+    3. User taps a type button.
+    4. Bot shows the period selection keyboard (months or years).
+    5. User taps a period button → bot executes backup and the backup container sends the result.
+
+Interaction flow for /backup with args:
+    /backup monthly          → skips step 2, shows month keyboard directly.
+    /backup monthly YYYY-MM  → executes immediately, no keyboards shown.
+    /backup yearly           → skips step 2, shows year keyboard directly.
+    /backup yearly YYYY      → executes immediately.
 """
 from __future__ import annotations
 
@@ -147,16 +154,15 @@ class TelegramBot:
 
     def _register_commands(self) -> None:
         commands = [
-            {"command": "sync",           "description": "Force Trade Republic sync (choose instance)"},
-            {"command": "login",          "description": "Renew Trade Republic 2FA session (choose instance)"},
-            {"command": "logs",           "description": "Show today's logs for an instance"},
-            {"command": "status",         "description": "Show instances and backup service availability"},
-            {"command": "help",           "description": "Show available commands"},
+            {"command": "sync",   "description": "Force Trade Republic sync (choose instance)"},
+            {"command": "login",  "description": "Renew Trade Republic 2FA session (choose instance)"},
+            {"command": "logs",   "description": "Show today's logs for an instance"},
+            {"command": "status", "description": "Show instances and backup service availability"},
+            {"command": "help",   "description": "Show available commands"},
         ]
         if self._cfg.backup_container:
             commands[1:1] = [
-                {"command": "backup_monthly", "description": "Force monthly backup [YYYY-MM]"},
-                {"command": "backup_yearly",  "description": "Force yearly backup [YYYY]"},
+                {"command": "backup", "description": "Force a Wallet backup (monthly or yearly)"},
             ]
         try:
             resp = requests.post(
@@ -218,14 +224,13 @@ class TelegramBot:
         args = parts[1:]
 
         dispatch = {
-            "help":           self._cmd_help,
-            "status":         self._cmd_status,
-            "sync":           self._cmd_sync,
-            "login":          self._cmd_login,
-            "logs":           self._cmd_logs,
-            "code":           self._cmd_code,
-            "backup_monthly": self._cmd_backup_monthly,
-            "backup_yearly":  self._cmd_backup_yearly,
+            "help":    self._cmd_help,
+            "status":  self._cmd_status,
+            "sync":    self._cmd_sync,
+            "login":   self._cmd_login,
+            "logs":    self._cmd_logs,
+            "code":    self._cmd_code,
+            "backup":  self._cmd_backup,
         }
         handler = dispatch.get(raw_cmd)
         if handler is None:
@@ -262,6 +267,14 @@ class TelegramBot:
             return
 
         cmd = parts[0]
+
+        if cmd == "backup_type":
+            subtype = parts[1]
+            if subtype == "monthly":
+                self._send_message("📅 *Monthly backup* — Choose month:", keyboard=self._month_buttons())
+            elif subtype == "yearly":
+                self._send_message("📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons())
+            return
 
         if cmd == "backup_yearly":
             year = parts[1]
@@ -307,8 +320,9 @@ class TelegramBot:
         ]
         if self._cfg.backup_container:
             lines += [
-                "/backup\\_monthly `[YYYY\\-MM]` — Monthly backup \\(default: previous month\\)",
-                "/backup\\_yearly `[YYYY]` — Yearly backup \\(default: previous year\\)",
+                "/backup — Force a Wallet backup \\(guided by inline buttons\\)",
+                "/backup `monthly [YYYY\\-MM]` — Monthly backup, optional period",
+                "/backup `yearly [YYYY]` — Yearly backup, optional year",
             ]
         lines += [
             "/status — Show instances and backup service",
@@ -376,14 +390,31 @@ class TelegramBot:
             daemon=True,
         ).start()
 
-    def _cmd_backup_monthly(self, args: list[str]) -> None:
+    def _cmd_backup(self, args: list[str]) -> None:
         if not self._cfg.backup_container:
             self._send_message("🚫 Backup service is not configured\\.")
             return
-        if args:
-            self._launch_backup_monthly(args[0])
+        if not args:
+            self._send_message("📦 *Backup* — Choose type:", keyboard=self._backup_type_buttons())
+            return
+
+        type_arg = args[0].lower()
+        period_arg = args[1] if len(args) > 1 else None
+
+        if type_arg == "monthly":
+            if period_arg:
+                self._launch_backup_monthly(period_arg)
+            else:
+                self._send_message("📅 *Monthly backup* — Choose month:", keyboard=self._month_buttons())
+        elif type_arg == "yearly":
+            if period_arg:
+                self._launch_backup_yearly(period_arg)
+            else:
+                self._send_message("📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons())
         else:
-            self._send_message("📦 *Monthly backup* — Choose month:", keyboard=self._month_buttons())
+            self._send_message(
+                f"⚠️ Unknown backup type: `{_esc(type_arg)}`\\. Use `monthly` or `yearly`\\."
+            )
 
     def _launch_backup_monthly(self, period: str) -> None:
         label = _esc(f"Monthly backup ({period})")
@@ -395,15 +426,6 @@ class TelegramBot:
             daemon=True,
         ).start()
 
-    def _cmd_backup_yearly(self, args: list[str]) -> None:
-        if not self._cfg.backup_container:
-            self._send_message("🚫 Backup service is not configured\\.")
-            return
-        if args:
-            self._launch_backup_yearly(args[0])
-        else:
-            self._send_message("📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons())
-
     def _launch_backup_yearly(self, year: str) -> None:
         label = _esc(f"Yearly backup ({year})")
         self._send_message(f"📆 *{label}*\\.\\.\\.")
@@ -413,6 +435,13 @@ class TelegramBot:
             kwargs={"on_error": self._send_message},
             daemon=True,
         ).start()
+
+    def _backup_type_buttons(self) -> list[list[dict]]:
+        """Inline keyboard with Monthly and Yearly type-selection buttons."""
+        return [[
+            {"text": "📅 Monthly", "callback_data": f"backup_type{_CB_SEP}monthly"},
+            {"text": "📆 Yearly",  "callback_data": f"backup_type{_CB_SEP}yearly"},
+        ]]
 
     def _year_buttons(self) -> list[list[dict]]:
         """Inline keyboard with the most recent years (previous year first)."""
