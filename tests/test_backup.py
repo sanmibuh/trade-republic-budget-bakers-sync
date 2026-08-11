@@ -354,12 +354,11 @@ def test_write_json_no_tmp_file_remains(tmp_path):
     path = tmp_path / "out.json"
     _write_json(path, {"x": 1})
 
-    tmp = path.with_suffix(".tmp")
-    assert not tmp.exists()
+    assert not any(tmp_path.glob("*.tmp")), "no .tmp files should remain after successful write"
 
 
-def test_write_json_uses_tmp_then_rename(tmp_path, monkeypatch):
-    """Atomic write must rename a .tmp file into the final path."""
+def test_write_json_uses_unique_tmp_then_rename(tmp_path, monkeypatch):
+    """Atomic write must use a unique tmp file (not a fixed .tmp name) and rename it."""
     path = tmp_path / "out.json"
     replaced_sources: list[str] = []
 
@@ -375,12 +374,16 @@ def test_write_json_uses_tmp_then_rename(tmp_path, monkeypatch):
     assert any(".tmp" in src for src in replaced_sources), (
         "_write_json must rename a .tmp file into the final path"
     )
+    # The tmp name must NOT be simply "out.tmp" — it must be unique
+    assert not any(src == "out.tmp" for src in replaced_sources), (
+        "_write_json must use a unique tmp filename, not a fixed 'out.tmp'"
+    )
     assert json.loads(path.read_text()) == {"v": 1}
 
 
 def test_write_json_atomic_preserves_original_when_rename_fails(tmp_path, monkeypatch):
     """If rename fails after tmp write, the pre-existing file must remain intact
-    and the .tmp file must be cleaned up."""
+    and all .tmp files must be cleaned up."""
     path = tmp_path / "out.json"
     original = {"original": True}
     path.write_text(json.dumps(original))
@@ -396,8 +399,8 @@ def test_write_json_atomic_preserves_original_when_rename_fails(tmp_path, monkey
     assert json.loads(path.read_text()) == original, (
         "original file must be untouched when rename fails"
     )
-    assert not path.with_suffix(".tmp").exists(), (
-        ".tmp file must be cleaned up after rename failure"
+    assert not any(tmp_path.glob("*.tmp")), (
+        ".tmp files must be cleaned up after rename failure"
     )
 
 
