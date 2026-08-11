@@ -177,8 +177,7 @@ jobs:
           | 📊 Coverage | ${PR_COV}%${COV_DIFF} | ${MAIN_COV}% |
           | 📝 Lines covered | ${PR_COVERED} / ${PR_LINES}${LINES_DIFF} | ${MAIN_COVERED} / ${MAIN_LINES} |"
 
-          BODY="<!-- ci-results-comment -->
-## CI Results
+          BODY="## CI Results
 
           $STATUS
 
@@ -193,12 +192,13 @@ jobs:
           $(grep -A 9999 'Name' test-output.txt | grep -v '^$' | head -40)
           \`\`\`
 
-          </details>"
+          </details>
+          <!-- ci-results-comment -->"
 
           # Delete existing ci-results comment (if any) and post a fresh one
           EXISTING_ID=$(gh api \
             "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-            --jq '[.[] | select(.body | startswith("<!-- ci-results-comment -->"))] | last | .id // empty')
+            --jq '[.[] | select(.body | contains("<!-- ci-results-comment -->"))] | last | .id // empty')
 
           if [ -n "$EXISTING_ID" ]; then
             gh api --method DELETE \
