@@ -1012,3 +1012,196 @@ def test_handle_update_ignores_unknown_type():
         bot._handle_update({"update_id": 1, "edited_message": {"text": "hi"}})
     mock_msg.assert_not_called()
     mock_cb.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _docker_logs_today
+# ---------------------------------------------------------------------------
+
+def test_docker_logs_today_returns_decoded_output():
+    import datetime
+
+    from app.bot import _docker_logs_today
+
+    container = MagicMock()
+    container.logs.return_value = b"2026-08-11 10:00:00 INFO  sync: done\n"
+    client = MagicMock()
+    client.containers.get.return_value = container
+
+    since = datetime.datetime(2026, 8, 11, 0, 0, 0, tzinfo=datetime.timezone.utc)
+    with patch("app.bot.docker.from_env", return_value=client):
+        result = _docker_logs_today("my-container", since=since)
+
+    client.containers.get.assert_called_once_with("my-container")
+    container.logs.assert_called_once_with(since=since, timestamps=False)
+    assert "done" in result
+
+
+def test_docker_logs_today_decodes_invalid_bytes():
+    import datetime
+
+    from app.bot import _docker_logs_today
+
+    container = MagicMock()
+    container.logs.return_value = b"ok\xff\xfe"
+    client = MagicMock()
+    client.containers.get.return_value = container
+
+    since = datetime.datetime(2026, 8, 11, 0, 0, 0, tzinfo=datetime.timezone.utc)
+    with patch("app.bot.docker.from_env", return_value=client):
+        result = _docker_logs_today("my-container", since=since)
+
+    assert "ok" in result  # no UnicodeDecodeError raised
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._cmd_logs
+# ---------------------------------------------------------------------------
+
+def test_cmd_logs_sends_keyboard_with_instances():
+    bot = _bot()
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_logs([])
+    mock_send.assert_called_once()
+    _, kwargs = mock_send.call_args
+    assert "keyboard" in kwargs
+    all_buttons = [btn for row in kwargs["keyboard"] for btn in row]
+    labels = [b["text"] for b in all_buttons]
+    assert "David" in labels
+    assert "Eli" in labels
+
+
+def test_cmd_logs_callback_data_encodes_logs_cmd():
+    bot = _bot()
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_logs([])
+    _, kwargs = mock_send.call_args
+    cb_data = [b["callback_data"] for row in kwargs["keyboard"] for b in row]
+    assert all(d.startswith("logs:") for d in cb_data)
+
+
+def test_handle_message_dispatches_logs():
+    bot = _bot()
+    with patch.object(bot, "_cmd_logs") as mock_logs:
+        bot._handle_message({"chat": {"id": 42}, "text": "/logs"})
+    mock_logs.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot callback logs:
+# ---------------------------------------------------------------------------
+
+def test_callback_query_logs_dispatches_fetch_and_send_logs():
+    bot = _bot()
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        mock_thread.return_value.start = MagicMock()
+        bot._handle_callback_query({
+            "id": "cq1",
+            "data": "logs:david",
+            "message": {"chat": {"id": 42}},
+        })
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["target"] == bot._fetch_and_send_logs
+    assert mock_thread.call_args.kwargs["args"][0].name == "David"
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._fetch_and_send_logs
+# ---------------------------------------------------------------------------
+
+def test_fetch_and_send_logs_sends_todays_logs():
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch("app.bot._docker_logs_today", return_value="INFO sync: all done\n") as mock_logs,
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._fetch_and_send_logs(inst)
+    mock_logs.assert_called_once()
+    mock_send.assert_called_once()
+    call_kwargs = mock_send.call_args
+    # parse_mode should be None so log text is sent as plain text
+    assert call_kwargs.kwargs.get("parse_mode") is None
+    assert "all done" in call_kwargs.args[0]
+
+
+def test_fetch_and_send_logs_empty_logs_sends_notice():
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch("app.bot._docker_logs_today", return_value=""),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._fetch_and_send_logs(inst)
+    mock_send.assert_called_once()
+    assert "No logs" in mock_send.call_args.args[0]
+
+
+def test_fetch_and_send_logs_truncates_long_output():
+    from app.bot import _MAX_LOG_CHARS
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    long_log = "x" * (_MAX_LOG_CHARS + 500)
+    with (
+        patch("app.bot._docker_logs_today", return_value=long_log),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._fetch_and_send_logs(inst)
+    sent_text = mock_send.call_args.args[0]
+    assert "truncated" in sent_text
+    # The sent text (header + truncation marker + tail) must not be excessively long
+    assert len(sent_text) < _MAX_LOG_CHARS + 300
+
+
+def test_fetch_and_send_logs_sends_error_on_exception():
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch("app.bot._docker_logs_today", side_effect=Exception("container not found")),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._fetch_and_send_logs(inst)
+    mock_send.assert_called_once()
+    assert "container not found" in mock_send.call_args.args[0]
+
+
+# ---------------------------------------------------------------------------
+# _register_commands includes /logs
+# ---------------------------------------------------------------------------
+
+def test_register_commands_includes_logs():
+    bot = _bot()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+        bot._register_commands()
+    commands = mock_post.call_args.kwargs["json"]["commands"]
+    cmd_names = [c["command"] for c in commands]
+    assert "logs" in cmd_names
+
+
+# ---------------------------------------------------------------------------
+# _send_message parse_mode param
+# ---------------------------------------------------------------------------
+
+def test_send_message_default_parse_mode_is_markdownv2():
+    bot = _bot()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+        bot._send_message("hello")
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload.get("parse_mode") == "MarkdownV2"
+
+
+def test_send_message_no_parse_mode_omits_field():
+    bot = _bot()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+        bot._send_message("plain text", parse_mode=None)
+    payload = mock_post.call_args.kwargs["json"]
+    assert "parse_mode" not in payload

@@ -60,6 +60,8 @@ _MONTH_BUTTON_COUNT = 4  # number of recent months offered in the monthly backup
 # Must not appear in instance names or period params (YYYY-MM / YYYY contain only digits and hyphens).
 _CB_SEP = ":"
 
+_MAX_LOG_CHARS = 3800  # safe limit below Telegram's 4096-char message cap
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -147,6 +149,7 @@ class TelegramBot:
         commands = [
             {"command": "sync",           "description": "Force Trade Republic sync (choose instance)"},
             {"command": "login",          "description": "Renew Trade Republic 2FA session (choose instance)"},
+            {"command": "logs",           "description": "Show today's logs for an instance"},
             {"command": "status",         "description": "Show instances and backup service availability"},
             {"command": "help",           "description": "Show available commands"},
         ]
@@ -219,6 +222,7 @@ class TelegramBot:
             "status":         self._cmd_status,
             "sync":           self._cmd_sync,
             "login":          self._cmd_login,
+            "logs":           self._cmd_logs,
             "code":           self._cmd_code,
             "backup_monthly": self._cmd_backup_monthly,
             "backup_yearly":  self._cmd_backup_yearly,
@@ -280,6 +284,12 @@ class TelegramBot:
             self._launch_sync(inst)
         elif cmd == "login":
             self._launch_login(inst)
+        elif cmd == "logs":
+            threading.Thread(
+                target=self._fetch_and_send_logs,
+                args=(inst,),
+                daemon=True,
+            ).start()
         else:
             log.warning("Unknown callback cmd: %r", cmd)
 
@@ -292,6 +302,7 @@ class TelegramBot:
             "🤖 *Available commands*\n",
             "/sync — Force Trade Republic sync \\(choose instance\\)",
             "/login — Renew Trade Republic 2FA session \\(choose instance\\)",
+            "/logs — Show today's logs for an instance",
             "/code `<instance> <code>` — Submit an authenticator code",
         ]
         if self._cfg.backup_container:
@@ -330,6 +341,10 @@ class TelegramBot:
     def _cmd_login(self, _args: list[str]) -> None:
         buttons = self._instance_buttons("login")
         self._send_message("🔐 *Login* — Choose instance to re\\-authenticate:", keyboard=buttons)
+
+    def _cmd_logs(self, _args: list[str]) -> None:
+        buttons = self._instance_buttons("logs")
+        self._send_message("📋 *Logs* — Choose instance:", keyboard=buttons)
 
     def _cmd_code(self, args: list[str]) -> None:
         """Deliver an authenticator code to a waiting login process: /code <instance> <code>."""
@@ -429,6 +444,28 @@ class TelegramBot:
             daemon=True,
         ).start()
 
+    def _fetch_and_send_logs(self, inst: InstanceConfig) -> None:
+        """Fetch today's logs for *inst* and send them to Telegram."""
+        today_start = datetime.datetime.now(tz=datetime.timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        try:
+            text = _docker_logs_today(inst.container_name, since=today_start)
+        except Exception as exc:  # noqa: BLE001
+            self._send_message(f"❌ Could not fetch logs for `{_esc(inst.container_name)}`: {_esc(str(exc))}")
+            return
+
+        header = f"📋 Logs for *{_esc(inst.name)}* \\({_esc(today_start.strftime('%Y-%m-%d'))} UTC\\)\n\n"
+        if not text.strip():
+            self._send_message(header + "_No logs today\\._")
+            return
+
+        # Truncate to stay within Telegram's message limit.
+        if len(text) > _MAX_LOG_CHARS:
+            text = "\\[\\.\\.\\. truncated \\.\\.\\.\\.\\]\n" + text[-_MAX_LOG_CHARS:]
+
+        self._send_message(header + text, parse_mode=None)
+
     # ------------------------------------------------------------------
     # Keyboard builder
     # ------------------------------------------------------------------
@@ -462,13 +499,14 @@ class TelegramBot:
     # Telegram API helpers
     # ------------------------------------------------------------------
 
-    def _send_message(self, text: str, keyboard: list[list[dict]] | None = None) -> None:
+    def _send_message(self, text: str, keyboard: list[list[dict]] | None = None, parse_mode: str | None = "MarkdownV2") -> None:
         payload: dict = {
             "chat_id": self._cfg.chat_id,
             "text": text,
-            "parse_mode": "MarkdownV2",
             "disable_web_page_preview": True,
         }
+        if parse_mode is not None:
+            payload["parse_mode"] = parse_mode
         if keyboard is not None:
             payload["reply_markup"] = {"inline_keyboard": keyboard}
         try:
@@ -513,8 +551,15 @@ class TelegramBot:
 # Docker helpers
 # ---------------------------------------------------------------------------
 
-def _docker_exec_silent(
-    container_name: str,
+def _docker_logs_today(container_name: str, since: datetime.datetime) -> str:
+    """Return stdout/stderr logs for *container_name* since *since* (UTC datetime)."""
+    client = docker.from_env()
+    container = client.containers.get(container_name)
+    raw: bytes = container.logs(since=since, timestamps=False)
+    return raw.decode(errors="replace")
+
+
+def _docker_exec_silent(    container_name: str,
     app_args: list[str],
     on_error: Callable[[str], None] | None = None,
     on_success: Callable[[], None] | None = None,
