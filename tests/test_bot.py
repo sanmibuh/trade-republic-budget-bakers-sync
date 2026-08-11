@@ -543,6 +543,58 @@ def test_callback_query_backup_type_yearly_shows_year_keyboard():
     assert all(b["callback_data"].startswith("backup_yearly:") for b in all_buttons)
 
 
+def test_launch_backup_monthly_sends_ack_and_starts_thread():
+    bot = _bot(backup_container="proj-backup-1")
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_exec_in_thread"),
+    ):
+        bot._launch_backup("monthly", "2026-07")
+    mock_send.assert_called_once()
+    assert "2026" in mock_send.call_args.args[0]
+
+
+def test_launch_backup_sends_error_when_backup_not_configured():
+    """Guard: _launch_backup with no backup container → clear error, no crash."""
+    bot = _bot(backup_container=None)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._launch_backup("monthly", "2026-07")
+    mock_send.assert_called_once()
+    assert "not configured" in mock_send.call_args.args[0].lower()
+
+
+def test_callback_backup_monthly_with_no_backup_container_sends_error():
+    """Stale inline keyboard: backup_monthly callback when backup not configured → error message."""
+    bot = _bot(backup_container=None)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_callback_query({
+            "id": "cq1",
+            "data": "backup_monthly:2026-07",
+            "message": {"chat": {"id": 42}},
+        })
+    mock_send.assert_called_once()
+    assert "not configured" in mock_send.call_args.args[0].lower()
+
+
+def test_callback_backup_yearly_with_no_backup_container_sends_error():
+    """Stale inline keyboard: backup_yearly callback when backup not configured → error message."""
+    bot = _bot(backup_container=None)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_callback_query({
+            "id": "cq1",
+            "data": "backup_yearly:2025",
+            "message": {"chat": {"id": 42}},
+        })
+    mock_send.assert_called_once()
+    assert "not configured" in mock_send.call_args.args[0].lower()
+
+
 def test_callback_query_backup_monthly_dispatches_launch():
     """backup_monthly:YYYY-MM callback should trigger _launch_backup("monthly", period)."""
     bot = _bot(backup_container="proj-backup-1")
@@ -556,17 +608,6 @@ def test_callback_query_backup_monthly_dispatches_launch():
             "message": {"chat": {"id": 42}},
         })
     mock_launch.assert_called_once_with("monthly", "2026-07")
-
-
-def test_launch_backup_monthly_sends_ack_and_starts_thread():
-    bot = _bot(backup_container="proj-backup-1")
-    with (
-        patch.object(bot, "_send_message") as mock_send,
-        patch.object(bot, "_exec_in_thread"),
-    ):
-        bot._launch_backup("monthly", "2026-07")
-    mock_send.assert_called_once()
-    assert "2026" in mock_send.call_args.args[0]
 
 
 def test_launch_backup_monthly_executes_correct_args():
@@ -1229,12 +1270,20 @@ def test_docker_check_session_returns_true_when_exit_zero():
     assert result is True
 
 
-def test_docker_check_session_returns_false_when_exit_nonzero():
-    """Non-zero exit from check-session → session needs renewal."""
+def test_docker_check_session_returns_false_when_exit_one():
+    """Exit code 1 from check-session → session needs renewal."""
     client = _make_docker_client(exit_code=1)
     with patch("app.bot.docker.from_env", return_value=client):
         result = _docker_check_session("my-container")
     assert result is False
+
+
+def test_docker_check_session_returns_none_on_unexpected_exit_code():
+    """Exit code other than 0/1 (e.g. crash) → unknown state, not False."""
+    client = _make_docker_client(exit_code=2)
+    with patch("app.bot.docker.from_env", return_value=client):
+        result = _docker_check_session("my-container")
+    assert result is None
 
 
 def test_docker_check_session_returns_none_on_exception():

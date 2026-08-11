@@ -413,6 +413,9 @@ class TelegramBot:
             )
 
     def _launch_backup(self, mode: str, period: str) -> None:
+        if not self._cfg.backup_container:
+            self._send_message("🚫 Backup service is not configured\\.")
+            return
         icon = _BACKUP_ICONS.get(mode, "📦")
         label = _esc(f"{mode.capitalize()} backup ({period})")
         self._send_message(f"{icon} *{label}*\\.\\.\\.")
@@ -593,7 +596,13 @@ def _docker_check_session(container_name: str) -> bool | None:
         client = docker.from_env()
         container = client.containers.get(container_name)
         exit_code, _ = container.exec_run(["python", "-m", "app", "check-session"])
-        return exit_code == 0
+        if exit_code == 0:
+            return True
+        if exit_code == 1:
+            return False
+        # Unexpected exit code (e.g. crash, missing module) — treat as unknown.
+        log.warning("check-session exited with unexpected code %s for %s", exit_code, container_name)
+        return None
     except Exception as exc:  # noqa: BLE001
         log.debug("check-session exec failed for %s: %s", container_name, exc)
         return None
