@@ -1,0 +1,19 @@
+.github/workflows/nightly-improvements.yml
+  s_4589b7bbddf089::t_3762d4e3489412 102-104,107,111-112,124,126,128,130,134,155,309
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "477e0ff65b6016772bd7becb578f3316d767f325",
+  "prompts": {},
+  "sessions": {
+    "s_4589b7bbddf089": {
+      "agent_id": {
+        "tool": "github-copilot-cli",
+        "id": "3783ef63-7cfb-48e8-bb93-b2a970df98b6",
+        "model": "unknown"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
