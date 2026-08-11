@@ -379,7 +379,8 @@ def test_write_json_uses_tmp_then_rename(tmp_path, monkeypatch):
 
 
 def test_write_json_atomic_preserves_original_when_rename_fails(tmp_path, monkeypatch):
-    """If rename fails after tmp write, the pre-existing file must remain intact."""
+    """If rename fails after tmp write, the pre-existing file must remain intact
+    and the .tmp file must be cleaned up."""
     path = tmp_path / "out.json"
     original = {"original": True}
     path.write_text(json.dumps(original))
@@ -394,6 +395,9 @@ def test_write_json_atomic_preserves_original_when_rename_fails(tmp_path, monkey
 
     assert json.loads(path.read_text()) == original, (
         "original file must be untouched when rename fails"
+    )
+    assert not path.with_suffix(".tmp").exists(), (
+        ".tmp file must be cleaned up after rename failure"
     )
 
 
