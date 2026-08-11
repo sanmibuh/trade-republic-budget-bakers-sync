@@ -157,8 +157,12 @@ An optional `telegram-bot` service lets you trigger sync and backup operations o
 | Command | Description |
 |---|---|
 | `/sync` | Force a Trade Republic sync — choose instance via inline buttons |
-| `/backup_monthly [YYYY-MM]` | Force a monthly backup (default: previous month) |
-| `/backup_yearly [YYYY]` | Force a yearly backup (default: previous year) |
+| `/login` | Renew Trade Republic 2FA session — choose instance via inline buttons |
+| `/logs` | Show today's logs for an instance — choose instance via inline buttons |
+| `/code <instance> <code>` | Submit an authenticator code to a waiting login process |
+| `/backup` | Force a Wallet backup — guided by inline buttons (monthly/yearly) |
+| `/backup monthly [YYYY-MM]` | Monthly backup, optional period (default: previous month) |
+| `/backup yearly [YYYY]` | Yearly backup, optional year (default: previous year) |
 | `/status` | Show all instances and whether backup is available |
 | `/help` | Show available commands |
 

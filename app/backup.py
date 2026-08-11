@@ -14,6 +14,7 @@ from __future__ import annotations
 import calendar
 import json
 import logging
+import tempfile
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -61,7 +62,23 @@ def _yearly_path(data_dir: Path, year: int) -> Path:
 
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            delete=False,
+            dir=path.parent,
+            prefix=path.stem + ".",
+            suffix=".tmp",
+        ) as fh:
+            tmp_path = Path(fh.name)
+            fh.write(json.dumps(payload, indent=2, ensure_ascii=False))
+        tmp_path.replace(path)
+    except Exception:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise
     log.info("Written %s", path)
 
 
@@ -221,7 +238,7 @@ def run_auto(
 def _parse_monthly_param(param: str | None) -> tuple[int, int]:
     """Parse an optional YYYY-MM string. Returns (year, month); raises ValueError on bad input."""
     if param is not None:
-        parsed = datetime.strptime(param, "%Y-%m")  # noqa: DTZ007 — only year/month needed, no tz
+        parsed = datetime.strptime(param, "%Y-%m")  # noqa: DTZ007  # only year/month needed, no tz
         return parsed.year, parsed.month
     return _previous_month(datetime.now(timezone.utc).date())
 

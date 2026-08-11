@@ -11,9 +11,6 @@ Each item is a candidate to be evaluated before implementing. Follow the TDD wor
 ### Retries with backoff in `WalletClient`
 `post_records` / `_get_all` currently only handle the SSL circuit-breaker (`app/http_client.py`). A transient `502`/`503` or a network timeout aborts the whole batch. Wrap the POST/GET calls with a bounded retry + exponential backoff for transient failures (5xx, connection/read timeouts) — but **not** for `400` (client error, all records rejected). Keep `200/207/400/500` batch-result semantics intact (`app/wallet_client.py:62`).
 
-### Backup integrity / atomic write
-`_write_json` (`app/backup.py:62`) writes directly to the final path. If the process dies mid-write the backup JSON is left corrupt. Write to a `.tmp` file and `os.replace()` (atomic rename) into place. Optionally re-read the file afterwards and validate the resource counts against the in-memory payload (`_payload_counts`) before considering the backup done.
-
 ### Healthcheck / liveness signal
 There is no way for Docker or the NAS to detect a hung daemon. Write a `health` file (or timestamp) to `DATA_DIR` after each successful sync/backup, containing last-run status + UTC timestamp. Expose it via a Docker `healthcheck` in `docker-compose.yml` so a stalled container can be restarted automatically.
 
