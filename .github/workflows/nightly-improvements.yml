@@ -1,0 +1,182 @@
+name: Nightly Improvements
+
+on:
+  schedule:
+    - cron: "30 2 * * 1-5" # Weekdays at 02:30 UTC
+  workflow_dispatch:
+    inputs:
+      skip_autofix:
+        description: "Skip auto-fix job"
+        required: false
+        type: boolean
+        default: false
+      skip_suggestions:
+        description: "Skip suggestions job"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  auto-fix:
+    if: ${{ !inputs.skip_autofix }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff fix and format
+        run: |
+          ruff check --fix . || true
+          ruff format .
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Pull Request
+        if: steps.diff.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "style: auto-fix lint and formatting"
+          title: "🧹 Auto-fix: lint & formatting"
+          body: |
+            Automated nightly run of `ruff check --fix` and `ruff format`.
+
+            Review the changes and merge if they look good.
+          branch: nightly/auto-fix
+          delete-branch: true
+          labels: automation,code-quality
+
+  suggest-improvement:
+    if: ${{ !inputs.skip_suggestions }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Check for existing open suggestion
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OPEN=$(gh issue list --label "nightly-suggestion" --state open --limit 5 --json number | jq length)
+          echo "open_count=$OPEN" >> "$GITHUB_OUTPUT"
+
+      - name: Gather metrics
+        if: steps.check.outputs.open_count == '0'
+        id: metrics
+        run: |
+          # Coverage gaps
+          python -m pytest --cov=app --cov-report=term-missing -q 2>&1 | \
+            grep -E "^app/" | grep -v "100%" | sort -t'%' -k2 -n | head -5 > /tmp/coverage-gaps.txt || true
+
+          # Ruff warnings (unfixable)
+          ruff check . --no-fix 2>&1 | tail -5 > /tmp/ruff-warnings.txt || true
+          RUFF_COUNT=$(ruff check . --no-fix 2>&1 | grep "Found" | grep -oP '\d+' | head -1 || echo "0")
+
+          # Roadmap item count
+          ROADMAP_ITEMS=$(grep -c "^### " ROADMAP.md || echo "0")
+
+          echo "ruff_count=${RUFF_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "roadmap_items=${ROADMAP_ITEMS}" >> "$GITHUB_OUTPUT"
+
+      - name: Pick and create suggestion issue
+        if: steps.check.outputs.open_count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUFF_COUNT="${{ steps.metrics.outputs.ruff_count }}"
+          ROADMAP_ITEMS="${{ steps.metrics.outputs.roadmap_items }}"
+          TIMESTAMP=$(date -u +"%Y-%m-%d")
+
+          # Priority: unfixable lint > coverage gaps > roadmap
+          if [ "$RUFF_COUNT" -gt 0 ] 2>/dev/null && [ "$RUFF_COUNT" != "0" ]; then
+            TITLE="🧹 Nightly suggestion: fix $RUFF_COUNT lint warnings ($TIMESTAMP)"
+            WARNINGS=$(cat /tmp/ruff-warnings.txt)
+            BODY="## Detected: lint warnings that need manual fixes
+
+          \`ruff check --no-fix\` found **$RUFF_COUNT** issues that cannot be auto-fixed.
+
+          \`\`\`
+          $WARNINGS
+          \`\`\`
+
+          ### How to fix
+          Run \`ruff check .\` locally and address each warning. Do NOT suppress with \`# noqa\` unless genuinely justified.
+
+          Keep coverage ≥ 97%."
+            LABELS="nightly-suggestion,code-quality"
+
+          elif [ -s /tmp/coverage-gaps.txt ]; then
+            TITLE="🧪 Nightly suggestion: improve test coverage ($TIMESTAMP)"
+            GAPS=$(cat /tmp/coverage-gaps.txt)
+            BODY="## Detected: modules with coverage gaps
+
+          These modules have less than 100% coverage:
+
+          \`\`\`
+          $GAPS
+          \`\`\`
+
+          ### How to fix
+          Add tests for the uncovered lines. Follow existing patterns in \`tests/\`.
+
+          Keep coverage ≥ 97% (ideally improve it)."
+            LABELS="nightly-suggestion,testing"
+
+          elif [ "$ROADMAP_ITEMS" -gt 0 ] 2>/dev/null; then
+            TITLE="🗺️ Nightly suggestion: pick a roadmap item ($TIMESTAMP)"
+            ITEMS=$(grep "^### " ROADMAP.md | sed 's/^### //' | head -10)
+            BODY="## Suggestion: implement a roadmap item
+
+          There are **$ROADMAP_ITEMS** items in \`ROADMAP.md\`. Consider picking one:
+
+          \`\`\`
+          $ITEMS
+          \`\`\`
+
+          ### Good candidates for small PRs:
+          - **Configurable dedup retention** — expose \`_TTL_DAYS\` as env var
+          - **Refactor \`excluded\` count handoff** — fix fragile double-assignment
+          - **SQLite \`IN (...)\` variable limit** — chunk the ID list
+
+          Follow TDD. Update \`ROADMAP.md\` when done."
+            LABELS="nightly-suggestion,enhancement"
+
+          else
+            echo "Nothing to suggest today."
+            exit 0
+          fi
+
+          gh issue create \
+            --title "$TITLE" \
+            --body "$BODY" \
+            --label "$LABELS"
