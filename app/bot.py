@@ -462,7 +462,7 @@ class TelegramBot:
 
         # Truncate to stay within Telegram's message limit.
         if len(text) > _MAX_LOG_CHARS:
-            text = "\\[\\.\\.\\. truncated \\.\\.\\.\\.\\]\n" + text[-_MAX_LOG_CHARS:]
+            text = "[... truncated ...]\n" + text[-_MAX_LOG_CHARS:]
 
         self._send_message(header + text, parse_mode=None)
 
@@ -559,7 +559,8 @@ def _docker_logs_today(container_name: str, since: datetime.datetime) -> str:
     return raw.decode(errors="replace")
 
 
-def _docker_exec_silent(    container_name: str,
+def _docker_exec_silent(
+    container_name: str,
     app_args: list[str],
     on_error: Callable[[str], None] | None = None,
     on_success: Callable[[], None] | None = None,

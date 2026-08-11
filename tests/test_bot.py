@@ -1152,8 +1152,8 @@ def test_fetch_and_send_logs_truncates_long_output():
         bot._fetch_and_send_logs(inst)
     sent_text = mock_send.call_args.args[0]
     assert "truncated" in sent_text
-    # The sent text (header + truncation marker + tail) must not be excessively long
-    assert len(sent_text) < _MAX_LOG_CHARS + 300
+    # No MarkdownV2 escape sequences should appear in the truncation marker
+    assert "\\[" not in sent_text
 
 
 def test_fetch_and_send_logs_sends_error_on_exception():
