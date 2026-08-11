@@ -34,9 +34,10 @@ Never write implementation code without a corresponding test. Coverage should st
 - The test count or file list changes.
 - A new workflow or release mechanism is introduced.
 
-### Update `ROADMAP.md` when:
-- A roadmap item is implemented — remove or mark it done.
-- A new improvement idea surfaces during a session — add it.
+### Roadmap items
+- Roadmap items are tracked as GitHub issues with the `roadmap` label.
+- When a roadmap item is implemented, close the corresponding issue via the PR.
+- New improvement ideas should be opened as issues with the `roadmap` label.
 
 ---
 
