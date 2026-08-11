@@ -192,10 +192,17 @@ jobs:
           $(grep -A 9999 'Name' test-output.txt | grep -v '^$' | head -40)
           \`\`\`
 
-          </details>"
+          </details>
+          <!-- ci-results-comment -->"
 
-          gh pr comment "${{ github.event.pull_request.number }}" \
-            --body "$BODY" \
-            --edit-last 2>/dev/null || \
-          gh pr comment "${{ github.event.pull_request.number }}" \
-            --body "$BODY"
+          # Delete existing ci-results comment (if any) and post a fresh one
+          EXISTING_ID=$(gh api \
+            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --jq '[.[] | select(.body | contains("<!-- ci-results-comment -->"))] | last | .id // empty')
+
+          if [ -n "$EXISTING_ID" ]; then
+            gh api --method DELETE \
+              "repos/${{ github.repository }}/issues/comments/${EXISTING_ID}"
+          fi
+
+          gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY"
