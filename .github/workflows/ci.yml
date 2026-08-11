@@ -177,7 +177,8 @@ jobs:
           | 📊 Coverage | ${PR_COV}%${COV_DIFF} | ${MAIN_COV}% |
           | 📝 Lines covered | ${PR_COVERED} / ${PR_LINES}${LINES_DIFF} | ${MAIN_COVERED} / ${MAIN_LINES} |"
 
-          BODY="## CI Results
+          BODY="<!-- ci-results-comment -->
+## CI Results
 
           $STATUS
 
@@ -194,8 +195,15 @@ jobs:
 
           </details>"
 
-          gh pr comment "${{ github.event.pull_request.number }}" \
-            --body "$BODY" \
-            --edit-last 2>/dev/null || \
-          gh pr comment "${{ github.event.pull_request.number }}" \
-            --body "$BODY"
+          # Delete existing ci-results comment (if any) and post a fresh one
+          EXISTING_ID=$(gh api \
+            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --jq '.[] | select(.body | startswith("<!-- ci-results-comment -->")) | .id' \
+            | head -1)
+
+          if [ -n "$EXISTING_ID" ]; then
+            gh api --method DELETE \
+              "repos/${{ github.repository }}/issues/comments/${EXISTING_ID}"
+          fi
+
+          gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY"
