@@ -63,11 +63,8 @@ Today the `Notifier` sends one message per run. Add an optional aggregated summa
 
 ## Bot
 
-### Real `/status` command
-`_cmd_status` (`app/bot.py:296`) only lists the configured container names. Enhance it via the Docker SDK to report whether each container is actually `running`, its last run outcome (parse the tail of `sync.log`), and the number of events synced recently.
-
-### `/logs` command
-Add a `/logs` command to the bot that returns the last N lines of `sync.log` for a chosen instance (reuse the instance inline-keyboard picker from `/sync`). Lets the user diagnose issues from Telegram without SSH-ing into the NAS. The bot already has Docker SDK access, so it can read the log either via `container.exec_run(["tail", "-n", "N", "/app/data/sync.log"])` or by reading the mounted data volume directly.
+### `/status` — container running state and last-run summary
+`_cmd_status` now reports per-instance auth state (✅ / ⚠️ / ❓) via `_docker_check_session`. Still pending: report whether each container is actually `running` (via Docker SDK `container.status`) and surface the last sync outcome (parse the tail of `sync.log` or check the last `synced_at` in `sync.db`).
 
 ### Version / update check
 Let the user check from Telegram whether a newer container image is published. The local version is the `VERSION` file (currently `6.1.0`) baked into the image; the published tags live at `ghcr.io/sanmibuh/tr-wallet-sync`. A `/version` (or `/update_check`) command would:

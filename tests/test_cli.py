@@ -237,3 +237,27 @@ def test_bot_calls_run():
     ):
         _runner().invoke(cli, ["bot"])
     mock_run.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# check-session command
+# ---------------------------------------------------------------------------
+
+def test_check_session_exits_zero_when_credentials_exist(tmp_path):
+    """Exit 0 when credentials.json is present — session was previously saved."""
+    (tmp_path / "credentials.json").write_text("{}")
+    with patch("app.config.read_data_dir", return_value=tmp_path):
+        result = _runner().invoke(cli, ["check-session"])
+    assert result.exit_code == 0
+
+
+def test_check_session_exits_one_when_credentials_missing(tmp_path):
+    """Exit 1 when credentials.json is absent — login required."""
+    with patch("app.config.read_data_dir", return_value=tmp_path):
+        result = _runner().invoke(cli, ["check-session"])
+    assert result.exit_code == 1
+
+
+def test_check_session_help():
+    result = _runner().invoke(cli, ["check-session", "--help"])
+    assert result.exit_code == 0
