@@ -1,0 +1,316 @@
+name: Nightly Improvements
+
+on:
+  schedule:
+    - cron: "30 2 * * 1-5" # Weekdays at 02:30 UTC
+  workflow_dispatch:
+    inputs:
+      skip_autofix:
+        description: "Skip auto-fix job"
+        required: false
+        type: boolean
+        default: false
+      skip_suggestions:
+        description: "Skip suggestions job"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  auto-fix:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_autofix }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff fix and format
+        run: |
+          ruff check --fix . || true
+          ruff format .
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Pull Request
+        if: steps.diff.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "style: auto-fix lint and formatting"
+          title: "🧹 Auto-fix: lint & formatting"
+          body: |
+            Automated nightly run of `ruff check --fix` and `ruff format`.
+
+            Review the changes and merge if they look good.
+          branch: nightly/auto-fix
+          delete-branch: true
+          labels: automation,code-quality
+
+  suggest-improvement:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_suggestions }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Check for existing open suggestion
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OPEN=$(gh issue list --label "nightly-suggestion" --state open --limit 5 --json number | jq length)
+          echo "open_count=$OPEN" >> "$GITHUB_OUTPUT"
+
+      - name: Gather metrics
+        if: steps.check.outputs.open_count == '0'
+        id: metrics
+        run: |
+          # Coverage gaps
+          python -m pytest --cov=app --cov-report=term-missing -q 2>&1 | \
+            grep -E "^app/" | grep -v "100%" | sort -t'%' -k2 -n | head -5 > /tmp/coverage-gaps.txt || true
+
+          # Ruff warnings (unfixable)
+          ruff check . --no-fix 2>&1 > /tmp/ruff-output.txt || true
+          tail -5 /tmp/ruff-output.txt > /tmp/ruff-warnings.txt
+          RUFF_COUNT=$(grep "Found" /tmp/ruff-output.txt | grep -oP '\d+' | head -1 || echo "0")
+
+          # TODOs and FIXMEs
+          TODO_COUNT=$(grep -rn "TODO\|FIXME\|HACK\|XXX" app/ --include="*.py" | wc -l | tr -d ' ')
+          grep -rn "TODO\|FIXME\|HACK\|XXX" app/ --include="*.py" | head -10 > /tmp/todos.txt || true
+
+          # Long functions (>20 lines)
+          python3 - <<'PY' > /tmp/long-func-count.txt || echo "0" > /tmp/long-func-count.txt
+          import ast, pathlib
+
+          long_funcs = []
+          for p in pathlib.Path('app').rglob('*.py'):
+              try:
+                  tree = ast.parse(p.read_text())
+              except SyntaxError:
+                  continue
+              for node in ast.walk(tree):
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                      length = node.end_lineno - node.lineno + 1
+                      if length > 20:
+                          long_funcs.append((length, f'{p}:{node.lineno} — {node.name}() ({length} lines)'))
+
+          long_funcs.sort(key=lambda item: -item[0])
+          with open('/tmp/long-functions.txt', 'w') as f:
+              f.write('\n'.join(desc for _, desc in long_funcs[:10]))
+          print(len(long_funcs))
+          PY
+          LONG_FUNC_COUNT=$(cat /tmp/long-func-count.txt)
+
+          # Missing docstrings on public functions
+          python3 - <<'PY' > /tmp/docstring-count.txt || echo "0" > /tmp/docstring-count.txt
+          import ast, pathlib
+
+          missing = []
+          for p in pathlib.Path('app').rglob('*.py'):
+              try:
+                  tree = ast.parse(p.read_text())
+              except SyntaxError:
+                  continue
+              for node in ast.walk(tree):
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                      if node.name.startswith('_'):
+                          continue
+                      if not (node.body and isinstance(node.body[0], ast.Expr)
+                              and isinstance(node.body[0].value, ast.Constant)
+                              and isinstance(node.body[0].value.value, str)):
+                          missing.append(f'{p}:{node.lineno} — {node.name}()')
+
+          with open('/tmp/missing-docstrings.txt', 'w') as f:
+              f.write('\n'.join(missing[:10]))
+          print(len(missing))
+          PY
+          DOCSTRING_COUNT=$(cat /tmp/docstring-count.txt)
+
+          echo "ruff_count=${RUFF_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "todo_count=${TODO_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "long_func_count=${LONG_FUNC_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "docstring_count=${DOCSTRING_COUNT}" >> "$GITHUB_OUTPUT"
+
+      - name: Pick and create suggestion issue
+        if: steps.check.outputs.open_count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUFF_COUNT="${{ steps.metrics.outputs.ruff_count }}"
+          TODO_COUNT="${{ steps.metrics.outputs.todo_count }}"
+          LONG_FUNC_COUNT="${{ steps.metrics.outputs.long_func_count }}"
+          DOCSTRING_COUNT="${{ steps.metrics.outputs.docstring_count }}"
+          TIMESTAMP=$(date -u +"%Y-%m-%d")
+
+          # Shared implementation instructions for Copilot agent
+          RULES="## Implementation rules
+
+          - Follow TDD: write the failing test FIRST, then implement the fix.
+          - Run \`ruff check .\` after changes — zero warnings allowed.
+          - Run \`python -m pytest --cov=app --cov-fail-under=97\` — all tests must pass.
+          - Do NOT suppress lint with \`# noqa\` unless genuinely justified.
+          - Do not modify unrelated code.
+          - Follow existing patterns in \`tests/\` for new tests.
+          - All env vars must be read in \`app/config.py\` (never \`os.getenv\` elsewhere).
+
+          ## Verification checklist
+          - [ ] \`ruff check .\` passes with zero warnings
+          - [ ] \`python -m pytest --cov=app --cov-fail-under=97\` passes
+          - [ ] No unrelated changes included"
+
+          # Priority: lint > coverage > TODOs > long functions > docstrings
+          if [ "$RUFF_COUNT" -gt 0 ] 2>/dev/null && [ "$RUFF_COUNT" != "0" ]; then
+            TITLE="🧹 Nightly: fix $RUFF_COUNT lint warnings ($TIMESTAMP)"
+            WARNINGS=$(cat /tmp/ruff-warnings.txt)
+            BODY="## Problem
+
+          \`ruff check --no-fix\` found **$RUFF_COUNT** issues that cannot be auto-fixed.
+
+          \`\`\`
+          $WARNINGS
+          \`\`\`
+
+          ## Task
+
+          Fix each lint warning by modifying the source code. These are issues that \`ruff --fix\` cannot resolve automatically — they require understanding the code intent.
+
+          For each warning:
+          1. Read the rule documentation (\`ruff rule <CODE>\`).
+          2. Fix the root cause in the source.
+          3. If a fix changes observable behaviour, write a test first.
+
+          $RULES"
+            LABELS="nightly-suggestion,code-quality"
+
+          elif [ -s /tmp/coverage-gaps.txt ]; then
+            TITLE="🧪 Nightly: improve test coverage ($TIMESTAMP)"
+            GAPS=$(cat /tmp/coverage-gaps.txt)
+            BODY="## Problem
+
+          These modules have less than 100% coverage:
+
+          \`\`\`
+          $GAPS
+          \`\`\`
+
+          ## Task
+
+          Add tests for the uncovered lines listed above.
+
+          Steps:
+          1. Run \`python -m pytest --cov=app --cov-report=term-missing\` to identify exact uncovered lines.
+          2. For each uncovered path, write a test that exercises it.
+          3. Focus on the module with the lowest coverage first.
+          4. Only write tests — do NOT modify implementation code.
+
+          $RULES"
+            LABELS="nightly-suggestion,testing"
+
+          elif [ "$TODO_COUNT" -gt 0 ] 2>/dev/null && [ "$TODO_COUNT" != "0" ]; then
+            TITLE="📋 Nightly: resolve $TODO_COUNT TODO/FIXME comments ($TIMESTAMP)"
+            TODOS=$(cat /tmp/todos.txt)
+            BODY="## Problem
+
+          Found **$TODO_COUNT** TODO/FIXME/HACK/XXX comments in the code:
+
+          \`\`\`
+          $TODOS
+          \`\`\`
+
+          ## Task
+
+          For each comment above:
+          1. Read the surrounding code to understand the intent.
+          2. If the TODO is actionable and small: **implement the fix** and remove the comment.
+          3. If it requires a larger change: leave it and note in the PR why it was skipped.
+
+          Do NOT just delete comments without fixing the underlying issue.
+
+          $RULES"
+            LABELS="nightly-suggestion,code-quality"
+
+          elif [ "$LONG_FUNC_COUNT" -gt 0 ] 2>/dev/null && [ "$LONG_FUNC_COUNT" != "0" ]; then
+            TITLE="✂️ Nightly: refactor $LONG_FUNC_COUNT long functions ($TIMESTAMP)"
+            FUNCS=$(cat /tmp/long-functions.txt)
+            BODY="## Problem
+
+          Found **$LONG_FUNC_COUNT** functions longer than 20 lines:
+
+          \`\`\`
+          $FUNCS
+          \`\`\`
+
+          ## Task
+
+          Refactor the longest function listed above (pick ONE):
+          1. Identify logical sub-steps within the function.
+          2. Extract each sub-step into a well-named private helper function.
+          3. Ensure the refactored code has identical behaviour (write a test if not already covered).
+          4. The original function should read like a high-level summary.
+
+          Only refactor ONE function per PR to keep changes reviewable.
+
+          $RULES"
+            LABELS="nightly-suggestion,code-quality"
+
+          elif [ "$DOCSTRING_COUNT" -gt 0 ] 2>/dev/null && [ "$DOCSTRING_COUNT" != "0" ]; then
+            TITLE="📝 Nightly: add docstrings to $DOCSTRING_COUNT public functions ($TIMESTAMP)"
+            DOCS=$(cat /tmp/missing-docstrings.txt)
+            BODY="## Problem
+
+          Found **$DOCSTRING_COUNT** public functions without docstrings:
+
+          \`\`\`
+          $DOCS
+          \`\`\`
+
+          ## Task
+
+          Add docstrings to the functions listed above:
+          1. Each docstring should explain WHAT the function does (not HOW).
+          2. Document parameters and return values for non-obvious functions.
+          3. Use imperative mood (e.g. \"Return the filtered list of...\").
+          4. Skip trivial functions (e.g. simple property getters).
+          5. Follow Google-style docstrings (already used in this codebase).
+
+          $RULES"
+            LABELS="nightly-suggestion,documentation"
+
+          else
+            echo "Nothing to suggest today. Code is clean."
+            exit 0
+          fi
+
+          gh issue create \
+            --title "$TITLE" \
+            --body "$BODY" \
+            --label "$LABELS"
