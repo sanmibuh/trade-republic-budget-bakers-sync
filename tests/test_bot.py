@@ -1418,56 +1418,6 @@ def test_auth_icon_none():
 # _cmd_status — auth state decoration
 # ---------------------------------------------------------------------------
 
-def test_instance_status_line_authenticated_running():
-    """Running + authenticated → ✅ auth icon, state=running, last sync shown."""
-    bot = _bot()
-    inst = InstanceConfig(name="David", container_name="proj-sync-david-1")
-    client = MagicMock()
-    with (
-        patch("app.bot._docker_container_status", return_value="running"),
-        patch("app.bot._docker_check_session", return_value=True),
-        patch("app.bot._docker_last_sync_summary", return_value="✅ success at 2026/08/11 10:00 UTC"),
-    ):
-        line = bot._instance_status_line(inst, client)
-    assert "running" in line
-    assert "✅" in line
-    assert "success at 2026/08/11 10:00 UTC" in line
-
-
-def test_instance_status_line_unauthenticated_running():
-    """Running + unauthenticated → ⚠️ auth icon."""
-    bot = _bot()
-    inst = InstanceConfig(name="David", container_name="proj-sync-david-1")
-    client = MagicMock()
-    with (
-        patch("app.bot._docker_container_status", return_value="running"),
-        patch("app.bot._docker_check_session", return_value=False),
-        patch("app.bot._docker_last_sync_summary", return_value=None),
-    ):
-        line = bot._instance_status_line(inst, client)
-    assert "⚠️" in line
-    assert "unavailable" in line
-
-
-def test_instance_status_line_no_client():
-    """No Docker client → unknown state, ❓, unavailable, no docker calls made."""
-    bot = _bot()
-    inst = InstanceConfig(name="David", container_name="proj-sync-david-1")
-    with (
-        patch("app.bot._docker_container_status") as mock_status,
-        patch("app.bot._docker_check_session") as mock_check,
-        patch("app.bot._docker_last_sync_summary") as mock_summary,
-    ):
-        line = bot._instance_status_line(inst, None)
-    assert "unknown" in line
-    assert "❓" in line
-    assert "unavailable" in line
-    mock_status.assert_not_called()
-    mock_check.assert_not_called()
-    mock_summary.assert_not_called()
-
-
-
 def test_cmd_status_shows_checkmark_for_authenticated_instance():
     """✅ icon when the session check passes for an instance."""
     bot = _bot()
@@ -1490,12 +1440,13 @@ def test_cmd_status_shows_warning_for_unauthenticated_instance():
     with (
         patch("app.bot._docker_container_status", return_value="running"),
         patch("app.bot._docker_check_session", return_value=False),
-        patch("app.bot._docker_last_sync_summary", return_value="✅ success at 2026/08/11 10:00 UTC"),
+        patch("app.bot._docker_last_sync_summary", return_value=None),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._cmd_status([])
     msg = mock_send.call_args.args[0]
     assert "⚠️" in msg
+    assert "unavailable" in msg
 
 
 def test_cmd_status_shows_question_mark_for_unavailable_instance():
