@@ -18,7 +18,7 @@ on:
 
 jobs:
   auto-fix:
-    if: ${{ !inputs.skip_autofix }}
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_autofix }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -65,7 +65,7 @@ jobs:
           labels: automation,code-quality
 
   suggest-improvement:
-    if: ${{ !inputs.skip_suggestions }}
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_suggestions }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
