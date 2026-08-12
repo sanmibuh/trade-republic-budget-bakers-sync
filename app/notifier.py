@@ -88,57 +88,48 @@ class Notifier:
     def _safe_owner(self) -> str:
         return _escape_markdown(self._owner_name)
 
+    def _header(self, icon: str, title: str) -> str:
+        return f"{icon} *Trade Republic Sync: {_escape_markdown(title)}*\n\nOwner: *{self._safe_owner()}*\n"
+
     def authentication_required(self) -> bool:
-        safe = self._safe_owner()
         return self._send(
-            "🚨 *Trade Republic Sync: Session Expired*\n\n"
-            f"Owner: *{safe}*\n"
+            self._header("🚨", "Session Expired") +
             "The saved Trade Republic session is no longer valid\\.\n"
             "Run the bootstrap command to renew the 2FA session\\."
         )
 
     def login_required(self) -> bool:
-        safe = self._safe_owner()
         return self._send(
-            "🔐 *Trade Republic Sync: Login Required*\n\n"
-            f"Owner: *{safe}*\n"
+            self._header("🔐", "Login Required") +
             "No saved session found\\. A new 2FA login has been initiated\\.\n"
             "Check your Trade Republic app to approve the request\\."
         )
 
     def login_failed(self) -> bool:
-        safe = self._safe_owner()
         return self._send(
-            "❌ *Trade Republic Sync: Login Failed*\n\n"
-            f"Owner: *{safe}*\n"
+            self._header("❌", "Login Failed") +
             "The 2FA code was incorrect or the login request was rejected\\.\n"
             "Run the bootstrap command again to retry\\."
         )
 
     def login_code_request(self, instance: str) -> bool:
-        safe = self._safe_owner()
         safe_instance = _escape_code(instance)
         return self._send(
-            "🔐 *Trade Republic Sync: 2FA Code Required*\n\n"
-            f"Owner: *{safe}*\n"
+            self._header("🔐", "2FA Code Required") +
             "Reply with your authenticator code using:\n"
             f"`/code {safe_instance} <code>`"
         )
 
     def login_success(self) -> bool:
-        safe = self._safe_owner()
         return self._send(
-            "✅ *Trade Republic Sync: Login Successful*\n\n"
-            f"Owner: *{safe}*\n"
+            self._header("✅", "Login Successful") +
             "Session saved\\. Future syncs will run automatically\\."
         )
 
     def error(self, exc: Exception) -> bool:
-        safe = self._safe_owner()
         safe_error = _escape_markdown(f"{type(exc).__name__}: {exc}")
         return self._send(
-            "❌ *Trade Republic Sync Failed*\n\n"
-            f"Owner: *{safe}*\n"
+            self._header("❌", "Sync Failed") +
             f"Error: `{safe_error}`"
         )
 
@@ -161,23 +152,19 @@ class Notifier:
         )
 
     def unknown_event_type(self, event_type: str) -> bool:
-        safe = self._safe_owner()
         safe_type = _escape_markdown(event_type)
         return self._send(
-            "⚠️ *Trade Republic Sync: Unknown Event Type*\n\n"
-            f"Owner: *{safe}*\n"
+            self._header("⚠️", "Unknown Event Type") +
             f"Event type `{safe_type}` is not recognised\\.\n"
             "It has been processed using the default cash handler\\.\n"
             "Please report this type so a proper handler can be added\\."
         )
 
     def missing_api_result(self, event_id: str, missing_indices: list[int]) -> bool:
-        safe = self._safe_owner()
         safe_id = _escape_markdown(event_id)
         safe_indices = _escape_markdown(", ".join(str(i) for i in missing_indices))
         return self._send(
-            "⚠️ *Trade Republic Sync: Incomplete API Response*\n\n"
-            f"Owner: *{safe}*\n"
+            self._header("⚠️", "Incomplete API Response") +
             f"Event `{safe_id}` has no result for record index\\(es\\): `{safe_indices}`\\.\n"
             "The event has not been marked as processed and will be retried\\."
         )
