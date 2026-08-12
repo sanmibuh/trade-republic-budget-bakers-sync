@@ -179,11 +179,7 @@ def _process_results(
     repo: EventRepository,
 ) -> _SyncCounts:
     """Interpret API results, mark successful events as processed, log failures."""
-    failed_by_index = {
-        r.get("inputIndex", i): r
-        for i, r in enumerate(results)
-        if r.get("error")
-    }
+    results_by_index = {r.get("inputIndex", i): r for i, r in enumerate(results)}
 
     synced = 0
     failed = 0
@@ -191,9 +187,19 @@ def _process_results(
         record_indices = event_record_indices[event_idx]
         if not record_indices:
             continue
-        failures = [failed_by_index[i] for i in record_indices if i in failed_by_index]
+        failures = [
+            results_by_index[i]
+            for i in record_indices
+            if i in results_by_index and results_by_index[i].get("error")
+        ]
         if not failures:
-            repo.mark_processed(event)
+            wallet_ids = [
+                results_by_index[i]["id"]
+                for i in record_indices
+                if i in results_by_index and results_by_index[i].get("id")
+            ]
+            wallet_record_id = ",".join(wallet_ids) if wallet_ids else None
+            repo.mark_processed(event, wallet_record_id=wallet_record_id)
             synced += 1
         else:
             failed += 1
