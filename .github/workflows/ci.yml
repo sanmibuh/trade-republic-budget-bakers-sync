@@ -204,15 +204,14 @@ jobs:
           </details>
           <!-- ci-results-comment -->"
 
-          # Delete existing ci-results comment (if any) and post a fresh one at the bottom.
-          # Concurrency group ensures runs are serialized, preventing duplicate comments.
-          EXISTING_ID=$(gh api \
+          # Delete ALL existing ci-results comments (handles duplicates) and post a fresh one.
+          # Concurrency group ensures runs are serialized, preventing new duplicates.
+          gh api \
             "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments?per_page=100" \
-            --jq '[.[] | select(.body | contains("<!-- ci-results-comment -->"))] | last | .id // empty')
-
-          if [ -n "$EXISTING_ID" ]; then
-            gh api --method DELETE \
-              "repos/${{ github.repository }}/issues/comments/${EXISTING_ID}"
-          fi
+            --jq '[.[] | select(.body | contains("<!-- ci-results-comment -->")) | .id][]' \
+          | while read -r comment_id; do
+              gh api --method DELETE \
+                "repos/${{ github.repository }}/issues/comments/${comment_id}"
+            done
 
           gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY"
