@@ -1422,6 +1422,7 @@ def test_cmd_status_shows_checkmark_for_authenticated_instance():
     """✅ icon when the session check passes for an instance."""
     bot = _bot()
     with (
+        patch("app.bot.docker.from_env", return_value=MagicMock()),
         patch("app.bot._docker_container_status", return_value="running"),
         patch("app.bot._docker_check_session", return_value=True),
         patch("app.bot._docker_last_sync_summary", return_value="✅ success at 2026/08/11 10:00 UTC"),
@@ -1438,6 +1439,7 @@ def test_cmd_status_shows_warning_for_unauthenticated_instance():
     """⚠️ icon when the session check fails for an instance."""
     bot = _bot()
     with (
+        patch("app.bot.docker.from_env", return_value=MagicMock()),
         patch("app.bot._docker_container_status", return_value="running"),
         patch("app.bot._docker_check_session", return_value=False),
         patch("app.bot._docker_last_sync_summary", return_value=None),
@@ -1453,6 +1455,7 @@ def test_cmd_status_shows_question_mark_for_unavailable_instance():
     """❓ icon when the container is unreachable."""
     bot = _bot()
     with (
+        patch("app.bot.docker.from_env", return_value=MagicMock()),
         patch("app.bot._docker_container_status", return_value=None),
         patch("app.bot._docker_check_session", return_value=None) as mock_check_session,
         patch("app.bot._docker_last_sync_summary", return_value=None) as mock_last_sync,
@@ -1471,6 +1474,7 @@ def test_cmd_status_checks_each_instance():
     """_docker_check_session must be called once per configured instance."""
     bot = _bot()
     with (
+        patch("app.bot.docker.from_env", return_value=MagicMock()),
         patch("app.bot._docker_container_status", return_value="running"),
         patch("app.bot._docker_check_session", return_value=True) as mock_check,
         patch("app.bot._docker_last_sync_summary", return_value="✅ success at 2026/08/11 10:00 UTC"),

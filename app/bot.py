@@ -80,6 +80,7 @@ _BACKUP_ICONS: dict[str, str] = {
 
 _LAST_SYNC_SUMMARY_SCRIPT = """
 import json
+import os
 import re
 import sqlite3
 from collections import deque
@@ -93,7 +94,7 @@ result = {
     "excluded": None,
     "synced_at": None,
 }
-data_dir = Path("/app/data")
+data_dir = Path(os.environ.get("DATA_DIR", "/app/data"))
 log_path = data_dir / "sync.log"
 
 if log_path.exists():
@@ -135,7 +136,7 @@ db_path = data_dir / "sync.db"
 if db_path.exists():
     conn = None
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         row = conn.execute("SELECT MAX(synced_at) FROM processed_events").fetchone()
         if row and row[0]:
             result["synced_at"] = row[0]
