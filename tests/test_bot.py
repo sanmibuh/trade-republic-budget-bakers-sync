@@ -1335,6 +1335,15 @@ def test_docker_last_sync_summary_parses_success_from_log():
     assert result == "✅ success at 2026/08/11 10:00 UTC · saved 3 · failed 0 · excluded 1"
 
 
+def test_docker_last_sync_summary_uses_explicit_client():
+    client = _make_docker_client(
+        output=b'{"status":"success","timestamp":"2026-08-11 10:00:00","synced":1,"failed":0,"excluded":0,"synced_at":null}'
+    )
+    assert _docker_last_sync_summary("my-container", client=client) == (
+        "✅ success at 2026/08/11 10:00 UTC · saved 1 · failed 0 · excluded 0"
+    )
+
+
 def test_docker_last_sync_summary_falls_back_to_last_synced_at():
     client = _make_docker_client(
         output=b'{"status":null,"timestamp":null,"synced":null,"failed":null,"excluded":null,"synced_at":"2026-08-11T10:00:00+00:00"}'
@@ -1346,6 +1355,12 @@ def test_docker_last_sync_summary_falls_back_to_last_synced_at():
 
 def test_docker_last_sync_summary_returns_none_on_invalid_payload():
     client = _make_docker_client(output=b"not json")
+    with patch("app.bot.docker.from_env", return_value=client):
+        assert _docker_last_sync_summary("my-container") is None
+
+
+def test_docker_last_sync_summary_returns_none_on_nonzero_exit_code():
+    client = _make_docker_client(exit_code=1, output=b"boom")
     with patch("app.bot.docker.from_env", return_value=client):
         assert _docker_last_sync_summary("my-container") is None
 
@@ -1389,8 +1404,8 @@ def test_cmd_status_shows_question_mark_for_unavailable_instance():
     bot = _bot()
     with (
         patch("app.bot._docker_container_status", return_value=None),
-        patch("app.bot._docker_check_session", return_value=None),
-        patch("app.bot._docker_last_sync_summary", return_value=None),
+        patch("app.bot._docker_check_session", return_value=None) as mock_check_session,
+        patch("app.bot._docker_last_sync_summary", return_value=None) as mock_last_sync,
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._cmd_status([])
@@ -1398,6 +1413,8 @@ def test_cmd_status_shows_question_mark_for_unavailable_instance():
     assert "❓" in msg
     assert "unknown" in msg
     assert "last: unavailable" in msg
+    mock_check_session.assert_not_called()
+    mock_last_sync.assert_not_called()
 
 
 def test_cmd_status_checks_each_instance():

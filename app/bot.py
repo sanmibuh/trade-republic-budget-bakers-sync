@@ -69,6 +69,7 @@ _MONTH_BUTTON_COUNT = 4  # number of recent months offered in the monthly backup
 _CB_SEP = ":"
 
 _MAX_LOG_CHARS = 3800  # safe limit below Telegram's 4096-char message cap
+_STATUS_LOG_TAIL_LINES = 500  # inspect enough recent lines to find the latest sync summary in noisy logs
 
 # Icons used in backup ACK messages — must stay in sync with _backup_type_buttons().
 _BACKUP_ICONS: dict[str, str] = {
@@ -97,9 +98,10 @@ log_path = data_dir / "sync.log"
 if log_path.exists():
     try:
         with log_path.open(encoding="utf-8", errors="replace") as fh:
-            for raw_line in reversed(deque(fh, maxlen=200)):
+            for raw_line in reversed(deque(fh, maxlen=__MAXLEN__)):
                 line = raw_line.strip()
-                timestamp = line[:19] if len(line) >= 19 else None
+                timestamp_match = re.match(r"^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}", line)
+                timestamp = timestamp_match.group(0) if timestamp_match else None
                 match = re.search(r"synced=(\\d+)\\s+excluded=(\\d+)\\s+failed=(\\d+)", line)
                 if "Sync complete." in line and match:
                     synced = int(match.group(1))
@@ -130,6 +132,7 @@ if log_path.exists():
 
 db_path = data_dir / "sync.db"
 if db_path.exists():
+    conn = None
     try:
         conn = sqlite3.connect(db_path)
         row = conn.execute("SELECT MAX(synced_at) FROM processed_events").fetchone()
@@ -139,12 +142,13 @@ if db_path.exists():
         pass
     finally:
         try:
-            conn.close()
+            if conn is not None:
+                conn.close()
         except Exception:
             pass
 
 print(json.dumps(result))
-"""
+""".replace("__MAXLEN__", str(_STATUS_LOG_TAIL_LINES))
 
 
 # ---------------------------------------------------------------------------
@@ -411,21 +415,38 @@ class TelegramBot:
             return
 
         lines = ["📋 *Instance status*\n"]
-        for inst in self._cfg.instances.values():
-            running_state = _docker_container_status(inst.container_name)
-            auth = _docker_check_session(inst.container_name) if running_state == "running" else None
-            if auth is True:
-                icon = "✅"
-            elif auth is False:
-                icon = "⚠️"
-            else:
-                icon = "❓"
-            last_sync = _docker_last_sync_summary(inst.container_name) or "unavailable"
-            lines.append(
-                f"• *{_esc(inst.name)}* — `{_esc(inst.container_name)}`"
-                f"\n  state: *{_esc(running_state or 'unknown')}* · auth: {icon}"
-                f"\n  last: {_esc(last_sync)}"
-            )
+        client = None
+        try:
+            client = docker.from_env()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("docker client init failed for /status: %s", exc)
+        try:
+            for inst in self._cfg.instances.values():
+                running_state = _docker_container_status(inst.container_name, client=client) if client else None
+                auth = (
+                    _docker_check_session(inst.container_name, client=client)
+                    if client and running_state == "running"
+                    else None
+                )
+                if auth is True:
+                    icon = "✅"
+                elif auth is False:
+                    icon = "⚠️"
+                else:
+                    icon = "❓"
+                last_sync = (
+                    _docker_last_sync_summary(inst.container_name, client=client)
+                    if client and running_state == "running"
+                    else None
+                ) or "unavailable"
+                lines.append(
+                    f"• *{_esc(inst.name)}* — `{_esc(inst.container_name)}`"
+                    f"\n  state: *{_esc(running_state or 'unknown')}* · auth: {icon}"
+                    f"\n  last: {_esc(last_sync)}"
+                )
+        finally:
+            if client is not None:
+                client.close()
 
         if self._cfg.backup_container:
             lines.append(f"\n💾 *Backup service*: `{_esc(self._cfg.backup_container)}`")
@@ -657,7 +678,7 @@ class TelegramBot:
 # Docker helpers
 # ---------------------------------------------------------------------------
 
-def _docker_check_session(container_name: str) -> bool | None:
+def _docker_check_session(container_name: str, client: docker.DockerClient | None = None) -> bool | None:
     """Check whether the saved Trade Republic session is valid for *container_name*.
 
     Runs ``python -m app check-session`` inside the container via the Docker SDK.
@@ -668,7 +689,7 @@ def _docker_check_session(container_name: str) -> bool | None:
         None   — container unreachable or exec failed unexpectedly.
     """
     try:
-        client = docker.from_env()
+        client = client or docker.from_env()
         container = client.containers.get(container_name)
         exit_code, _ = container.exec_run(["python", "-m", "app", "check-session"])
         if exit_code == 0:
@@ -683,10 +704,12 @@ def _docker_check_session(container_name: str) -> bool | None:
         return None
 
 
-def _docker_container_status(container_name: str) -> str | None:
+def _docker_container_status(
+    container_name: str, client: docker.DockerClient | None = None
+) -> str | None:
     """Return the Docker container status for *container_name*."""
     try:
-        client = docker.from_env()
+        client = client or docker.from_env()
         container = client.containers.get(container_name)
         return container.status
     except Exception as exc:  # noqa: BLE001
@@ -695,6 +718,7 @@ def _docker_container_status(container_name: str) -> str | None:
 
 
 def _format_sync_timestamp(raw: str) -> str:
+    """Format log/DB timestamps as `YYYY/MM/DD HH:MM UTC` for Telegram output."""
     try:
         if "T" in raw:
             parsed = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
@@ -707,16 +731,18 @@ def _format_sync_timestamp(raw: str) -> str:
         return raw
 
 
-def _docker_last_sync_summary(container_name: str) -> str | None:
+def _docker_last_sync_summary(
+    container_name: str, client: docker.DockerClient | None = None
+) -> str | None:
     """Return a human-readable summary of the most recent sync activity."""
     try:
-        client = docker.from_env()
+        client = client or docker.from_env()
         container = client.containers.get(container_name)
         exit_code, output = container.exec_run(["python", "-c", _LAST_SYNC_SUMMARY_SCRIPT])
         if exit_code != 0:
             return None
         payload = json.loads(output.decode(errors="replace"))
-    except (json.JSONDecodeError, Exception) as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         log.debug("last sync lookup failed for %s: %s", container_name, exc)
         return None
 
