@@ -43,11 +43,13 @@ Interaction flow for /backup with args:
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
+import json
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 
 import requests
@@ -68,12 +70,87 @@ _MONTH_BUTTON_COUNT = 4  # number of recent months offered in the monthly backup
 _CB_SEP = ":"
 
 _MAX_LOG_CHARS = 3800  # safe limit below Telegram's 4096-char message cap
+_STATUS_LOG_TAIL_LINES = 500  # inspect enough recent lines to find the latest sync summary in noisy logs
 
 # Icons used in backup ACK messages — must stay in sync with _backup_type_buttons().
 _BACKUP_ICONS: dict[str, str] = {
     "monthly": "📅",
     "yearly":  "📆",
 }
+
+_LAST_SYNC_SUMMARY_SCRIPT = """
+import json
+import os
+import re
+import sqlite3
+from collections import deque
+from pathlib import Path
+
+result = {
+    "status": None,
+    "timestamp": None,
+    "synced": None,
+    "failed": None,
+    "excluded": None,
+    "synced_at": None,
+}
+data_dir = Path(os.environ.get("DATA_DIR", "/app/data"))
+log_path = data_dir / "sync.log"
+
+if log_path.exists():
+    try:
+        with log_path.open(encoding="utf-8", errors="replace") as fh:
+            for raw_line in reversed(deque(fh, maxlen=__MAXLEN__)):
+                line = raw_line.strip()
+                timestamp_match = re.match(r"^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}", line)
+                timestamp = timestamp_match.group(0) if timestamp_match else None
+                match = re.search(r"synced=(\\d+)\\s+excluded=(\\d+)\\s+failed=(\\d+)", line)
+                if "Sync complete." in line and match:
+                    synced = int(match.group(1))
+                    excluded = int(match.group(2))
+                    failed = int(match.group(3))
+                    result["status"] = "success"
+                    if failed:
+                        result["status"] = "failed" if synced == 0 else "partial"
+                    result["timestamp"] = timestamp
+                    result["synced"] = synced
+                    result["failed"] = failed
+                    result["excluded"] = excluded
+                    break
+                if any(
+                    marker in line
+                    for marker in (
+                        "Error syncing events to wallet",
+                        "Authentication error",
+                        "Unexpected error during TR connection/fetch",
+                        "Login failed",
+                    )
+                ):
+                    result["status"] = "failed"
+                    result["timestamp"] = timestamp
+                    break
+    except Exception:
+        pass
+
+db_path = data_dir / "sync.db"
+if db_path.exists():
+    conn = None
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        row = conn.execute("SELECT MAX(synced_at) FROM processed_events").fetchone()
+        if row and row[0]:
+            result["synced_at"] = row[0]
+    except Exception:
+        pass
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+print(json.dumps(result))
+""".replace("__MAXLEN__", str(_STATUS_LOG_TAIL_LINES))
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +198,15 @@ class BotConfig:
 # Markdown helpers (MarkdownV2)
 # ---------------------------------------------------------------------------
 # _esc is imported from app.notifier._escape_markdown — single source of truth.
+
+def _auth_icon(auth: bool | None) -> str:
+    """Return a status icon for a Trade Republic session auth check result."""
+    if auth is True:
+        return "✅"
+    if auth is False:
+        return "⚠️"
+    return "❓"
+
 
 # ---------------------------------------------------------------------------
 # Bot
@@ -340,17 +426,9 @@ class TelegramBot:
             return
 
         lines = ["📋 *Instance status*\n"]
-        for inst in self._cfg.instances.values():
-            auth = _docker_check_session(inst.container_name)
-            if auth is True:
-                icon = "✅"
-            elif auth is False:
-                icon = "⚠️"
-            else:
-                icon = "❓"
-            lines.append(
-                f"• *{_esc(inst.name)}* — `{_esc(inst.container_name)}` {icon}"
-            )
+        with _docker_client_ctx() as client:
+            for inst in self._cfg.instances.values():
+                lines.append(self._instance_status_line(inst, client))
 
         if self._cfg.backup_container:
             lines.append(f"\n💾 *Backup service*: `{_esc(self._cfg.backup_container)}`")
@@ -358,6 +436,21 @@ class TelegramBot:
             lines.append("\n💾 *Backup service*: not configured")
 
         self._send_message("\n".join(lines))
+
+    def _instance_status_line(self, inst: InstanceConfig, client: docker.DockerClient | None) -> str:
+        """Build a Telegram-formatted status line for a single sync instance."""
+        running_state = _docker_container_status(inst.container_name, client=client) if client else None
+        is_running = client and running_state == "running"
+        auth = _docker_check_session(inst.container_name, client=client) if is_running else None
+        last_sync = (
+            _docker_last_sync_summary(inst.container_name, client=client) if is_running else None
+        ) or "unavailable"
+        auth_icon = _auth_icon(auth)
+        return (
+            f"• *{_esc(inst.name)}* — `{_esc(inst.container_name)}`"
+            f"\n  state: *{_esc(running_state or 'unknown')}* · auth: {auth_icon}"
+            f"\n  last: {_esc(last_sync)}"
+        )
 
     def _cmd_sync(self, _args: list[str]) -> None:
         self._pick_instance("sync", "🔄 *Sync* — Choose instance:")
@@ -582,7 +675,26 @@ class TelegramBot:
 # Docker helpers
 # ---------------------------------------------------------------------------
 
-def _docker_check_session(container_name: str) -> bool | None:
+@contextlib.contextmanager
+def _docker_client_ctx() -> Generator[docker.DockerClient | None, None, None]:
+    """Context manager that yields a Docker client and closes it on exit.
+
+    Yields ``None`` (without raising) if the Docker daemon is unreachable so
+    callers can handle the unavailable-client case without extra try/except.
+    """
+    client = None
+    try:
+        client = docker.from_env()
+    except Exception as exc:  # noqa: BLE001
+        log.debug("docker client init failed: %s", exc)
+    try:
+        yield client
+    finally:
+        if client is not None:
+            client.close()
+
+
+def _docker_check_session(container_name: str, client: docker.DockerClient | None = None) -> bool | None:
     """Check whether the saved Trade Republic session is valid for *container_name*.
 
     Runs ``python -m app check-session`` inside the container via the Docker SDK.
@@ -593,7 +705,7 @@ def _docker_check_session(container_name: str) -> bool | None:
         None   — container unreachable or exec failed unexpectedly.
     """
     try:
-        client = docker.from_env()
+        client = client or docker.from_env()
         container = client.containers.get(container_name)
         exit_code, _ = container.exec_run(["python", "-m", "app", "check-session"])
         if exit_code == 0:
@@ -608,9 +720,75 @@ def _docker_check_session(container_name: str) -> bool | None:
         return None
 
 
-def _docker_logs_today(container_name: str, since: datetime.datetime) -> str:
+def _docker_container_status(
+    container_name: str, client: docker.DockerClient | None = None
+) -> str | None:
+    """Return the Docker container status for *container_name*."""
+    try:
+        client = client or docker.from_env()
+        container = client.containers.get(container_name)
+        return container.status
+    except Exception as exc:  # noqa: BLE001
+        log.debug("container status lookup failed for %s: %s", container_name, exc)
+        return None
+
+
+def _format_sync_timestamp(raw: str) -> str:
+    """Format log/DB timestamps as `YYYY/MM/DD HH:MM UTC` for Telegram output."""
+    try:
+        if "T" in raw:
+            parsed = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        else:
+            parsed = datetime.datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=datetime.timezone.utc
+            )
+        return parsed.astimezone(datetime.timezone.utc).strftime("%Y/%m/%d %H:%M UTC")
+    except ValueError:
+        return raw
+
+
+def _docker_last_sync_summary(
+    container_name: str, client: docker.DockerClient | None = None
+) -> str | None:
+    """Return a human-readable summary of the most recent sync activity."""
+    try:
+        client = client or docker.from_env()
+        container = client.containers.get(container_name)
+        exit_code, output = container.exec_run(["python", "-c", _LAST_SYNC_SUMMARY_SCRIPT])
+        if exit_code != 0:
+            return None
+        payload = json.loads(output.decode(errors="replace"))
+    except Exception as exc:  # noqa: BLE001
+        log.debug("last sync lookup failed for %s: %s", container_name, exc)
+        return None
+
+    status = payload.get("status")
+    timestamp = payload.get("timestamp")
+    if status in {"success", "partial", "failed"}:
+        icon = {"success": "✅", "partial": "⚠️", "failed": "❌"}[status]
+        parts = [f"{icon} {status}"]
+        if timestamp:
+            parts[0] = f"{parts[0]} at {_format_sync_timestamp(timestamp)}"
+        synced = payload.get("synced")
+        failed = payload.get("failed")
+        excluded = payload.get("excluded")
+        if synced is not None:
+            parts.append(f"saved {synced}")
+        if failed is not None:
+            parts.append(f"failed {failed}")
+        if excluded is not None:
+            parts.append(f"excluded {excluded}")
+        return " · ".join(parts)
+
+    synced_at = payload.get("synced_at")
+    if synced_at:
+        return f"✅ last saved event at {_format_sync_timestamp(synced_at)}"
+    return None
+
+
+def _docker_logs_today(container_name: str, since: datetime.datetime, client: docker.DockerClient | None = None) -> str:
     """Return stdout/stderr logs for *container_name* since *since* (UTC datetime)."""
-    client = docker.from_env()
+    client = client or docker.from_env()
     container = client.containers.get(container_name)
     raw: bytes = container.logs(since=since, timestamps=False)
     return raw.decode(errors="replace")
