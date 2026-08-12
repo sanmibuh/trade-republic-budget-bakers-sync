@@ -43,12 +43,13 @@ Interaction flow for /backup with args:
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
 import json
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 
 import requests
@@ -196,6 +197,15 @@ class BotConfig:
 # Markdown helpers (MarkdownV2)
 # ---------------------------------------------------------------------------
 # _esc is imported from app.notifier._escape_markdown — single source of truth.
+
+def _auth_icon(auth: bool | None) -> str:
+    """Return a status icon for a Trade Republic session auth check result."""
+    if auth is True:
+        return "✅"
+    if auth is False:
+        return "⚠️"
+    return "❓"
+
 
 # ---------------------------------------------------------------------------
 # Bot
@@ -415,38 +425,9 @@ class TelegramBot:
             return
 
         lines = ["📋 *Instance status*\n"]
-        client = None
-        try:
-            client = docker.from_env()
-        except Exception as exc:  # noqa: BLE001
-            log.debug("docker client init failed for /status: %s", exc)
-        try:
+        with _docker_client_ctx() as client:
             for inst in self._cfg.instances.values():
-                running_state = _docker_container_status(inst.container_name, client=client) if client else None
-                auth = (
-                    _docker_check_session(inst.container_name, client=client)
-                    if client and running_state == "running"
-                    else None
-                )
-                if auth is True:
-                    icon = "✅"
-                elif auth is False:
-                    icon = "⚠️"
-                else:
-                    icon = "❓"
-                last_sync = (
-                    _docker_last_sync_summary(inst.container_name, client=client)
-                    if client and running_state == "running"
-                    else None
-                ) or "unavailable"
-                lines.append(
-                    f"• *{_esc(inst.name)}* — `{_esc(inst.container_name)}`"
-                    f"\n  state: *{_esc(running_state or 'unknown')}* · auth: {icon}"
-                    f"\n  last: {_esc(last_sync)}"
-                )
-        finally:
-            if client is not None:
-                client.close()
+                lines.append(self._instance_status_line(inst, client))
 
         if self._cfg.backup_container:
             lines.append(f"\n💾 *Backup service*: `{_esc(self._cfg.backup_container)}`")
@@ -454,6 +435,21 @@ class TelegramBot:
             lines.append("\n💾 *Backup service*: not configured")
 
         self._send_message("\n".join(lines))
+
+    def _instance_status_line(self, inst: InstanceConfig, client: docker.DockerClient | None) -> str:
+        """Build a Telegram-formatted status line for a single sync instance."""
+        running_state = _docker_container_status(inst.container_name, client=client) if client else None
+        is_running = client and running_state == "running"
+        auth = _docker_check_session(inst.container_name, client=client) if is_running else None
+        last_sync = (
+            _docker_last_sync_summary(inst.container_name, client=client) if is_running else None
+        ) or "unavailable"
+        auth_icon = _auth_icon(auth)
+        return (
+            f"• *{_esc(inst.name)}* — `{_esc(inst.container_name)}`"
+            f"\n  state: *{_esc(running_state or 'unknown')}* · auth: {auth_icon}"
+            f"\n  last: {_esc(last_sync)}"
+        )
 
     def _cmd_sync(self, _args: list[str]) -> None:
         self._pick_instance("sync", "🔄 *Sync* — Choose instance:")
@@ -678,6 +674,25 @@ class TelegramBot:
 # Docker helpers
 # ---------------------------------------------------------------------------
 
+@contextlib.contextmanager
+def _docker_client_ctx() -> Generator[docker.DockerClient | None, None, None]:
+    """Context manager that yields a Docker client and closes it on exit.
+
+    Yields ``None`` (without raising) if the Docker daemon is unreachable so
+    callers can handle the unavailable-client case without extra try/except.
+    """
+    client = None
+    try:
+        client = docker.from_env()
+    except Exception as exc:  # noqa: BLE001
+        log.debug("docker client init failed: %s", exc)
+    try:
+        yield client
+    finally:
+        if client is not None:
+            client.close()
+
+
 def _docker_check_session(container_name: str, client: docker.DockerClient | None = None) -> bool | None:
     """Check whether the saved Trade Republic session is valid for *container_name*.
 
@@ -770,9 +785,9 @@ def _docker_last_sync_summary(
     return None
 
 
-def _docker_logs_today(container_name: str, since: datetime.datetime) -> str:
+def _docker_logs_today(container_name: str, since: datetime.datetime, client: docker.DockerClient | None = None) -> str:
     """Return stdout/stderr logs for *container_name* since *since* (UTC datetime)."""
-    client = docker.from_env()
+    client = client or docker.from_env()
     container = client.containers.get(container_name)
     raw: bytes = container.logs(since=since, timestamps=False)
     return raw.decode(errors="replace")
