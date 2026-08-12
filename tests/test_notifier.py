@@ -326,3 +326,24 @@ def test_notifier_backup_complete_filename_optional():
         )
     msg = mock_send.call_args.kwargs["message"]
     assert "File" not in msg
+
+
+# ---------------------------------------------------------------------------
+# Notifier.missing_api_result
+# ---------------------------------------------------------------------------
+
+def test_notifier_missing_api_result_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().missing_api_result("evt-123", [2, 3])
+    mock_send.assert_called_once()
+    msg = mock_send.call_args.kwargs["message"]
+    assert "evt" in msg
+    assert "123" in msg
+    assert "2" in msg
+    assert "3" in msg
+
+
+def test_notifier_missing_api_result_returns_send_result():
+    with patch("app.notifier.send_telegram_message", return_value=False):
+        result = _make_notifier().missing_api_result("evt-x", [0])
+    assert result is False

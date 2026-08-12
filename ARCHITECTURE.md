@@ -95,9 +95,35 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `run()` (sync) and `run_login()` share two helpers to avoid divergence: `_prepare(cfg)` (data dir + SSL circuit-breaker + logging + `Notifier`) and `_connect(cfg, notifier)` (builds the `TRClient`, selects the code provider via `_build_code_provider`, and establishes the session).
 
 ### Deduplication
-- `processed_events` table in SQLite: `(event_id, event_type, event_timestamp, amount, raw, synced_at)`.
+- `processed_events` table in SQLite: `(event_id, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id)`.
 - `INSERT OR IGNORE` — idempotent. Re-running never creates duplicate records in BudgetBakers.
+- `wallet_record_id` stores the Wallet API record ID returned by `post_records` on success. For events that produce multiple records (e.g. investment with cash + portfolio split), IDs are stored comma-separated. NULL for zero-amount excluded events. Enables insert-vs-update decisions when reprocessing a date range.
+- Schema migrations are applied automatically on each `EventRepository` open via `PRAGMA table_info` + `ALTER TABLE` — safe to run repeatedly, no migration state needed.
 - Old records without `details` are not retroactively updated (correct by design).
+
+---
+
+## Database schema
+
+### `sync.db` — dedup database (`app/persistence.py`)
+
+```sql
+CREATE TABLE processed_events (
+    event_id         TEXT PRIMARY KEY,   -- TR native ID or hash:<sha256> fallback
+    event_type       TEXT NOT NULL DEFAULT '',
+    event_timestamp  TEXT NOT NULL DEFAULT '',
+    amount           TEXT NOT NULL DEFAULT '',
+    raw              TEXT NOT NULL DEFAULT '',  -- full TR event JSON for auditing
+    synced_at        TEXT NOT NULL,             -- UTC ISO timestamp of sync
+    wallet_record_id TEXT                       -- Wallet API record ID(s); comma-separated for multi-record events; NULL for excluded events
+);
+
+CREATE INDEX idx_synced_at ON processed_events (synced_at);
+```
+
+**TTL**: records older than 60 days are purged on each sync run (`purge_old_records`).
+
+**Migrations**: applied automatically on `EventRepository` open — new columns are added via `ALTER TABLE` if missing, detected with `PRAGMA table_info`.
 
 ### Labels
 - `LABEL_<EVENT_TYPE>` env vars (e.g. `LABEL_BANK_TRANSACTION_INCOMING`) are read by `_read_label_ids()` → `cfg.label_ids: dict[str, str]`.
@@ -272,7 +298,7 @@ See `deploy/DEPLOY.md` for setup instructions.
 | `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions; `connect` uses a `code_provider` |
 | `app/twofa.py` | 2FA code providers (`TerminalCodeProvider`, `TelegramCodeProvider`) + `select_code_provider`; `CODE_FILENAME` |
 | `app/tr_mapper.py` | `_build_note` (note/description), `_note_extras` (detail fragments), `_HANDLERS`, `KNOWN_EVENT_TYPES`, `_make_record` |
-| `app/persistence.py` | `EventRepository`, `dedup_event_id`; `INSERT OR IGNORE` |
+| `app/persistence.py` | `EventRepository`, `dedup_event_id`; `INSERT OR IGNORE`; `get_wallet_record_id` for insert-vs-update on reprocessing |
 | `app/config.py` | `Config` (sync) and `BackupConfig` (backup) dataclasses; `BotEnv`; `read_data_dir()`; `_read_label_ids()` |
 | `app/wallet_client.py` | `post_records` (sync) + `_get_all`/`_collect_page` + `get_*` (backup) |
 | `app/logging_setup.py` | `setup_logging(data_dir)` for daemon; `configure_logging()` for CLI entry points |

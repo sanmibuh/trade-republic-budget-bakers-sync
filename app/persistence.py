@@ -50,13 +50,18 @@ def dedup_event_id(event: dict[str, Any]) -> str:
 
 _CREATE_TABLE = """
     CREATE TABLE IF NOT EXISTS processed_events (
-        event_id        TEXT PRIMARY KEY,
-        event_type      TEXT NOT NULL DEFAULT '',
-        event_timestamp TEXT NOT NULL DEFAULT '',
-        amount          TEXT NOT NULL DEFAULT '',
-        raw             TEXT NOT NULL DEFAULT '',
-        synced_at       TEXT NOT NULL
+        event_id         TEXT PRIMARY KEY,
+        event_type       TEXT NOT NULL DEFAULT '',
+        event_timestamp  TEXT NOT NULL DEFAULT '',
+        amount           TEXT NOT NULL DEFAULT '',
+        raw              TEXT NOT NULL DEFAULT '',
+        synced_at        TEXT NOT NULL,
+        wallet_record_id TEXT
     )
+"""
+
+_MIGRATE_ADD_WALLET_RECORD_ID = """
+    ALTER TABLE processed_events ADD COLUMN wallet_record_id TEXT
 """
 
 _CREATE_INDEX = """
@@ -75,7 +80,8 @@ class EventRepository:
         with EventRepository(db_path) as repo:
             repo.purge_old_records()
             new_events = repo.filter_unprocessed(events)
-            repo.mark_processed(event)
+            for event in new_events:
+                repo.mark_processed(event, wallet_record_id="wid-abc")
             repo.commit()
     """
 
@@ -83,7 +89,15 @@ class EventRepository:
         self._conn = sqlite3.connect(db_path)
         self._conn.execute(_CREATE_TABLE)
         self._conn.execute(_CREATE_INDEX)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        if "wallet_record_id" not in self._column_names("processed_events"):
+            self._conn.execute(_MIGRATE_ADD_WALLET_RECORD_ID)
+
+    def _column_names(self, table: str) -> set[str]:
+        return {row[1] for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
     def filter_unprocessed(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         events_with_ids = [(event, dedup_event_id(event)) for event in events]
@@ -99,7 +113,7 @@ class EventRepository:
 
         return [event for event, dedup_id in events_with_ids if dedup_id not in processed]
 
-    def mark_processed(self, event: dict[str, Any]) -> None:
+    def mark_processed(self, event: dict[str, Any], *, wallet_record_id: str | None = None) -> None:
         eid = dedup_event_id(event)
         event_type = extract_event_type(event)
         event_timestamp = normalize_event_time(event)
@@ -112,10 +126,17 @@ class EventRepository:
 
         self._conn.execute(
             "INSERT OR IGNORE INTO processed_events "
-            "(event_id, event_type, event_timestamp, amount, raw, synced_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (eid, event_type, event_timestamp, amount, raw, synced_at),
+            "(event_id, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (eid, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id),
         )
+
+    def get_wallet_record_id(self, event: dict[str, Any]) -> str | None:
+        eid = dedup_event_id(event)
+        row = self._conn.execute(
+            "SELECT wallet_record_id FROM processed_events WHERE event_id = ?", (eid,)
+        ).fetchone()
+        return row[0] if row else None
 
     def purge_old_records(self, ttl_days: int = _TTL_DAYS) -> int:
         """Delete records synced more than ttl_days ago. Returns number of rows deleted."""
