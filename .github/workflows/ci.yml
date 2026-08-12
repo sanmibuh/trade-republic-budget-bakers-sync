@@ -204,14 +204,24 @@ jobs:
           </details>
           <!-- ci-results-comment -->"
 
-          # Delete ALL existing ci-results comments (handles duplicates) and post a fresh one.
-          # Concurrency group ensures runs are serialized, preventing new duplicates.
-          gh api \
+          # Upsert: update existing comment if present, otherwise create.
+          # Also clean up any accidental duplicates (keep first, delete rest).
+          COMMENT_IDS=$(gh api \
             "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments?per_page=100" \
-            --jq '[.[] | select(.body | contains("<!-- ci-results-comment -->")) | .id][]' \
-          | while read -r comment_id; do
-              gh api --method DELETE \
-                "repos/${{ github.repository }}/issues/comments/${comment_id}"
-            done
+            --jq '[.[] | select(.body | contains("<!-- ci-results-comment -->")) | .id][]')
 
-          gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY"
+          FIRST_ID=$(echo "$COMMENT_IDS" | head -1)
+
+          if [ -n "$FIRST_ID" ]; then
+            # Update the first comment in-place (no delete → no duplicate window)
+            gh api --method PATCH \
+              "repos/${{ github.repository }}/issues/comments/${FIRST_ID}" \
+              -f body="$BODY" > /dev/null
+            # Delete any extra duplicates beyond the first
+            echo "$COMMENT_IDS" | tail -n +2 | while read -r dup_id; do
+              gh api --method DELETE \
+                "repos/${{ github.repository }}/issues/comments/${dup_id}"
+            done
+          else
+            gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY"
+          fi
