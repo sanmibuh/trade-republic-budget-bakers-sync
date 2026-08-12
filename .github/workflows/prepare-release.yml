@@ -57,11 +57,7 @@ jobs:
             COMMITS="<!-- add release notes here -->"
           fi
 
-          NEW_SECTION="## [${NEW}] - ${TODAY}
-
-${COMMITS}
-
-"
+          printf -v NEW_SECTION "## [%s] - %s\n\n%s\n\n" "$NEW" "$TODAY" "$COMMITS"
 
           # Prepend the new section after the header (after the second blank line following "The format is based on...")
           awk -v section="$NEW_SECTION" '
