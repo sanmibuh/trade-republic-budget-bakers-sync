@@ -1,0 +1,19 @@
+CONTRIBUTING.md
+  s_3ee5343b24be88::t_db85a7ca60f816 1-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "04413cbd5a0afc47a744d569522a96b4c4f24eaa",
+  "prompts": {},
+  "sessions": {
+    "s_3ee5343b24be88": {
+      "agent_id": {
+        "tool": "github-copilot-cli",
+        "id": "6dd005a2-6751-4469-8015-7b2811c947f0",
+        "model": "unknown"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
