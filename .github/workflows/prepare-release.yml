@@ -45,6 +45,36 @@ jobs:
       - name: Update VERSION
         run: echo "${{ steps.version.outputs.new }}" > VERSION
 
+      - name: Update CHANGELOG
+        run: |
+          NEW="${{ steps.version.outputs.new }}"
+          CURRENT="${{ steps.version.outputs.current }}"
+          TODAY=$(date -u +%Y-%m-%d)
+
+          # Collect commits between current tag and HEAD
+          COMMITS=$(git log "v${CURRENT}..HEAD" --pretty=format:"- %s" 2>/dev/null || echo "<!-- add release notes here -->")
+          if [ -z "$COMMITS" ]; then
+            COMMITS="<!-- add release notes here -->"
+          fi
+
+          NEW_SECTION="## [${NEW}] - ${TODAY}
+
+${COMMITS}
+
+"
+
+          # Prepend the new section after the header (after the second blank line following "The format is based on...")
+          awk -v section="$NEW_SECTION" '
+            /^The format is based on/ && !inserted {
+              print
+              print ""
+              printf "%s", section
+              inserted=1
+              next
+            }
+            { print }
+          ' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+
       - name: Open PR
         env:
           GH_TOKEN: ${{ secrets.PAT_RELEASE }}
@@ -57,7 +87,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add VERSION
+          git add VERSION CHANGELOG.md
           git commit -m "[release-${NEW}]: chore: update version to ${NEW}"
           git push origin "$BRANCH" --force-with-lease 2>/dev/null || git push origin "$BRANCH" --force
 
@@ -72,6 +102,8 @@ jobs:
             --body "## Release ${NEW} (${BUMP})
 
           Bumps version \`${CURRENT}\` → \`${NEW}\`.
+
+          **Before merging, please review the new \`CHANGELOG.md\` section** at the top of the file and fill in / refine the release notes.
 
           **Merging this PR will:**
           - Trigger \`release.yml\` → create tag \`v${NEW}\` + GitHub Release
