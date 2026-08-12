@@ -11,6 +11,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    concurrency:
+      group: ci-comment-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: write
       pull-requests: write
@@ -195,9 +198,10 @@ jobs:
           </details>
           <!-- ci-results-comment -->"
 
-          # Delete existing ci-results comment (if any) and post a fresh one
+          # Delete existing ci-results comment (if any) and post a fresh one at the bottom.
+          # Concurrency group ensures runs are serialized, preventing duplicate comments.
           EXISTING_ID=$(gh api \
-            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments?per_page=100" \
             --jq '[.[] | select(.body | contains("<!-- ci-results-comment -->"))] | last | .id // empty')
 
           if [ -n "$EXISTING_ID" ]; then
