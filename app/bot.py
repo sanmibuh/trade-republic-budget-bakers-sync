@@ -44,6 +44,7 @@ Interaction flow for /backup with args:
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import threading
 import time
@@ -74,6 +75,76 @@ _BACKUP_ICONS: dict[str, str] = {
     "monthly": "📅",
     "yearly":  "📆",
 }
+
+_LAST_SYNC_SUMMARY_SCRIPT = """
+import json
+import re
+import sqlite3
+from collections import deque
+from pathlib import Path
+
+result = {
+    "status": None,
+    "timestamp": None,
+    "synced": None,
+    "failed": None,
+    "excluded": None,
+    "synced_at": None,
+}
+data_dir = Path("/app/data")
+log_path = data_dir / "sync.log"
+
+if log_path.exists():
+    try:
+        with log_path.open(encoding="utf-8", errors="replace") as fh:
+            for raw_line in reversed(deque(fh, maxlen=200)):
+                line = raw_line.strip()
+                timestamp = line[:19] if len(line) >= 19 else None
+                match = re.search(r"synced=(\\d+)\\s+excluded=(\\d+)\\s+failed=(\\d+)", line)
+                if "Sync complete." in line and match:
+                    synced = int(match.group(1))
+                    excluded = int(match.group(2))
+                    failed = int(match.group(3))
+                    result["status"] = "success"
+                    if failed:
+                        result["status"] = "failed" if synced == 0 else "partial"
+                    result["timestamp"] = timestamp
+                    result["synced"] = synced
+                    result["failed"] = failed
+                    result["excluded"] = excluded
+                    break
+                if any(
+                    marker in line
+                    for marker in (
+                        "Error syncing events to wallet",
+                        "Authentication error",
+                        "Unexpected error during TR connection/fetch",
+                        "Login failed",
+                    )
+                ):
+                    result["status"] = "failed"
+                    result["timestamp"] = timestamp
+                    break
+    except Exception:
+        pass
+
+db_path = data_dir / "sync.db"
+if db_path.exists():
+    try:
+        conn = sqlite3.connect(db_path)
+        row = conn.execute("SELECT MAX(synced_at) FROM processed_events").fetchone()
+        if row and row[0]:
+            result["synced_at"] = row[0]
+    except Exception:
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+print(json.dumps(result))
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -341,15 +412,19 @@ class TelegramBot:
 
         lines = ["📋 *Instance status*\n"]
         for inst in self._cfg.instances.values():
-            auth = _docker_check_session(inst.container_name)
+            running_state = _docker_container_status(inst.container_name)
+            auth = _docker_check_session(inst.container_name) if running_state == "running" else None
             if auth is True:
                 icon = "✅"
             elif auth is False:
                 icon = "⚠️"
             else:
                 icon = "❓"
+            last_sync = _docker_last_sync_summary(inst.container_name) or "unavailable"
             lines.append(
-                f"• *{_esc(inst.name)}* — `{_esc(inst.container_name)}` {icon}"
+                f"• *{_esc(inst.name)}* — `{_esc(inst.container_name)}`"
+                f"\n  state: *{_esc(running_state or 'unknown')}* · auth: {icon}"
+                f"\n  last: {_esc(last_sync)}"
             )
 
         if self._cfg.backup_container:
@@ -606,6 +681,67 @@ def _docker_check_session(container_name: str) -> bool | None:
     except Exception as exc:  # noqa: BLE001
         log.debug("check-session exec failed for %s: %s", container_name, exc)
         return None
+
+
+def _docker_container_status(container_name: str) -> str | None:
+    """Return the Docker container status for *container_name*."""
+    try:
+        client = docker.from_env()
+        container = client.containers.get(container_name)
+        return container.status
+    except Exception as exc:  # noqa: BLE001
+        log.debug("container status lookup failed for %s: %s", container_name, exc)
+        return None
+
+
+def _format_sync_timestamp(raw: str) -> str:
+    try:
+        if "T" in raw:
+            parsed = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        else:
+            parsed = datetime.datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=datetime.timezone.utc
+            )
+        return parsed.astimezone(datetime.timezone.utc).strftime("%Y/%m/%d %H:%M UTC")
+    except ValueError:
+        return raw
+
+
+def _docker_last_sync_summary(container_name: str) -> str | None:
+    """Return a human-readable summary of the most recent sync activity."""
+    try:
+        client = docker.from_env()
+        container = client.containers.get(container_name)
+        exit_code, output = container.exec_run(["python", "-c", _LAST_SYNC_SUMMARY_SCRIPT])
+        if exit_code != 0:
+            return None
+        payload = json.loads(output.decode(errors="replace"))
+    except (json.JSONDecodeError, Exception) as exc:  # noqa: BLE001
+        log.debug("last sync lookup failed for %s: %s", container_name, exc)
+        return None
+
+    status = payload.get("status")
+    timestamp = payload.get("timestamp")
+    if status in {"success", "partial", "failed"}:
+        icon = {"success": "✅", "partial": "⚠️", "failed": "❌"}[status]
+        parts = [f"{icon} {status}"]
+        if timestamp:
+            parts[0] = f"{parts[0]} at {_format_sync_timestamp(timestamp)}"
+        synced = payload.get("synced")
+        failed = payload.get("failed")
+        excluded = payload.get("excluded")
+        if synced is not None:
+            parts.append(f"saved {synced}")
+        if failed is not None:
+            parts.append(f"failed {failed}")
+        if excluded is not None:
+            parts.append(f"excluded {excluded}")
+        return " · ".join(parts)
+
+    synced_at = payload.get("synced_at")
+    if synced_at:
+        return f"✅ last saved event at {_format_sync_timestamp(synced_at)}"
+    return None
 
 
 def _docker_logs_today(container_name: str, since: datetime.datetime) -> str:

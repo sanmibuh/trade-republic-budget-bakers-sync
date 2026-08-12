@@ -11,7 +11,9 @@ from app.bot import (
     InstanceConfig,
     TelegramBot,
     _docker_check_session,
+    _docker_container_status,
     _docker_exec_silent,
+    _docker_last_sync_summary,
 )
 
 # ---------------------------------------------------------------------------
@@ -1305,6 +1307,50 @@ def test_docker_check_session_invokes_check_session_command():
 
 
 # ---------------------------------------------------------------------------
+# _docker_container_status / _docker_last_sync_summary
+# ---------------------------------------------------------------------------
+
+def test_docker_container_status_returns_running_state():
+    client = MagicMock()
+    container = MagicMock()
+    container.status = "running"
+    client.containers.get.return_value = container
+    with patch("app.bot.docker.from_env", return_value=client):
+        assert _docker_container_status("my-container") == "running"
+
+
+def test_docker_container_status_returns_none_on_exception():
+    client = MagicMock()
+    client.containers.get.side_effect = Exception("boom")
+    with patch("app.bot.docker.from_env", return_value=client):
+        assert _docker_container_status("my-container") is None
+
+
+def test_docker_last_sync_summary_parses_success_from_log():
+    client = _make_docker_client(
+        output=b'{"status":"success","timestamp":"2026-08-11 10:00:00","synced":3,"failed":0,"excluded":1,"synced_at":null}'
+    )
+    with patch("app.bot.docker.from_env", return_value=client):
+        result = _docker_last_sync_summary("my-container")
+    assert result == "✅ success at 2026/08/11 10:00 UTC · saved 3 · failed 0 · excluded 1"
+
+
+def test_docker_last_sync_summary_falls_back_to_last_synced_at():
+    client = _make_docker_client(
+        output=b'{"status":null,"timestamp":null,"synced":null,"failed":null,"excluded":null,"synced_at":"2026-08-11T10:00:00+00:00"}'
+    )
+    with patch("app.bot.docker.from_env", return_value=client):
+        result = _docker_last_sync_summary("my-container")
+    assert result == "✅ last saved event at 2026/08/11 10:00 UTC"
+
+
+def test_docker_last_sync_summary_returns_none_on_invalid_payload():
+    client = _make_docker_client(output=b"not json")
+    with patch("app.bot.docker.from_env", return_value=client):
+        assert _docker_last_sync_summary("my-container") is None
+
+
+# ---------------------------------------------------------------------------
 # _cmd_status — auth state decoration
 # ---------------------------------------------------------------------------
 
@@ -1312,19 +1358,25 @@ def test_cmd_status_shows_checkmark_for_authenticated_instance():
     """✅ icon when the session check passes for an instance."""
     bot = _bot()
     with (
+        patch("app.bot._docker_container_status", return_value="running"),
         patch("app.bot._docker_check_session", return_value=True),
+        patch("app.bot._docker_last_sync_summary", return_value="✅ success at 2026/08/11 10:00 UTC"),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._cmd_status([])
     msg = mock_send.call_args.args[0]
     assert "✅" in msg
+    assert "running" in msg
+    assert "last: ✅ success at 2026/08/11 10:00 UTC" in msg
 
 
 def test_cmd_status_shows_warning_for_unauthenticated_instance():
     """⚠️ icon when the session check fails for an instance."""
     bot = _bot()
     with (
+        patch("app.bot._docker_container_status", return_value="running"),
         patch("app.bot._docker_check_session", return_value=False),
+        patch("app.bot._docker_last_sync_summary", return_value="✅ success at 2026/08/11 10:00 UTC"),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._cmd_status([])
@@ -1336,19 +1388,25 @@ def test_cmd_status_shows_question_mark_for_unavailable_instance():
     """❓ icon when the container is unreachable."""
     bot = _bot()
     with (
+        patch("app.bot._docker_container_status", return_value=None),
         patch("app.bot._docker_check_session", return_value=None),
+        patch("app.bot._docker_last_sync_summary", return_value=None),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._cmd_status([])
     msg = mock_send.call_args.args[0]
     assert "❓" in msg
+    assert "unknown" in msg
+    assert "last: unavailable" in msg
 
 
 def test_cmd_status_checks_each_instance():
     """_docker_check_session must be called once per configured instance."""
     bot = _bot()
     with (
+        patch("app.bot._docker_container_status", return_value="running"),
         patch("app.bot._docker_check_session", return_value=True) as mock_check,
+        patch("app.bot._docker_last_sync_summary", return_value="✅ success at 2026/08/11 10:00 UTC"),
         patch.object(bot, "_send_message"),
     ):
         bot._cmd_status([])
