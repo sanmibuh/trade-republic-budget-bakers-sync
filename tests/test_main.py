@@ -546,13 +546,14 @@ def test_fetch_events_success_returns_events():
 
 def test_process_results_marks_successful_events(tmp_path):
     from app.main import _process_results
+    from app.notifier import Notifier
 
     event = {"id": "ev1", "timestamp": "2024-01-01T00:00:00Z"}
     results = [{"inputIndex": 0}]  # no "error" key → success
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = _process_results(results, [event], event_record_indices, repo)
+        counts = _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
         unprocessed = repo.filter_unprocessed([event])
 
     assert counts.synced == 1
@@ -562,13 +563,14 @@ def test_process_results_marks_successful_events(tmp_path):
 
 def test_process_results_counts_failures(tmp_path):
     from app.main import _process_results
+    from app.notifier import Notifier
 
     event = {"id": "ev1", "timestamp": "2024-01-01T00:00:00Z"}
     results = [{"inputIndex": 0, "error": "bad record"}]
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = _process_results(results, [event], event_record_indices, repo)
+        counts = _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
         unprocessed = repo.filter_unprocessed([event])
 
     assert counts.synced == 0
@@ -578,13 +580,14 @@ def test_process_results_counts_failures(tmp_path):
 
 def test_process_results_skips_events_with_no_records(tmp_path):
     from app.main import _process_results
+    from app.notifier import Notifier
 
     event = {"id": "ev1", "timestamp": "2024-01-01T00:00:00Z"}
     results = []
     event_record_indices = [[]]  # event produced no records
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = _process_results(results, [event], event_record_indices, repo)
+        counts = _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
 
     assert counts.synced == 0
     assert counts.failed == 0
@@ -849,13 +852,14 @@ def test_get_wallet_record_id_returns_none_when_id_is_null(tmp_path):
 
 def test_process_results_passes_wallet_record_id(tmp_path):
     from app.main import _process_results
+    from app.notifier import Notifier
 
     event = {"id": "ev-wrid", "timestamp": "2024-01-01T00:00:00Z"}
     results = [{"inputIndex": 0, "id": "wallet-record-1"}]
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        _process_results(results, [event], event_record_indices, repo)
+        _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
         wallet_id = repo.get_wallet_record_id(event)
 
     assert wallet_id == "wallet-record-1"
@@ -864,6 +868,7 @@ def test_process_results_passes_wallet_record_id(tmp_path):
 def test_process_results_stores_joined_ids_for_multi_record_event(tmp_path):
     """An event that maps to 2 Wallet records stores both IDs joined by comma."""
     from app.main import _process_results
+    from app.notifier import Notifier
 
     event = {"id": "ev-multi", "timestamp": "2024-01-01T00:00:00Z"}
     results = [
@@ -873,7 +878,7 @@ def test_process_results_stores_joined_ids_for_multi_record_event(tmp_path):
     event_record_indices = [[0, 1]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        _process_results(results, [event], event_record_indices, repo)
+        _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
         wallet_id = repo.get_wallet_record_id(event)
 
     assert wallet_id == "wid-1,wid-2"
@@ -882,16 +887,50 @@ def test_process_results_stores_joined_ids_for_multi_record_event(tmp_path):
 def test_process_results_no_wallet_id_when_result_has_no_id(tmp_path):
     """If the API result has no 'id' field, wallet_record_id is stored as None."""
     from app.main import _process_results
+    from app.notifier import Notifier
 
     event = {"id": "ev-noid", "timestamp": "2024-01-01T00:00:00Z"}
     results = [{"inputIndex": 0}]  # no "id" field
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        _process_results(results, [event], event_record_indices, repo)
+        _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
         wallet_id = repo.get_wallet_record_id(event)
 
     assert wallet_id is None
+
+
+def test_process_results_missing_index_counts_as_failure(tmp_path):
+    """An event whose record index is absent from API results is not marked processed."""
+    from app.main import _process_results
+    from app.notifier import Notifier
+
+    event = {"id": "ev-missing", "timestamp": "2024-01-01T00:00:00Z"}
+    results = []  # API returned no results at all
+    event_record_indices = [[0]]
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        counts = _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
+        unprocessed = repo.filter_unprocessed([event])
+
+    assert counts.failed == 1
+    assert unprocessed == [event]
+
+
+def test_process_results_missing_index_notifies(tmp_path):
+    """A missing result index triggers a warning via notifier."""
+    from app.main import _process_results
+    from app.notifier import Notifier
+
+    event = {"id": "ev-notify", "timestamp": "2024-01-01T00:00:00Z"}
+    results = []
+    event_record_indices = [[0]]
+    notifier = MagicMock(spec=Notifier)
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        _process_results(results, [event], event_record_indices, repo, notifier)
+
+    notifier.missing_api_result.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

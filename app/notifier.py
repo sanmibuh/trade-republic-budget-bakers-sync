@@ -171,6 +171,17 @@ class Notifier:
             "Please report this type so a proper handler can be added\\."
         )
 
+    def missing_api_result(self, event_id: str, missing_indices: list[int]) -> bool:
+        safe = self._safe_owner()
+        safe_id = _escape_markdown(event_id)
+        safe_indices = _escape_markdown(", ".join(str(i) for i in missing_indices))
+        return self._send(
+            "⚠️ *Trade Republic Sync: Incomplete API Response*\n\n"
+            f"Owner: *{safe}*\n"
+            f"Event `{safe_id}` has no result for record index\\(es\\): `{safe_indices}`\\.\n"
+            "The event has not been marked as processed and will be retried\\."
+        )
+
     def sync_complete(
         self,
         *,

@@ -98,7 +98,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `processed_events` table in SQLite: `(event_id, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id)`.
 - `INSERT OR IGNORE` — idempotent. Re-running never creates duplicate records in BudgetBakers.
 - `wallet_record_id` stores the Wallet API record ID returned by `post_records` on success. For events that produce multiple records (e.g. investment with cash + portfolio split), IDs are stored comma-separated. NULL for zero-amount excluded events. Enables insert-vs-update decisions when reprocessing a date range.
-- Schema migrations are applied automatically on each `EventRepository` open via `PRAGMA table_info` + `ALTER TABLE IF NOT EXISTS` — safe to run repeatedly, no migration state needed.
+- Schema migrations are applied automatically on each `EventRepository` open via `PRAGMA table_info` + `ALTER TABLE` — safe to run repeatedly, no migration state needed.
 - Old records without `details` are not retroactively updated (correct by design).
 
 ---

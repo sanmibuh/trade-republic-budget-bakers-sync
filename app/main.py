@@ -177,6 +177,7 @@ def _process_results(
     new_events: list[dict[str, Any]],
     event_record_indices: list[list[int]],
     repo: EventRepository,
+    notifier: Notifier,
 ) -> _SyncCounts:
     """Interpret API results, mark successful events as processed, log failures."""
     results_by_index = {r.get("inputIndex", i): r for i, r in enumerate(results)}
@@ -187,16 +188,23 @@ def _process_results(
         record_indices = event_record_indices[event_idx]
         if not record_indices:
             continue
+        missing = [i for i in record_indices if i not in results_by_index]
+        if missing:
+            eid = dedup_event_id(event)
+            log.error("Event %s has no API result for record index(es): %s", eid, missing)
+            notifier.missing_api_result(eid, missing)
+            failed += 1
+            continue
         failures = [
             results_by_index[i]
             for i in record_indices
-            if i in results_by_index and results_by_index[i].get("error")
+            if results_by_index[i].get("error")
         ]
         if not failures:
             wallet_ids = [
                 results_by_index[i]["id"]
                 for i in record_indices
-                if i in results_by_index and results_by_index[i].get("id")
+                if results_by_index[i].get("id")
             ]
             wallet_record_id = ",".join(wallet_ids) if wallet_ids else None
             repo.mark_processed(event, wallet_record_id=wallet_record_id)
@@ -247,7 +255,7 @@ def run() -> int:
             if batch.records:
                 results = WalletClient(api_key=cfg.wallet_api_key).post_records(batch.records)
                 log.debug("API results: %s", results)
-                counts = _process_results(results, new_events, batch.event_record_indices, repo)
+                counts = _process_results(results, new_events, batch.event_record_indices, repo, notifier)
                 counts.excluded = batch.excluded_count
 
             log.info("Sync complete. synced=%d excluded=%d failed=%d", counts.synced, counts.excluded, counts.failed)

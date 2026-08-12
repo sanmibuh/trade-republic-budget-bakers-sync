@@ -80,7 +80,8 @@ class EventRepository:
         with EventRepository(db_path) as repo:
             repo.purge_old_records()
             new_events = repo.filter_unprocessed(events)
-            repo.mark_processed(event, wallet_record_id="wid-abc")
+            for event in new_events:
+                repo.mark_processed(event, wallet_record_id="wid-abc")
             repo.commit()
     """
 
