@@ -160,6 +160,27 @@ class EventRepository:
         ).fetchone()
         return row[0] if row else None
 
+    def is_processed(self, event_id: str) -> bool:
+        """Return True if the given event_id has been marked as processed."""
+        row = self._conn.execute(
+            "SELECT 1 FROM processed_events WHERE event_id = ?", (event_id,)
+        ).fetchone()
+        return row is not None
+
+    def get_raw(self, event_id: str) -> str | None:
+        """Return the stored raw JSON for the given event_id, or None if not found."""
+        row = self._conn.execute(
+            "SELECT raw FROM processed_events WHERE event_id = ?", (event_id,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def count_processed(self) -> int:
+        """Return the total number of processed events stored."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM processed_events"
+        ).fetchone()
+        return row[0]
+
     def purge_old_records(self, ttl_days: int = _TTL_DAYS) -> int:
         """Delete records synced more than ttl_days ago. Returns number of rows deleted."""
         cutoff = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
