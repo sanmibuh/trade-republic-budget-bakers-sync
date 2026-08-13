@@ -24,6 +24,7 @@ Never write implementation code without a corresponding test. Coverage should st
 - **Clean Code**: small functions, descriptive names, no magic numbers, no dead code.
 - **OOP**: encapsulate state, prefer methods over module-level functions when state is involved.
 - **DRY**: extract shared logic; never copy-paste across modules.
+- Run `ruff format .` to auto-format all code before considering any task done.
 - Run `ruff check .` before considering any task done. Fix all warnings — do not suppress with `noqa`
   unless genuinely justified.
 
