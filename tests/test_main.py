@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.config import BackupConfig, Config
+from app.config import LABELABLE_EVENT_TYPES, BackupConfig, Config
 from app.persistence import (
     EventRepository,
     dedup_event_id,
@@ -32,6 +32,7 @@ def _set_sync_env(monkeypatch, **overrides: str) -> None:
     defaults.update(overrides)
     for key, value in defaults.items():
         monkeypatch.setenv(key, value)
+    monkeypatch.delenv("ALLOW_INSECURE_SSL", raising=False)
 
 
 # required env var — present
@@ -39,6 +40,7 @@ def _set_sync_env(monkeypatch, **overrides: str) -> None:
 
 def test_required_env_present(monkeypatch):
     monkeypatch.setenv("WALLET_API_KEY", "my-key")
+    monkeypatch.delenv("ALLOW_INSECURE_SSL", raising=False)
     cfg = BackupConfig.from_env()
     assert cfg.wallet_api_key == "my-key"
 
@@ -48,6 +50,7 @@ def test_required_env_present(monkeypatch):
 
 def test_required_env_missing(monkeypatch):
     monkeypatch.delenv("WALLET_API_KEY", raising=False)
+    monkeypatch.delenv("ALLOW_INSECURE_SSL", raising=False)
     with pytest.raises(ValueError, match="WALLET_API_KEY"):
         BackupConfig.from_env()
 
@@ -57,6 +60,7 @@ def test_required_env_missing(monkeypatch):
 
 def test_required_env_blank(monkeypatch):
     monkeypatch.setenv("WALLET_API_KEY", "   ")
+    monkeypatch.delenv("ALLOW_INSECURE_SSL", raising=False)
     with pytest.raises(ValueError, match="WALLET_API_KEY"):
         BackupConfig.from_env()
 
@@ -1073,15 +1077,14 @@ def test_process_results_missing_index_notifies(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
 # Config.from_env().label_ids — LABEL_* env var parsing (public API)
 # ---------------------------------------------------------------------------
 
 
 def test_read_label_ids_returns_empty_when_no_env(monkeypatch):
     _set_sync_env(monkeypatch)
-    monkeypatch.delenv("LABEL_BANK_TRANSACTION_INCOMING", raising=False)
-    monkeypatch.delenv("LABEL_BUY_ORDER", raising=False)
+    for event_type in LABELABLE_EVENT_TYPES:
+        monkeypatch.delenv(f"LABEL_{event_type}", raising=False)
     assert Config.from_env().label_ids == {}
 
 
