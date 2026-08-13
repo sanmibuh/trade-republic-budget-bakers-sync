@@ -176,9 +176,7 @@ class EventRepository:
 
     def count_processed(self) -> int:
         """Return the total number of processed events stored."""
-        row = self._conn.execute(
-            "SELECT COUNT(*) FROM processed_events"
-        ).fetchone()
+        row = self._conn.execute("SELECT COUNT(*) FROM processed_events").fetchone()
         return row[0]
 
     def purge_old_records(self, ttl_days: int = _TTL_DAYS) -> int:
