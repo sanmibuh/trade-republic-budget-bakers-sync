@@ -442,13 +442,13 @@ def test_filter_by_lookback_multiple_events():
 
 
 # ---------------------------------------------------------------------------
-# _build_batch — unknown event type triggers notifier
+# SyncRunner.build_batch — unknown event type triggers notifier
 # ---------------------------------------------------------------------------
 
 
 def test_build_batch_notifies_on_unknown_event_type(tmp_path):
     from app.config import Config
-    from app.main import _build_batch
+    from app.main import SyncRunner
     from app.notifier import Notifier
 
     cfg = MagicMock(spec=Config)
@@ -457,6 +457,7 @@ def test_build_batch_notifies_on_unknown_event_type(tmp_path):
     cfg.label_ids = {}
 
     notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
 
     event = {
         "eventType": "TOTALLY_NEW_TYPE",
@@ -464,14 +465,14 @@ def test_build_batch_notifies_on_unknown_event_type(tmp_path):
         "amount": "5.00",
     }
     with EventRepository(tmp_path / "test.db") as repo:
-        _build_batch([event], cfg, repo, notifier)
+        runner.build_batch([event], repo)
 
     notifier.unknown_event_type.assert_called_once_with("TOTALLY_NEW_TYPE")
 
 
 def test_build_batch_no_notification_for_known_event_type(tmp_path):
     from app.config import Config
-    from app.main import _build_batch
+    from app.main import SyncRunner
     from app.notifier import Notifier
 
     cfg = MagicMock(spec=Config)
@@ -480,6 +481,7 @@ def test_build_batch_no_notification_for_known_event_type(tmp_path):
     cfg.label_ids = {}
 
     notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
 
     event = {
         "eventType": "BUY_ORDER",
@@ -487,19 +489,19 @@ def test_build_batch_no_notification_for_known_event_type(tmp_path):
         "amount": "100.00",
     }
     with EventRepository(tmp_path / "test.db") as repo:
-        _build_batch([event], cfg, repo, notifier)
+        runner.build_batch([event], repo)
 
     notifier.unknown_event_type.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# _build_batch — zero-amount events are excluded
+# SyncRunner.build_batch — zero-amount events are excluded
 # ---------------------------------------------------------------------------
 
 
 def test_build_batch_excludes_zero_amount_event(tmp_path):
     from app.config import Config
-    from app.main import _build_batch
+    from app.main import SyncRunner
     from app.notifier import Notifier
 
     cfg = MagicMock(spec=Config)
@@ -508,6 +510,7 @@ def test_build_batch_excludes_zero_amount_event(tmp_path):
     cfg.label_ids = {}
 
     notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
 
     # A zero-amount event produces no records → should be excluded
     event = {
@@ -517,31 +520,32 @@ def test_build_batch_excludes_zero_amount_event(tmp_path):
         "amount": "0.00",
     }
     with EventRepository(tmp_path / "test.db") as repo:
-        batch = _build_batch([event], cfg, repo, notifier)
+        batch = runner.build_batch([event], repo)
 
     assert batch.excluded_count == 1
     assert batch.records == []
 
 
 # ---------------------------------------------------------------------------
-# _fetch_events — error branches
+# SyncRunner.fetch_events — error branches
 # ---------------------------------------------------------------------------
 
 
 def test_fetch_events_login_failed_exits():
     from unittest.mock import patch
 
-    from app.main import _fetch_events
+    from app.main import SyncRunner
     from app.tr_client import LoginFailedError
 
     cfg = MagicMock()
     notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
     since = datetime.now(UTC)
 
     with patch("app.main.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = LoginFailedError("bad pin")
         with pytest.raises(SystemExit) as exc_info:
-            _fetch_events(cfg, notifier, since)
+            runner.fetch_events(since)
 
     assert exc_info.value.code == 1
     notifier.login_failed.assert_called_once()
@@ -550,17 +554,18 @@ def test_fetch_events_login_failed_exits():
 def test_fetch_events_session_expired_exits():
     from unittest.mock import patch
 
-    from app.main import _fetch_events
+    from app.main import SyncRunner
     from app.tr_client import SessionExpiredError
 
     cfg = MagicMock()
     notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
     since = datetime.now(UTC)
 
     with patch("app.main.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = SessionExpiredError("needs bootstrap")
         with pytest.raises(SystemExit) as exc_info:
-            _fetch_events(cfg, notifier, since)
+            runner.fetch_events(since)
 
     assert exc_info.value.code == 1
     notifier.authentication_required.assert_called_once()
@@ -572,10 +577,11 @@ def test_fetch_events_http_401_exits():
 
     from requests import HTTPError
 
-    from app.main import _fetch_events
+    from app.main import SyncRunner
 
     cfg = MagicMock()
     notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
     since = datetime.now(UTC)
 
     err = HTTPError()
@@ -585,7 +591,7 @@ def test_fetch_events_http_401_exits():
     with patch("app.main.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = err
         with pytest.raises(SystemExit) as exc_info:
-            _fetch_events(cfg, notifier, since)
+            runner.fetch_events(since)
 
     assert exc_info.value.code == 1
     notifier.authentication_required.assert_called_once()
@@ -596,10 +602,11 @@ def test_fetch_events_http_non_401_reraises():
 
     from requests import HTTPError
 
-    from app.main import _fetch_events
+    from app.main import SyncRunner
 
     cfg = MagicMock()
     notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
     since = datetime.now(UTC)
 
     err = HTTPError()
@@ -609,7 +616,7 @@ def test_fetch_events_http_non_401_reraises():
     with patch("app.main.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = err
         with pytest.raises(HTTPError):
-            _fetch_events(cfg, notifier, since)
+            runner.fetch_events(since)
 
     notifier.error.assert_called_once_with(err)
 
@@ -617,17 +624,18 @@ def test_fetch_events_http_non_401_reraises():
 def test_fetch_events_unexpected_exception_reraises():
     from unittest.mock import patch
 
-    from app.main import _fetch_events
+    from app.main import SyncRunner
 
     cfg = MagicMock()
     notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
     since = datetime.now(UTC)
 
     boom = RuntimeError("unexpected")
     with patch("app.main.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = boom
         with pytest.raises(RuntimeError):
-            _fetch_events(cfg, notifier, since)
+            runner.fetch_events(since)
 
     notifier.error.assert_called_once_with(boom)
 
@@ -635,37 +643,40 @@ def test_fetch_events_unexpected_exception_reraises():
 def test_fetch_events_success_returns_events():
     from unittest.mock import patch
 
-    from app.main import _fetch_events
+    from app.main import SyncRunner
 
     cfg = MagicMock()
     notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
     since = datetime.now(UTC)
     fake_events = [{"id": "e1"}, {"id": "e2"}]
 
     with patch("app.main.TRClient") as MockTR:
         MockTR.return_value.fetch_timeline_events.return_value = fake_events
-        result = _fetch_events(cfg, notifier, since)
+        result = runner.fetch_events(since)
 
     assert result == fake_events
 
 
 # ---------------------------------------------------------------------------
-# _process_results
+# SyncRunner.process_results
 # ---------------------------------------------------------------------------
 
 
 def test_process_results_marks_successful_events(tmp_path):
-    from app.main import _process_results
+    from app.main import SyncRunner
     from app.notifier import Notifier
+
+    cfg = MagicMock()
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
 
     event = {"id": "ev1", "timestamp": "2024-01-01T00:00:00Z"}
     results = [{"inputIndex": 0}]  # no "error" key → success
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = _process_results(
-            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
-        )
+        counts = runner.process_results(results, [event], event_record_indices, repo)
         unprocessed = repo.filter_unprocessed([event])
 
     assert counts.synced == 1
@@ -674,17 +685,19 @@ def test_process_results_marks_successful_events(tmp_path):
 
 
 def test_process_results_counts_failures(tmp_path):
-    from app.main import _process_results
+    from app.main import SyncRunner
     from app.notifier import Notifier
+
+    cfg = MagicMock()
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
 
     event = {"id": "ev1", "timestamp": "2024-01-01T00:00:00Z"}
     results = [{"inputIndex": 0, "error": "bad record"}]
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = _process_results(
-            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
-        )
+        counts = runner.process_results(results, [event], event_record_indices, repo)
         unprocessed = repo.filter_unprocessed([event])
 
     assert counts.synced == 0
@@ -693,17 +706,19 @@ def test_process_results_counts_failures(tmp_path):
 
 
 def test_process_results_skips_events_with_no_records(tmp_path):
-    from app.main import _process_results
+    from app.main import SyncRunner
     from app.notifier import Notifier
+
+    cfg = MagicMock()
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
 
     event = {"id": "ev1", "timestamp": "2024-01-01T00:00:00Z"}
     results = []
     event_record_indices = [[]]  # event produced no records
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = _process_results(
-            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
-        )
+        counts = runner.process_results(results, [event], event_record_indices, repo)
 
     assert counts.synced == 0
     assert counts.failed == 0
@@ -732,29 +747,32 @@ def test_run_returns_zero_on_success(tmp_path):
         patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.setup_logging"),
         patch("app.main.Notifier"),
-        patch("app.main._fetch_events", return_value=fake_events),
-        patch("app.main.filter_by_lookback", return_value=fake_events),
-        patch("app.main._build_batch") as mock_batch,
-        patch("app.main.WalletClient") as mock_wallet,
-        patch("app.main._process_results") as mock_results,
+        patch("app.main.SyncRunner") as mock_runner_cls,
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
         mock_cfg_cls.return_value = cfg
 
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = fake_events
+
+        from app.main import _SyncCounts
+
+        runner.process_results.return_value = _SyncCounts(synced=1, failed=0)
+
         batch = MagicMock()
         batch.records = [{"amount": 10}]
         batch.excluded_count = 0
         batch.event_record_indices = [[0]]
-        mock_batch.return_value = batch
+        runner.build_batch.return_value = batch
 
-        from app.main import _SyncCounts
-
-        mock_results.return_value = _SyncCounts(synced=1, failed=0)
-        mock_wallet.return_value.post_records.return_value = [{}]
-
-        result = run()
+        with (
+            patch("app.main.filter_by_lookback", return_value=fake_events),
+            patch("app.main.WalletClient") as mock_wallet,
+        ):
+            mock_wallet.return_value.post_records.return_value = [{}]
+            result = run()
 
     assert result == 0
 
@@ -768,20 +786,22 @@ def test_run_returns_zero_when_no_new_events(tmp_path):
         patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.setup_logging"),
         patch("app.main.Notifier"),
-        patch("app.main._fetch_events", return_value=[]),
+        patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=[]),
-        patch("app.main._build_batch") as mock_batch,
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
         mock_cfg_cls.return_value = cfg
 
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = []
+
         batch = MagicMock()
         batch.records = []
         batch.excluded_count = 0
         batch.event_record_indices = []
-        mock_batch.return_value = batch
+        runner.build_batch.return_value = batch
 
         result = run()
 
@@ -789,16 +809,16 @@ def test_run_returns_zero_when_no_new_events(tmp_path):
 
 
 def test_run_authentication_error_exits(tmp_path):
-    """except AuthenticationError branch in _fetch_events — simulate via patching."""
+    """except AuthenticationError branch in fetch_events — simulate via patching."""
     from unittest.mock import patch
 
-    from app.main import _fetch_events
+    from app.main import SyncRunner
 
     cfg = MagicMock()
     notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
     since = datetime.now(UTC)
 
-    # Import the sentinel class the module uses and raise it
     import app.main as main_module
 
     AuthErr = main_module.AuthenticationError
@@ -806,7 +826,7 @@ def test_run_authentication_error_exits(tmp_path):
     with patch("app.main.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = AuthErr("auth required")
         with pytest.raises(SystemExit) as exc_info:
-            _fetch_events(cfg, notifier, since)
+            runner.fetch_events(since)
 
     assert exc_info.value.code == 1
     notifier.authentication_required.assert_called_once()
@@ -824,20 +844,17 @@ def test_run_wallet_error_notifies_and_reraises(tmp_path):
         patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.setup_logging"),
         patch("app.main.Notifier") as mock_notifier_cls,
-        patch("app.main._fetch_events", return_value=[]),
+        patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=[]),
-        patch("app.main._build_batch") as mock_batch,
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
         mock_cfg_cls.return_value = cfg
 
-        batch = MagicMock()
-        batch.records = [{"amount": 10}]
-        batch.excluded_count = 0
-        batch.event_record_indices = [[0]]
-        mock_batch.side_effect = boom  # simulate error during batch build
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = []
+        runner.build_batch.side_effect = boom  # simulate error during batch build
 
         notifier_instance = mock_notifier_cls.return_value
 
@@ -857,20 +874,22 @@ def test_run_logs_warning_when_sync_complete_not_sent(tmp_path):
         patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.setup_logging"),
         patch("app.main.Notifier") as mock_notifier_cls,
-        patch("app.main._fetch_events", return_value=[]),
+        patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=[]),
-        patch("app.main._build_batch") as mock_batch,
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
         mock_cfg_cls.return_value = cfg
 
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = []
+
         batch = MagicMock()
         batch.records = []
         batch.excluded_count = 0
         batch.event_record_indices = []
-        mock_batch.return_value = batch
+        runner.build_batch.return_value = batch
 
         notifier_instance = mock_notifier_cls.return_value
         notifier_instance.sync_complete.return_value = False  # simulate not sent
@@ -964,22 +983,24 @@ def test_get_wallet_record_id_returns_none_when_id_is_null(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _process_results — passes wallet_record_id to mark_processed
+# SyncRunner.process_results — passes wallet_record_id to mark_processed
 # ---------------------------------------------------------------------------
 
 
 def test_process_results_passes_wallet_record_id(tmp_path):
-    from app.main import _process_results
+    from app.main import SyncRunner
     from app.notifier import Notifier
+
+    cfg = MagicMock()
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
 
     event = {"id": "ev-wrid", "timestamp": "2024-01-01T00:00:00Z"}
     results = [{"inputIndex": 0, "id": "wallet-record-1"}]
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        _process_results(
-            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
-        )
+        runner.process_results(results, [event], event_record_indices, repo)
         wallet_id = repo.get_wallet_record_id(event)
 
     assert wallet_id == "wallet-record-1"
@@ -987,8 +1008,12 @@ def test_process_results_passes_wallet_record_id(tmp_path):
 
 def test_process_results_stores_joined_ids_for_multi_record_event(tmp_path):
     """An event that maps to 2 Wallet records stores both IDs joined by comma."""
-    from app.main import _process_results
+    from app.main import SyncRunner
     from app.notifier import Notifier
+
+    cfg = MagicMock()
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
 
     event = {"id": "ev-multi", "timestamp": "2024-01-01T00:00:00Z"}
     results = [
@@ -998,9 +1023,7 @@ def test_process_results_stores_joined_ids_for_multi_record_event(tmp_path):
     event_record_indices = [[0, 1]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        _process_results(
-            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
-        )
+        runner.process_results(results, [event], event_record_indices, repo)
         wallet_id = repo.get_wallet_record_id(event)
 
     assert wallet_id == "wid-1,wid-2"
@@ -1008,17 +1031,19 @@ def test_process_results_stores_joined_ids_for_multi_record_event(tmp_path):
 
 def test_process_results_no_wallet_id_when_result_has_no_id(tmp_path):
     """If the API result has no 'id' field, wallet_record_id is stored as None."""
-    from app.main import _process_results
+    from app.main import SyncRunner
     from app.notifier import Notifier
+
+    cfg = MagicMock()
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
 
     event = {"id": "ev-noid", "timestamp": "2024-01-01T00:00:00Z"}
     results = [{"inputIndex": 0}]  # no "id" field
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        _process_results(
-            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
-        )
+        runner.process_results(results, [event], event_record_indices, repo)
         wallet_id = repo.get_wallet_record_id(event)
 
     assert wallet_id is None
@@ -1026,17 +1051,19 @@ def test_process_results_no_wallet_id_when_result_has_no_id(tmp_path):
 
 def test_process_results_missing_index_counts_as_failure(tmp_path):
     """An event whose record index is absent from API results is not marked processed."""
-    from app.main import _process_results
+    from app.main import SyncRunner
     from app.notifier import Notifier
+
+    cfg = MagicMock()
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
 
     event = {"id": "ev-missing", "timestamp": "2024-01-01T00:00:00Z"}
     results = []  # API returned no results at all
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = _process_results(
-            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
-        )
+        counts = runner.process_results(results, [event], event_record_indices, repo)
         unprocessed = repo.filter_unprocessed([event])
 
     assert counts.failed == 1
@@ -1045,16 +1072,19 @@ def test_process_results_missing_index_counts_as_failure(tmp_path):
 
 def test_process_results_missing_index_notifies(tmp_path):
     """A missing result index triggers a warning via notifier."""
-    from app.main import _process_results
+    from app.main import SyncRunner
     from app.notifier import Notifier
+
+    cfg = MagicMock()
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
 
     event = {"id": "ev-notify", "timestamp": "2024-01-01T00:00:00Z"}
     results = []
     event_record_indices = [[0]]
-    notifier = MagicMock(spec=Notifier)
 
     with EventRepository(tmp_path / "test.db") as repo:
-        _process_results(results, [event], event_record_indices, repo, notifier)
+        runner.process_results(results, [event], event_record_indices, repo)
 
     notifier.missing_api_result.assert_called_once()
 
@@ -1112,9 +1142,8 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
         patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.setup_logging"),
         patch("app.main.Notifier") as mock_notifier_cls,
-        patch("app.main._fetch_events", return_value=fake_events),
+        patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=fake_events),
-        patch("app.main._build_batch") as mock_batch,
         patch("app.main.WalletClient") as mock_wallet,
     ):
         cfg = MagicMock()
@@ -1122,11 +1151,14 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
         cfg.lookback_days = 7
         mock_cfg_cls.return_value = cfg
 
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = fake_events
+
         batch = MagicMock()
         batch.records = [{"amount": 10}]
         batch.excluded_count = 3  # excluded events present
         batch.event_record_indices = [[0]]
-        mock_batch.return_value = batch
+        runner.build_batch.return_value = batch
 
         mock_wallet.return_value.post_records.side_effect = RuntimeError("wallet down")
 
@@ -1281,27 +1313,28 @@ def test_prepare_configures_environment_and_returns_notifier(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _connect — shared TR client creation + login
+# SyncRunner.connect — shared TR client creation + login
 # ---------------------------------------------------------------------------
 
 
 def test_connect_builds_client_and_calls_connect_with_code_provider():
     from unittest.mock import patch
 
-    from app.main import _connect
+    from app.main import SyncRunner
 
     cfg = MagicMock()
     cfg.phone_number = "+49123"
     cfg.pin = "1234"
     cfg.data_dir = "/data"
     notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
     provider = MagicMock()
 
     with (
         patch("app.main.TRClient") as MockTR,
         patch("app.main._build_code_provider", return_value=provider) as mock_build,
     ):
-        result = _connect(cfg, notifier)
+        result = runner.connect()
 
     MockTR.assert_called_once_with("+49123", "1234", "/data")
     mock_build.assert_called_once_with(cfg, notifier)
