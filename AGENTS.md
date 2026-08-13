@@ -2,6 +2,8 @@
 
 Instructions for AI assistants working on this project. Read this before making any changes.
 
+Read `ARCHITECTURE.md` before making any changes to understand module design, data flow, and key decisions.
+
 ---
 
 ## Workflow
@@ -22,7 +24,8 @@ Never write implementation code without a corresponding test. Coverage should st
 - **Clean Code**: small functions, descriptive names, no magic numbers, no dead code.
 - **OOP**: encapsulate state, prefer methods over module-level functions when state is involved.
 - **DRY**: extract shared logic; never copy-paste across modules.
-- Run `ruff check .` before considering any task done. Fix all warnings — do not suppress with `noqa` unless genuinely justified.
+- Run `ruff check .` before considering any task done. Fix all warnings — do not suppress with `noqa`
+  unless genuinely justified.
 
 ---
 
@@ -71,9 +74,13 @@ Never write implementation code without a corresponding test. Coverage should st
 
 ## Project conventions
 
-- All environment variables are read in `app/config.py` — never call `os.getenv` directly in other modules. Use `_required_env` for required vars.
+- All environment variables are read in `app/config.py` — never call `os.getenv` directly in other modules.
+  Use `_required_env` for required vars.
 - Sync/backup env vars are read via `Config.from_env()`. Bot env vars are read via `BotEnv.from_env()`.
-- `OWNER_NAME` is optional in `Config` — defaults to `"Backup"`. Sync services set it explicitly; the backup service does not.
-- Container naming: `{CONTAINER_PREFIX}-sync-{instance}-1` for sync, `{CONTAINER_PREFIX}-{BACKUP_SERVICE}-1` for backup. `CONTAINER_PREFIX` matches the `name:` field in `docker-compose.yml` (`tr-sync`).
+- `OWNER_NAME` is optional in `Config` — defaults to `"Backup"`. Sync services set it explicitly;
+  the backup service does not.
+- Container naming: `{CONTAINER_PREFIX}-sync-{instance}-1` for sync, `{CONTAINER_PREFIX}-{BACKUP_SERVICE}-1` for backup.
+  `CONTAINER_PREFIX` matches the `name:` field in `docker-compose.yml` (`tr-sync`).
 - `entrypoint.sh` is driven by `MODE=sync|backup|bot`. No heuristics.
-- One Docker image (`tr-wallet-sync`) for all services — `entrypoint` is overridden per service in the compose file where needed.
+- One Docker image (`tr-wallet-sync`) for all services — `entrypoint` is overridden per service in the
+  compose file where needed.
