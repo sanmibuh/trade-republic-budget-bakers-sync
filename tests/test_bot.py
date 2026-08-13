@@ -1133,8 +1133,6 @@ def test_maybe_submit_pending_code_snapshots_dict_to_avoid_race():
         result = bot._maybe_submit_pending_code("123456")
     assert result is True
 
-
-
     """Non-command, non-digit text receives a 'commands only' reply."""
     bot = _bot()
     with patch.object(bot, "_send_message") as mock_send:

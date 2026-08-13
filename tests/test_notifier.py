@@ -159,6 +159,7 @@ def test_notifier_login_code_request_does_not_label_instance_as_owner():
     # The word 'Owner' may appear in the standard header (owner name line),
     # but the instance name 'david' must NOT follow immediately after 'Owner:'.
     import re
+
     assert not re.search(r"Owner[^:]*:\s*`david`", sent)
 
 
