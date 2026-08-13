@@ -150,6 +150,26 @@ def test_notifier_login_code_request_sends_message_with_instance():
     assert "david" in sent
 
 
+def test_notifier_login_code_request_does_not_label_instance_as_owner():
+    """The instance name must not appear under an 'Owner:' label — the header
+    already shows the real owner; labelling the instance 'Owner' is misleading."""
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().login_code_request("david")
+    sent = mock_send.call_args.kwargs["message"]
+    # The word 'Owner' may appear in the standard header (owner name line),
+    # but the instance name 'david' must NOT follow immediately after 'Owner:'.
+    import re
+    assert not re.search(r"Owner[^:]*:\s*`david`", sent)
+
+
+def test_notifier_login_code_request_labels_instance_correctly():
+    """The instance name should be labelled as 'Instance', not 'Owner'."""
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().login_code_request("david")
+    sent = mock_send.call_args.kwargs["message"]
+    assert "Instance" in sent
+
+
 def test_notifier_login_code_request_sends_force_reply():
     """login_code_request must include force_reply so Telegram opens the reply box."""
     with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:

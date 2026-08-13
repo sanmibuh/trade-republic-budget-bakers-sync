@@ -644,18 +644,22 @@ class TelegramBot:
     def _maybe_submit_pending_code(self, code: str) -> bool:
         """Submit *code* to the single pending login instance, or prompt if ambiguous.
 
+        Snapshots ``_pending_login`` at the start to avoid RuntimeError if a
+        worker thread mutates the dict concurrently.
+
         Returns True if the code was submitted (message should be deleted by caller),
         False if nothing was submitted (no pending login, or ambiguous — prompt sent).
         """
-        if not self._pending_login:
+        pending = dict(self._pending_login)  # snapshot before any iteration
+        if not pending:
             return False
-        if len(self._pending_login) == 1:
-            inst = next(iter(self._pending_login.values()))
+        if len(pending) == 1:
+            inst = next(iter(pending.values()))
             self._exec_in_thread(
                 inst.container_name, ["submit-code", code], on_error=self._send_message
             )
             return True
-        names = ", ".join(f"`{_esc(k)}`" for k in sorted(self._pending_login))
+        names = ", ".join(f"`{_esc(k)}`" for k in sorted(pending))
         self._send_message(
             f"⚠️ Multiple logins pending: {names}\\. "
             "Use `/code <instance> <code>` to specify which one\\."

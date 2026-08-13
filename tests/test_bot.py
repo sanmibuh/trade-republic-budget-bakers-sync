@@ -1113,7 +1113,28 @@ def test_handle_message_digit_string_sends_prompt_when_multiple_pending():
     assert "david" in sent_text.lower() or "eli" in sent_text.lower()
 
 
-def test_handle_message_unknown_plain_text_replies_commands_only():
+def test_maybe_submit_pending_code_snapshots_dict_to_avoid_race():
+    """_maybe_submit_pending_code must snapshot _pending_login before iterating
+    so a concurrent mutation from a worker thread doesn't cause RuntimeError."""
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    bot._pending_login["david"] = inst
+
+    # Simulate the worker thread clearing pending state mid-iteration by
+    # patching _exec_in_thread to mutate _pending_login before returning.
+    def clear_pending(*_args, **_kwargs):
+        bot._pending_login.clear()
+
+    with (
+        patch.object(bot, "_exec_in_thread", side_effect=clear_pending),
+        patch.object(bot, "_send_message"),
+    ):
+        # Must not raise RuntimeError even though the dict is mutated mid-call.
+        result = bot._maybe_submit_pending_code("123456")
+    assert result is True
+
+
+
     """Non-command, non-digit text receives a 'commands only' reply."""
     bot = _bot()
     with patch.object(bot, "_send_message") as mock_send:

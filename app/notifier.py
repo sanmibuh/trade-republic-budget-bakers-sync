@@ -152,7 +152,8 @@ class Notifier:
     def login_code_request(self, instance: str) -> bool:
         safe_instance = _escape_code(instance)
         return self._send_with_markup(
-            self._header("🔐", "2FA Code Required") + f"Owner: `{safe_instance}`\n"
+            self._header("🔐", "2FA Code Required")
+            + f"Instance: `{safe_instance}`\n"
             "Just reply here with your 6\\-digit authenticator code\\.\n"
             "_\\(Or use `/code "
             f"{safe_instance}"
