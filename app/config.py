@@ -82,6 +82,31 @@ def read_data_dir() -> Path:
     return Path(os.getenv("DATA_DIR", "/app/data"))
 
 
+def has_valid_session(data_dir: Path) -> bool:
+    """Return True if cookies.txt exists and contains at least one non-expired cookie.
+
+    pytr persists the Trade Republic session as a Netscape cookie jar (cookies.txt).
+    A file with only expired cookies means the session has ended and the user must
+    log in again.  We use stdlib's MozillaCookieJar so the parsing logic is the
+    same as pytr's own cookie loading — no custom TSV parsing needed.
+    """
+    import time
+    from http.cookiejar import MozillaCookieJar
+
+    cookies_file = data_dir / "cookies.txt"
+    if not cookies_file.exists():
+        return False
+
+    jar = MozillaCookieJar(str(cookies_file))
+    try:
+        jar.load(ignore_discard=True, ignore_expires=True)
+    except OSError:
+        return False
+
+    now = time.time()
+    return any(c.expires is None or c.expires > now for c in jar)
+
+
 @dataclass(frozen=True)
 class Config:
     """Full config for the sync command. Requires Trade Republic and Wallet credentials."""

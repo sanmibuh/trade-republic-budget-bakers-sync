@@ -253,20 +253,69 @@ def test_bot_calls_run():
 # check-session command
 # ---------------------------------------------------------------------------
 
+_FAR_FUTURE = 9_999_999_999  # Unix timestamp well beyond any realistic date
+_PAST = 1_000_000_000  # Unix timestamp in 2001 — always expired
 
-def test_check_session_exits_zero_when_credentials_exist(tmp_path):
-    """Exit 0 when credentials.json is present — session was previously saved."""
-    (tmp_path / "credentials.json").write_text("{}")
+
+def _netscape_cookie(name: str, value: str, expires: int) -> str:
+    return (
+        "# Netscape HTTP Cookie File\n"
+        f".api.traderepublic.com\tTRUE\t/\tTRUE\t{expires}\t{name}\t{value}\n"
+    )
+
+
+def test_check_session_exits_zero_when_valid_cookie_present(tmp_path):
+    """Exit 0 when cookies.txt contains at least one non-expired cookie."""
+    (tmp_path / "cookies.txt").write_text(
+        _netscape_cookie("tr_session", "abc", _FAR_FUTURE)
+    )
     with patch("app.config.read_data_dir", return_value=tmp_path):
         result = _runner().invoke(cli, ["check-session"])
     assert result.exit_code == 0
 
 
-def test_check_session_exits_one_when_credentials_missing(tmp_path):
-    """Exit 1 when credentials.json is absent — login required."""
+def test_check_session_exits_one_when_all_cookies_expired(tmp_path):
+    """Exit 1 when cookies.txt exists but all cookies are expired."""
+    (tmp_path / "cookies.txt").write_text(_netscape_cookie("tr_session", "abc", _PAST))
     with patch("app.config.read_data_dir", return_value=tmp_path):
         result = _runner().invoke(cli, ["check-session"])
     assert result.exit_code == 1
+
+
+def test_check_session_exits_one_when_cookies_missing(tmp_path):
+    """Exit 1 when cookies.txt is absent — login required."""
+    with patch("app.config.read_data_dir", return_value=tmp_path):
+        result = _runner().invoke(cli, ["check-session"])
+    assert result.exit_code == 1
+
+
+def test_check_session_exits_one_when_only_credentials_json_present(tmp_path):
+    """credentials.json alone does not count — session lives in cookies.txt."""
+    (tmp_path / "credentials.json").write_text("{}")
+    with patch("app.config.read_data_dir", return_value=tmp_path):
+        result = _runner().invoke(cli, ["check-session"])
+    assert result.exit_code == 1
+
+
+def test_check_session_exits_one_when_cookies_file_empty(tmp_path):
+    """Exit 1 when cookies.txt is empty (no cookies at all)."""
+    (tmp_path / "cookies.txt").write_text("# Netscape HTTP Cookie File\n")
+    with patch("app.config.read_data_dir", return_value=tmp_path):
+        result = _runner().invoke(cli, ["check-session"])
+    assert result.exit_code == 1
+
+
+def test_check_session_exits_zero_when_mixed_cookies_one_valid(tmp_path):
+    """Exit 0 when cookies.txt has a mix of expired and valid cookies."""
+    content = (
+        "# Netscape HTTP Cookie File\n"
+        f".api.traderepublic.com\tTRUE\t/\tTRUE\t{_PAST}\told_token\texpired\n"
+        f".api.traderepublic.com\tTRUE\t/\tTRUE\t{_FAR_FUTURE}\ttr_session\tvalid\n"
+    )
+    (tmp_path / "cookies.txt").write_text(content)
+    with patch("app.config.read_data_dir", return_value=tmp_path):
+        result = _runner().invoke(cli, ["check-session"])
+    assert result.exit_code == 0
 
 
 def test_check_session_help():

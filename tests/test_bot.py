@@ -312,11 +312,13 @@ def test_handle_message_ignores_unauthorized_chat():
     mock_send.assert_not_called()
 
 
-def test_handle_message_ignores_non_command():
+def test_handle_message_non_command_replies_commands_only():
+    """Non-command plain text receives a 'commands only' reply (not silently ignored)."""
     bot = _bot()
     with patch.object(bot, "_send_message") as mock_send:
         bot._handle_message({"chat": {"id": 42}, "text": "hello"})
-    mock_send.assert_not_called()
+    mock_send.assert_called_once()
+    assert "command" in mock_send.call_args.args[0].lower()
 
 
 def test_handle_message_unknown_command_replies():
@@ -964,6 +966,7 @@ def test_launch_login_reports_success_via_on_success():
     with (
         patch.object(bot, "_send_message") as mock_send,
         patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_launch_sync"),
     ):
         bot._launch_login(inst)
         on_success = mock_exec.call_args.kwargs["on_success"]
@@ -973,9 +976,177 @@ def test_launch_login_reports_success_via_on_success():
     assert "David" in mock_send.call_args.args[0]
 
 
+def test_launch_login_auto_syncs_on_success():
+    """After a successful login, the bot automatically triggers a sync for the same instance."""
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_launch_sync") as mock_sync,
+    ):
+        bot._launch_login(inst)
+        on_success = mock_exec.call_args.kwargs["on_success"]
+        on_success()
+    mock_sync.assert_called_once_with(inst)
+
+
 # ---------------------------------------------------------------------------
-# TelegramBot._cmd_code
+# TelegramBot — pending login state & digit-intercept for 2FA
 # ---------------------------------------------------------------------------
+
+
+def test_launch_login_marks_instance_as_pending():
+    """While login exec is running, the instance should be in _pending_login."""
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_exec_in_thread"),
+    ):
+        bot._launch_login(inst)
+    assert "david" in bot._pending_login
+
+
+def test_on_login_success_removes_pending_state():
+    """After success, the instance is removed from _pending_login."""
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_launch_sync"),
+    ):
+        bot._launch_login(inst)
+        assert "david" in bot._pending_login
+        on_success = mock_exec.call_args.kwargs["on_success"]
+        on_success()
+    assert "david" not in bot._pending_login
+
+
+def test_on_login_error_removes_pending_state():
+    """After an error, the instance is also removed from _pending_login."""
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+    ):
+        bot._launch_login(inst)
+        assert "david" in bot._pending_login
+        on_error = mock_exec.call_args.kwargs["on_error"]
+        on_error("❌ failed")
+    assert "david" not in bot._pending_login
+
+
+def test_handle_message_digit_string_submitted_to_pending_instance():
+    """A digit-only reply is treated as 2FA code when exactly one instance is pending."""
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    bot._pending_login["david"] = inst
+    with (
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_delete_message") as mock_delete,
+    ):
+        bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
+    mock_exec.assert_called_once_with(
+        inst.container_name, ["submit-code", "123456"], on_error=ANY
+    )
+    mock_delete.assert_called_once_with(77)
+
+
+def test_handle_message_digit_string_not_deleted_when_no_pending_login():
+    """Digit messages are not deleted and not submitted when no login is pending."""
+    bot = _bot()
+    with (
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_delete_message") as mock_delete,
+    ):
+        bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
+    mock_exec.assert_not_called()
+    mock_send.assert_not_called()
+    mock_delete.assert_not_called()
+
+
+def test_handle_message_digit_string_not_deleted_when_multiple_pending():
+    """Digit message is not deleted when multiple instances are pending (just a prompt is sent)."""
+    bot = _bot()
+    bot._pending_login["david"] = bot._cfg.instances["david"]
+    bot._pending_login["eli"] = bot._cfg.instances["eli"]
+    with (
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_delete_message") as mock_delete,
+    ):
+        bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
+    mock_exec.assert_not_called()
+    mock_delete.assert_not_called()
+
+
+def test_handle_message_digit_string_ignored_when_no_pending_login():
+    """Plain digit messages are silently ignored when no login is pending."""
+    bot = _bot()
+    with (
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_message({"chat": {"id": 42}, "text": "123456"})
+    mock_exec.assert_not_called()
+    mock_send.assert_not_called()
+
+
+def test_handle_message_digit_string_sends_prompt_when_multiple_pending():
+    """When multiple instances are pending, ask which one the code is for."""
+    bot = _bot()
+    bot._pending_login["david"] = bot._cfg.instances["david"]
+    bot._pending_login["eli"] = bot._cfg.instances["eli"]
+    with (
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_message({"chat": {"id": 42}, "text": "123456"})
+    mock_exec.assert_not_called()
+    mock_send.assert_called_once()
+    sent_text = mock_send.call_args.args[0]
+    assert "david" in sent_text.lower() or "eli" in sent_text.lower()
+
+
+def test_maybe_submit_pending_code_snapshots_dict_to_avoid_race():
+    """_maybe_submit_pending_code must snapshot _pending_login before iterating
+    so a concurrent mutation from a worker thread doesn't cause RuntimeError."""
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    bot._pending_login["david"] = inst
+
+    # Simulate the worker thread clearing pending state mid-iteration by
+    # patching _exec_in_thread to mutate _pending_login before returning.
+    def clear_pending(*_args, **_kwargs):
+        bot._pending_login.clear()
+
+    with (
+        patch.object(bot, "_exec_in_thread", side_effect=clear_pending),
+        patch.object(bot, "_send_message"),
+    ):
+        # Must not raise RuntimeError even though the dict is mutated mid-call.
+        result = bot._maybe_submit_pending_code("123456")
+    assert result is True
+
+    """Non-command, non-digit text receives a 'commands only' reply."""
+    bot = _bot()
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._handle_message({"chat": {"id": 42}, "text": "hello there"})
+    mock_send.assert_called_once()
+    assert "command" in mock_send.call_args.args[0].lower()
+
+
+def test_handle_message_unknown_plain_text_ignored_from_other_chat():
+    """Messages from unauthorized chats are never answered."""
+    bot = _bot()
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._handle_message({"chat": {"id": 99}, "text": "hello"})
+    mock_send.assert_not_called()
 
 
 def test_cmd_code_executes_submit_code_for_instance():

@@ -67,12 +67,14 @@ def check_session() -> None:
 
     Used by the Telegram bot to report per-instance authentication state in
     /status without making any network calls.
-    """
-    from app.config import read_data_dir
 
-    data_dir = read_data_dir()
-    credentials = data_dir / "credentials.json"
-    sys.exit(0 if credentials.exists() else 1)
+    pytr persists the session as cookies.txt (written by save_websession()).
+    The check reads the cookie expiry timestamps so that a file with only
+    expired cookies is correctly reported as needing re-authentication.
+    """
+    from app.config import has_valid_session, read_data_dir
+
+    sys.exit(0 if has_valid_session(read_data_dir()) else 1)
 
 
 @cli.command()

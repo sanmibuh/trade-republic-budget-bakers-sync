@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.config import BackupConfig, Config
+from app.config import BackupConfig, Config, has_valid_session
 
 BASE_ENV = {
     "PHONE_NUMBER": "+34600000000",
@@ -224,3 +224,51 @@ def test_backup_config_allow_insecure_ssl_true_when_set(monkeypatch):
     monkeypatch.setenv("ALLOW_INSECURE_SSL", "true")
 
     assert BackupConfig.from_env().allow_insecure_ssl is True
+
+
+# ---------------------------------------------------------------------------
+# has_valid_session
+# ---------------------------------------------------------------------------
+
+_FAR_FUTURE = 9_999_999_999
+_PAST = 1_000_000_000
+
+
+def _write_cookies(path, expires: int, name: str = "tr_session") -> None:
+    path.write_text(
+        "# Netscape HTTP Cookie File\n"
+        f".api.traderepublic.com\tTRUE\t/\tTRUE\t{expires}\t{name}\tval\n"
+    )
+
+
+def test_has_valid_session_false_when_no_file(tmp_path):
+    assert has_valid_session(tmp_path) is False
+
+
+def test_has_valid_session_false_when_file_empty(tmp_path):
+    (tmp_path / "cookies.txt").write_text("# Netscape HTTP Cookie File\n")
+    assert has_valid_session(tmp_path) is False
+
+
+def test_has_valid_session_false_when_all_expired(tmp_path):
+    _write_cookies(tmp_path / "cookies.txt", _PAST)
+    assert has_valid_session(tmp_path) is False
+
+
+def test_has_valid_session_true_when_valid_cookie(tmp_path):
+    _write_cookies(tmp_path / "cookies.txt", _FAR_FUTURE)
+    assert has_valid_session(tmp_path) is True
+
+
+def test_has_valid_session_true_when_mixed_cookies(tmp_path):
+    (tmp_path / "cookies.txt").write_text(
+        "# Netscape HTTP Cookie File\n"
+        f".api.traderepublic.com\tTRUE\t/\tTRUE\t{_PAST}\told\texpired\n"
+        f".api.traderepublic.com\tTRUE\t/\tTRUE\t{_FAR_FUTURE}\ttr_session\tvalid\n"
+    )
+    assert has_valid_session(tmp_path) is True
+
+
+def test_has_valid_session_false_when_file_corrupt(tmp_path):
+    (tmp_path / "cookies.txt").write_text("not a cookie jar at all\x00\xff")
+    assert has_valid_session(tmp_path) is False
