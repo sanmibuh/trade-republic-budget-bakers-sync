@@ -25,7 +25,7 @@ app/
   notifier.py       # Notifier — Telegram notifications (transversal)
   bot.py            # TelegramBot — long-polling bot for remote command execution
   logging_setup.py  # Rotating file + console logging; configure_logging() for CLIs
-  main.py           # Sync orchestrator: wires all modules, minimal logic
+  main.py           # Sync orchestrator: SyncRunner class + run() / run_login() thin wrappers
 
 docker/
   base/Dockerfile   # python:3.11-slim + git + pip deps (incl. docker SDK); published as python-trade-republic
@@ -118,9 +118,12 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - On-demand renewal: `/login` (bot) → `python -m app login` → `main.run_login()` triggers the 2FA flow explicitly.
   Scheduled cron syncs that hit an expired session trigger the same flow automatically (Eli via push, David via
   `/code`).
-- `run()` (sync) and `run_login()` share two helpers to avoid divergence: `_prepare(cfg)` (data dir + SSL
-  circuit-breaker + logging + `Notifier`) and `_connect(cfg, notifier)` (builds the `TRClient`, selects the code
-  provider via `_build_code_provider`, and establishes the session).
+- `run()` (sync) and `run_login()` share `_prepare(cfg)` (data dir + SSL circuit-breaker + logging + `Notifier`)
+  as a module-level bootstrap helper.
+- Sync orchestration logic lives in the `SyncRunner` class (`main.py`). Its public methods — `connect`,
+  `fetch_events`, `build_batch`, `process_results` — accept `cfg` and `notifier` injected via the constructor,
+  making dependencies explicit and easy to mock. `run()` and `run_login()` are thin wrappers that call `_prepare`,
+  construct a `SyncRunner`, and delegate to it.
 
 ### Deduplication
 - `processed_events` table in SQLite:
@@ -361,7 +364,7 @@ See `deploy/DEPLOY.md` for setup instructions.
 |---|---|
 | `app/__main__.py` | click CLI: `sync`, `backup`, `bot`, `login`, `submit-code`, `check-session`; single entry point |
 | `app/http_client.py` | SSL circuit-breaker shared by notifier and wallet_client; `http_post`, `build_session` |
-| `app/main.py` | Sync orchestrator (`run`) + on-demand login (`run_login`); shared `_prepare` and `_connect` helpers |
+| `app/main.py` | `SyncRunner` class (`connect`, `fetch_events`, `build_batch`, `process_results`) + `run()` / `run_login()` thin wrappers; `_prepare` bootstrap helper |
 | `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |
 | `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions; `connect` uses a `code_provider` |
 | `app/twofa.py` | `TerminalCodeProvider`, `TelegramCodeProvider`, `select_code_provider`; `CODE_FILENAME` |
