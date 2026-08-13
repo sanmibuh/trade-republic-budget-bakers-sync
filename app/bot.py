@@ -231,6 +231,9 @@ class TelegramBot:
         self._cfg = cfg
         self._api = _TELEGRAM_API.format(token=cfg.bot_token)
         self._offset = 0
+        # Instances that have an active login flow waiting for a 2FA code.
+        # Maps instance key (lower-case name) → InstanceConfig.
+        self._pending_login: dict[str, InstanceConfig] = {}
         if not cfg.telegram_verify_ssl:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -339,7 +342,18 @@ class TelegramBot:
             return
 
         text = message.get("text", "").strip()
+
+        # Intercept a plain digit-only reply as a 2FA code when a login is pending.
+        if text.isdigit() and not text.startswith("/"):
+            submitted = self._maybe_submit_pending_code(text)
+            if submitted:
+                self._delete_message(message.get("message_id"))
+            return
+
         if not text.startswith("/"):
+            self._send_message(
+                "⚠️ I only accept commands\\. Use /help to see what's available\\."
+            )
             return
 
         parts = text.split()
@@ -608,14 +622,47 @@ class TelegramBot:
 
     def _launch_login(self, inst: InstanceConfig) -> None:
         self._send_message(f"🔐 Re\\-authenticating *{_esc(inst.name)}*\\.\\.\\.")
+        self._pending_login[inst.name.lower()] = inst
         self._exec_in_thread(
             inst.container_name,
             ["login"],
-            on_error=self._send_message,
-            on_success=lambda: self._send_message(
-                f"✅ *{_esc(inst.name)}* session is ready\\."
-            ),
+            on_error=lambda msg: self._on_login_error(inst, msg),
+            on_success=lambda: self._on_login_success(inst),
         )
+
+    def _on_login_success(self, inst: InstanceConfig) -> None:
+        """Called when login completes successfully: notify user then auto-sync."""
+        self._pending_login.pop(inst.name.lower(), None)
+        self._send_message(f"✅ *{_esc(inst.name)}* session is ready\\.")
+        self._launch_sync(inst)
+
+    def _on_login_error(self, inst: InstanceConfig, msg: str) -> None:
+        """Called when login fails: clear pending state and forward the error message."""
+        self._pending_login.pop(inst.name.lower(), None)
+        self._send_message(msg)
+
+    def _maybe_submit_pending_code(self, code: str) -> bool:
+        """Submit *code* to the single pending login instance, or prompt if ambiguous.
+
+        Returns True if the code was submitted (message should be deleted by caller),
+        False if nothing was submitted (no pending login, or ambiguous — prompt sent).
+        """
+        if not self._pending_login:
+            return False
+        if len(self._pending_login) == 1:
+            inst = next(iter(self._pending_login.values()))
+            self._exec_in_thread(
+                inst.container_name, ["submit-code", code], on_error=self._send_message
+            )
+            return True
+        names = ", ".join(
+            f"`{_esc(k)}`" for k in sorted(self._pending_login)
+        )
+        self._send_message(
+            f"⚠️ Multiple logins pending: {names}\\. "
+            "Use `/code <instance> <code>` to specify which one\\."
+        )
+        return False
 
     def _fetch_and_send_logs(self, inst: InstanceConfig) -> None:
         """Fetch today's logs for *inst* and send them to Telegram."""

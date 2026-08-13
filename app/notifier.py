@@ -58,7 +58,10 @@ def _escape_code(value: str) -> str:
 
 
 def send_telegram_message(
-    bot_token: str | None, chat_id: str | None, message: str
+    bot_token: str | None,
+    chat_id: str | None,
+    message: str,
+    reply_markup: dict | None = None,
 ) -> bool:
     if not bot_token or not chat_id:
         return False
@@ -69,6 +72,8 @@ def send_telegram_message(
         "parse_mode": "MarkdownV2",
         "disable_web_page_preview": True,
     }
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     try:
         response = http_post(
             TELEGRAM_API.format(token=bot_token), json=payload, timeout=20
@@ -109,6 +114,14 @@ class Notifier:
             message=message,
         )
 
+    def _send_with_markup(self, message: str, reply_markup: dict) -> bool:
+        return send_telegram_message(
+            bot_token=self._bot_token,
+            chat_id=self._chat_id,
+            message=message,
+            reply_markup=reply_markup,
+        )
+
     def _safe_owner(self) -> str:
         return _escape_markdown(self._owner_name)
 
@@ -138,10 +151,14 @@ class Notifier:
 
     def login_code_request(self, instance: str) -> bool:
         safe_instance = _escape_code(instance)
-        return self._send(
+        return self._send_with_markup(
             self._header("🔐", "2FA Code Required")
-            + "Reply with your authenticator code using:\n"
-            f"`/code {safe_instance} <code>`"
+            + f"Owner: `{safe_instance}`\n"
+            "Just reply here with your 6\\-digit authenticator code\\.\n"
+            "_\\(Or use `/code "
+            f"{safe_instance}"
+            " <code>` from any message\\.\\)_",
+            reply_markup={"force_reply": True, "input_field_placeholder": "6-digit code"},
         )
 
     def login_success(self) -> bool:
