@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [6.4.0] - 2026-08-13
+
+### What's Changed
+* ci: add explicit permissions to lint job to resolve CodeQL alert — [#92](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/92)
+* fix: auth status ⚠️, auto-sync after login, easier 2FA code entry — [#91](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/91)
+* fix: CHANGELOG 6.3.0 format inconsistent and prepare-release workflow generates wrong format — [#89](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/89)
+* chore: add ruff config and enforce linting in CI — [#87](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/87)
+* 🧹 Auto-fix: lint & formatting — [#82](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/82)
+**Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v6.3.0...v6.4.0
+
+
 ## [6.3.0] - 2026-08-12
 
 ### What's Changed
