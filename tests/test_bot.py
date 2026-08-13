@@ -1149,7 +1149,7 @@ def test_docker_logs_today_returns_decoded_output():
     client = MagicMock()
     client.containers.get.return_value = container
 
-    since = datetime.datetime(2026, 8, 11, 0, 0, 0, tzinfo=datetime.timezone.utc)
+    since = datetime.datetime(2026, 8, 11, 0, 0, 0, tzinfo=datetime.UTC)
     with patch("app.bot.docker.from_env", return_value=client):
         result = _docker_logs_today("my-container", since=since)
 
@@ -1168,7 +1168,7 @@ def test_docker_logs_today_decodes_invalid_bytes():
     client = MagicMock()
     client.containers.get.return_value = container
 
-    since = datetime.datetime(2026, 8, 11, 0, 0, 0, tzinfo=datetime.timezone.utc)
+    since = datetime.datetime(2026, 8, 11, 0, 0, 0, tzinfo=datetime.UTC)
     with patch("app.bot.docker.from_env", return_value=client):
         result = _docker_logs_today("my-container", since=since)
 
@@ -1183,7 +1183,7 @@ def test_docker_logs_today_uses_explicit_client():
     client = MagicMock()
     client.containers.get.return_value = container
 
-    since = datetime.datetime(2026, 8, 11, 0, 0, 0, tzinfo=datetime.timezone.utc)
+    since = datetime.datetime(2026, 8, 11, 0, 0, 0, tzinfo=datetime.UTC)
     result = _docker_logs_today("my-container", since=since, client=client)
 
     client.containers.get.assert_called_once_with("my-container")

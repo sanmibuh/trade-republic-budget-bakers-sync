@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -136,7 +136,7 @@ class EventRepository:
             raw = json.dumps(event, ensure_ascii=False, default=str)
         except TypeError:
             raw = str(event)
-        synced_at = datetime.now(timezone.utc).isoformat()
+        synced_at = datetime.now(UTC).isoformat()
 
         self._conn.execute(
             "INSERT OR IGNORE INTO processed_events "
@@ -162,9 +162,7 @@ class EventRepository:
 
     def purge_old_records(self, ttl_days: int = _TTL_DAYS) -> int:
         """Delete records synced more than ttl_days ago. Returns number of rows deleted."""
-        cutoff = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        cutoff = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         cutoff -= timedelta(days=ttl_days)
         cursor = self._conn.execute(
             "DELETE FROM processed_events WHERE synced_at < ?",
@@ -186,7 +184,7 @@ class EventRepository:
     def close(self) -> None:
         self._conn.close()
 
-    def __enter__(self) -> EventRepository:  # noqa: PYI034
+    def __enter__(self) -> EventRepository:
         return self
 
     def __exit__(self, *_: object) -> None:

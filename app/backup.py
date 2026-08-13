@@ -16,7 +16,7 @@ import calendar
 import json
 import logging
 import tempfile
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from app.notifier import Notifier
@@ -121,7 +121,7 @@ def _fetch_snapshot(
         "mode": mode,
         "date_from": date_from,
         "date_to": date_to,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "accounts": accounts,
         "categories": categories,
         "budgets": budgets,
@@ -217,7 +217,7 @@ def run_auto(
       - Cleans up the covered monthly files
     """
     if today is None:
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
 
     cur_year, cur_month = today.year, today.month
     prev_year, prev_month = _previous_month(today)
@@ -247,13 +247,13 @@ def run_auto(
 def _parse_monthly_param(param: str | None) -> tuple[int, int]:
     """Parse an optional YYYY-MM string. Returns (year, month); raises ValueError on bad input."""
     if param is not None:
-        parsed = datetime.strptime(param, "%Y-%m")  # noqa: DTZ007  # only year/month needed, no tz
+        parsed = datetime.strptime(param, "%Y-%m")  # only year/month needed, no tz
         return parsed.year, parsed.month
-    return _previous_month(datetime.now(timezone.utc).date())
+    return _previous_month(datetime.now(UTC).date())
 
 
 def _parse_yearly_param(param: str | None) -> int:
     """Parse an optional YYYY string. Returns year; raises ValueError on bad input."""
     if param is not None:
         return int(param)
-    return datetime.now(timezone.utc).year - 1
+    return datetime.now(UTC).year - 1

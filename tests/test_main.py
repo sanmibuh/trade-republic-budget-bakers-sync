@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -297,8 +297,8 @@ def _insert_record(repo: EventRepository, event_id: str, synced_at: str) -> None
 
 def test_purge_removes_old_records(tmp_path):
     with EventRepository(tmp_path / "db") as repo:
-        old = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
-        recent = datetime.now(timezone.utc).isoformat()
+        old = (datetime.now(UTC) - timedelta(days=90)).isoformat()
+        recent = datetime.now(UTC).isoformat()
         _insert_record(repo, "old-evt", old)
         _insert_record(repo, "recent-evt", recent)
 
@@ -315,7 +315,7 @@ def test_purge_removes_old_records(tmp_path):
 
 def test_purge_returns_zero_when_nothing_to_delete(tmp_path):
     with EventRepository(tmp_path / "db") as repo:
-        recent = datetime.now(timezone.utc).isoformat()
+        recent = datetime.now(UTC).isoformat()
         _insert_record(repo, "recent-evt", recent)
         assert repo.purge_old_records(ttl_days=60) == 0
 
@@ -347,37 +347,37 @@ def _make_event(timestamp: str, **kwargs) -> dict:
 
 
 def test_filter_by_lookback_keeps_recent():
-    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
+    since = datetime(2024, 1, 10, tzinfo=UTC)
     assert len(filter_by_lookback([_make_event("2024-01-11T00:00:00Z")], since)) == 1
 
 
 def test_filter_by_lookback_removes_old():
-    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
+    since = datetime(2024, 1, 10, tzinfo=UTC)
     assert filter_by_lookback([_make_event("2024-01-09T00:00:00Z")], since) == []
 
 
 def test_filter_by_lookback_keeps_event_on_boundary():
-    since = datetime(2024, 1, 10, 0, 0, 0, tzinfo=timezone.utc)
+    since = datetime(2024, 1, 10, 0, 0, 0, tzinfo=UTC)
     assert len(filter_by_lookback([_make_event("2024-01-10T00:00:00Z")], since)) == 1
 
 
 def test_filter_by_lookback_keeps_event_with_unparseable_timestamp():
-    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
+    since = datetime(2024, 1, 10, tzinfo=UTC)
     assert len(filter_by_lookback([{"timestamp": "not-a-date"}], since)) == 1
 
 
 def test_filter_by_lookback_keeps_event_without_timestamp():
-    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
+    since = datetime(2024, 1, 10, tzinfo=UTC)
     assert len(filter_by_lookback([{"amount": "5"}], since)) == 1
 
 
 def test_filter_by_lookback_naive_timestamp_treated_as_utc():
-    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
+    since = datetime(2024, 1, 10, tzinfo=UTC)
     assert len(filter_by_lookback([_make_event("2024-01-11T00:00:00")], since)) == 1
 
 
 def test_filter_by_lookback_multiple_events():
-    since = datetime(2024, 1, 10, tzinfo=timezone.utc)
+    since = datetime(2024, 1, 10, tzinfo=UTC)
     events = [
         _make_event("2024-01-09T00:00:00Z"),
         _make_event("2024-01-11T00:00:00Z"),
@@ -481,7 +481,7 @@ def test_fetch_events_login_failed_exits():
 
     cfg = MagicMock()
     notifier = MagicMock()
-    since = datetime.now(timezone.utc)
+    since = datetime.now(UTC)
 
     with patch("app.main.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = LoginFailedError("bad pin")
@@ -500,7 +500,7 @@ def test_fetch_events_session_expired_exits():
 
     cfg = MagicMock()
     notifier = MagicMock()
-    since = datetime.now(timezone.utc)
+    since = datetime.now(UTC)
 
     with patch("app.main.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = SessionExpiredError("needs bootstrap")
@@ -521,7 +521,7 @@ def test_fetch_events_http_401_exits():
 
     cfg = MagicMock()
     notifier = MagicMock()
-    since = datetime.now(timezone.utc)
+    since = datetime.now(UTC)
 
     err = HTTPError()
     err.response = MagicMock()
@@ -545,7 +545,7 @@ def test_fetch_events_http_non_401_reraises():
 
     cfg = MagicMock()
     notifier = MagicMock()
-    since = datetime.now(timezone.utc)
+    since = datetime.now(UTC)
 
     err = HTTPError()
     err.response = MagicMock()
@@ -566,7 +566,7 @@ def test_fetch_events_unexpected_exception_reraises():
 
     cfg = MagicMock()
     notifier = MagicMock()
-    since = datetime.now(timezone.utc)
+    since = datetime.now(UTC)
 
     boom = RuntimeError("unexpected")
     with patch("app.main.TRClient") as MockTR:
@@ -584,7 +584,7 @@ def test_fetch_events_success_returns_events():
 
     cfg = MagicMock()
     notifier = MagicMock()
-    since = datetime.now(timezone.utc)
+    since = datetime.now(UTC)
     fake_events = [{"id": "e1"}, {"id": "e2"}]
 
     with patch("app.main.TRClient") as MockTR:
@@ -741,7 +741,7 @@ def test_run_authentication_error_exits(tmp_path):
 
     cfg = MagicMock()
     notifier = MagicMock()
-    since = datetime.now(timezone.utc)
+    since = datetime.now(UTC)
 
     # Import the sentinel class the module uses and raise it
     import app.main as main_module

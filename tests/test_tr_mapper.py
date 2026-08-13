@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -128,7 +128,7 @@ def test_normalize_event_time_date_key():
 
 
 def test_normalize_event_time_datetime_object():
-    dt = datetime(2024, 6, 1, 9, 0, 0, tzinfo=timezone.utc)
+    dt = datetime(2024, 6, 1, 9, 0, 0, tzinfo=UTC)
     event = {"timestamp": dt}
     result = normalize_event_time(event)
     assert "2024-06-01" in result
