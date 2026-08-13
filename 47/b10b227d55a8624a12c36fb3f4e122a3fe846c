@@ -1,0 +1,39 @@
+app/tr_mapper.py
+  s_2c0a1aaeb24312::t_b6a9a152b944ea 7,28,43
+tests/test_tr_client.py
+  s_2c0a1aaeb24312::t_7287a45dd74221 3,290,292
+app/main.py
+  s_2c0a1aaeb24312::t_b24fdec1b557b0 6,32,248,261
+app/bot.py
+  s_2c0a1aaeb24312::t_c1204844c39e43 256,320,593,622,627,662,763,799,812,824,826,844,897
+tests/test_backup.py
+  s_2c0a1aaeb24312::t_c72e694512f7db 4,82,85
+tests/test_main.py
+  s_2c0a1aaeb24312::t_a396648e0d0e9f 5,300-301,318,350,355,360,365,370,375,380,484,503,524,548,569,587,744
+app/backup.py
+  s_2c0a1aaeb24312::t_a682ccd07b5f02 19,124,220,250,252,259
+tests/test_bot.py
+  s_2c0a1aaeb24312::t_4a683bc0d87ab5 1152,1171,1186
+app/twofa.py
+  s_2c0a1aaeb24312::t_9af63438962f88 19,87
+app/persistence.py
+  s_2c0a1aaeb24312::t_6ffa0cdefd3f90 7,139,165,187
+tests/test_tr_mapper.py
+  s_2c0a1aaeb24312::t_b76c74d3f6c4cf 3,131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "47b10b227d55a8624a12c36fb3f4e122a3fe846c",
+  "prompts": {},
+  "sessions": {
+    "s_2c0a1aaeb24312": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0062c20a4ffeYgT8zaeGMnx81F",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
