@@ -298,7 +298,6 @@ def _make_record(
     payment_type: str | None = None,
     counter_party: str | None = None,
     unpaired_transfer: bool = False,
-    label_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     r: dict[str, Any] = {
         "accountId": account_id,
@@ -314,8 +313,6 @@ def _make_record(
         r["transfer"] = {"pairingMode": "unpaired"}
     if counter_party:
         r["counterParty"] = counter_party[:255]
-    if label_ids:
-        r["labelIds"] = label_ids
     return r
 
 
