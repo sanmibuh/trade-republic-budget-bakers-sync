@@ -426,3 +426,32 @@ def test_write_json_overwrites_existing_file(tmp_path):
     _write_json(path, {"v": 2})
 
     assert json.loads(path.read_text()) == {"v": 2}
+
+
+# ---------------------------------------------------------------------------
+# run_auto — today defaults to current date
+# ---------------------------------------------------------------------------
+
+
+def test_run_auto_uses_current_date_when_today_not_provided(tmp_path, monkeypatch):
+    """run_auto with no today argument must fall back to datetime.now(UTC).date()."""
+    from datetime import datetime
+
+    fixed_date = date(2026, 8, 13)
+
+    class _FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 8, 13, 12, 0, 0, tzinfo=UTC)
+
+    monkeypatch.setattr("app.backup.datetime", _FakeDatetime)
+
+    client = _make_client()
+    notifier = _make_notifier()
+
+    run_auto(client, notifier, tmp_path)
+
+    year_str = str(fixed_date.year)
+    month_str = f"{fixed_date.month:02d}"
+    monthly_dir = tmp_path / "backups" / "monthly"
+    assert any(f"{year_str}-{month_str}" in f.name for f in monthly_dir.iterdir())

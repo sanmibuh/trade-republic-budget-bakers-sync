@@ -272,3 +272,24 @@ def test_has_valid_session_true_when_mixed_cookies(tmp_path):
 def test_has_valid_session_false_when_file_corrupt(tmp_path):
     (tmp_path / "cookies.txt").write_text("not a cookie jar at all\x00\xff")
     assert has_valid_session(tmp_path) is False
+
+
+# ---------------------------------------------------------------------------
+# read_data_dir
+# ---------------------------------------------------------------------------
+
+
+def test_read_data_dir_returns_env_value(monkeypatch):
+    """DATA_DIR env var is reflected in the returned Path."""
+    from app.config import read_data_dir
+
+    monkeypatch.setenv("DATA_DIR", "/custom/data")
+    assert read_data_dir() == __import__("pathlib").Path("/custom/data")
+
+
+def test_read_data_dir_defaults_to_app_data(monkeypatch):
+    """When DATA_DIR is unset, the default /app/data is returned."""
+    from app.config import read_data_dir
+
+    monkeypatch.delenv("DATA_DIR", raising=False)
+    assert read_data_dir() == __import__("pathlib").Path("/app/data")

@@ -280,6 +280,24 @@ def test_repo_mark_processed_handles_non_serializable_event(tmp_path):
     assert "Unserializable" in row[0]
 
 
+def test_repo_mark_processed_raw_falls_back_to_str_on_type_error(tmp_path, monkeypatch):
+    """When json.dumps raises TypeError, raw is set to str(event)."""
+    from unittest.mock import patch
+
+    event = {"id": "evt-fallback", "timestamp": "2024-01-01T00:00:00Z"}
+    with (
+        patch("app.persistence.json.dumps", side_effect=TypeError("not serialisable")),
+        EventRepository(tmp_path / "db") as repo,
+    ):
+        repo.mark_processed(event)
+        repo.commit()
+        raw = repo._conn.execute(
+            "SELECT raw FROM processed_events WHERE event_id='evt-fallback'"
+        ).fetchone()[0]
+
+    assert "evt-fallback" in raw
+
+
 # ---------------------------------------------------------------------------
 # EventRepository — purge_old_records
 # ---------------------------------------------------------------------------
