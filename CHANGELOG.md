@@ -5,18 +5,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [6.3.0] - 2026-08-12
 
-- fix: YAML syntax error in prepare-release.yml (line 62) (#80)
-- Store Wallet record ID in dedup DB to enable insert/update on reprocessing (#78)
-- Extend `/status` with container runtime state and last-sync summary (#76)
-- feat: maintain CHANGELOG.md — bootstrap from existing releases and auto-update on prepare-release (#75)
-- fix: CI Results comment duplicated when concurrent runs post to the same PR (#73)
-- Nightly (#71)
-- [improve-ci-report]: feat: enhance CI report by adding comment deleti… (#59)
-- [atomic-write-backup]: feat: implement atomic write for JSON backups … (#58)
-- Login status bot (#57)
-- [bot-logs]: feat: add /logs command to fetch and send today's logs fo… (#56)
-- [remove-2fa-code-telegram]: feat: remove sensitive 2FA code messages … (#55)
+### What's Changed
+* fix: YAML syntax error in prepare-release.yml (line 62) — [#80](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/80)
+* Store Wallet record ID in dedup DB to enable insert/update on reprocessing — [#78](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/78)
+* Extend `/status` with container runtime state and last-sync summary — [#76](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/76)
+* feat: maintain CHANGELOG.md — bootstrap from existing releases and auto-update on prepare-release — [#75](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/75)
+* fix: CI Results comment duplicated when concurrent runs post to the same PR — [#73](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/73)
+* Nightly — [#71](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/71)
+* [improve-ci-report]: feat: enhance CI report by adding comment deleti… — [#59](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/59)
+* [atomic-write-backup]: feat: implement atomic write for JSON backups … — [#58](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/58)
+* Login status bot — [#57](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/57)
+* [bot-logs]: feat: add /logs command to fetch and send today's logs fo… — [#56](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/56)
+* [remove-2fa-code-telegram]: feat: remove sensitive 2FA code messages … — [#55](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/55)
 
+**Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v6.2.1...v6.3.0
 
 ## [6.2.1] - 2026-08-10
 
