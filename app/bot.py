@@ -253,7 +253,7 @@ class TelegramBot:
             except KeyboardInterrupt:
                 log.info("Bot stopped by keyboard interrupt")
                 break
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.warning("Polling error: %s", exc)
                 time.sleep(5)
 
@@ -317,7 +317,7 @@ class TelegramBot:
             self._offset = update["update_id"] + 1
             try:
                 self._handle_update(update)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.warning(
                     "Error handling update %s: %s", update.get("update_id"), exc
                 )
@@ -590,7 +590,7 @@ class TelegramBot:
 
     def _year_buttons(self) -> list[list[dict]]:
         """Inline keyboard with the most recent years (previous year first)."""
-        current_year = datetime.datetime.now(tz=datetime.timezone.utc).year
+        current_year = datetime.datetime.now(tz=datetime.UTC).year
         years = [current_year - i for i in range(1, _YEAR_BUTTON_COUNT + 1)]
         buttons = [
             {"text": str(y), "callback_data": f"backup_yearly{_CB_SEP}{y}"}
@@ -619,12 +619,12 @@ class TelegramBot:
 
     def _fetch_and_send_logs(self, inst: InstanceConfig) -> None:
         """Fetch today's logs for *inst* and send them to Telegram."""
-        today_start = datetime.datetime.now(tz=datetime.timezone.utc).replace(
+        today_start = datetime.datetime.now(tz=datetime.UTC).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
         try:
             text = _docker_logs_today(inst.container_name, since=today_start)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._send_message(
                 f"❌ Could not fetch logs for `{_esc(inst.container_name)}`: {_esc(str(exc))}"
             )
@@ -659,7 +659,7 @@ class TelegramBot:
 
     def _month_buttons(self) -> list[list[dict]]:
         """Inline keyboard with the most recent months (previous month first)."""
-        today = datetime.datetime.now(tz=datetime.timezone.utc).date()
+        today = datetime.datetime.now(tz=datetime.UTC).date()
         months = []
         year, month = today.year, today.month
         for _ in range(_MONTH_BUTTON_COUNT):
@@ -760,7 +760,7 @@ def _docker_client_ctx() -> Generator[docker.DockerClient | None, None, None]:
     client = None
     try:
         client = docker.from_env()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.debug("docker client init failed: %s", exc)
     try:
         yield client
@@ -796,7 +796,7 @@ def _docker_check_session(
             container_name,
         )
         return None
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.debug("check-session exec failed for %s: %s", container_name, exc)
         return None
 
@@ -809,7 +809,7 @@ def _docker_container_status(
         client = client or docker.from_env()
         container = client.containers.get(container_name)
         return container.status
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.debug("container status lookup failed for %s: %s", container_name, exc)
         return None
 
@@ -821,9 +821,9 @@ def _format_sync_timestamp(raw: str) -> str:
             parsed = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
         else:
             parsed = datetime.datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(
-                tzinfo=datetime.timezone.utc
+                tzinfo=datetime.UTC
             )
-        return parsed.astimezone(datetime.timezone.utc).strftime("%Y/%m/%d %H:%M UTC")
+        return parsed.astimezone(datetime.UTC).strftime("%Y/%m/%d %H:%M UTC")
     except ValueError:
         return raw
 
@@ -841,7 +841,7 @@ def _docker_last_sync_summary(
         if exit_code != 0:
             return None
         payload = json.loads(output.decode(errors="replace"))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.debug("last sync lookup failed for %s: %s", container_name, exc)
         return None
 
@@ -894,7 +894,7 @@ def _docker_exec_silent(
     `login`, which may finish silently by resuming a still-valid session) can
     pass `on_success`. On failure, calls `on_error(message)` if provided.
     """
-    cmd = ["python", "-m", "app"] + app_args
+    cmd = ["python", "-m", "app", *app_args]
     log.info("Executing: docker exec %s %s", container_name, " ".join(cmd))
     try:
         client = docker.from_env()
@@ -919,7 +919,7 @@ def _docker_exec_silent(
                 on_error(
                     f"❌ Command failed on `{container_name}` \\(exit {exit_code}\\)\\."
                 )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.warning("docker exec failed for container %s: %s", container_name, exc)
         if on_error:
             on_error(f"❌ Could not exec on `{container_name}`: {exc}")

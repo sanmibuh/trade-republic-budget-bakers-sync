@@ -14,7 +14,28 @@ on:
       - ready_for_review
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff==0.16.2
+
+      - name: Check lint
+        run: ruff check .
+
+      - name: Check formatting
+        run: ruff format --check .
+
   test:
+    needs: lint
     runs-on: ubuntu-latest
     if: github.event.pull_request.draft == false || github.event_name == 'push'
     concurrency:

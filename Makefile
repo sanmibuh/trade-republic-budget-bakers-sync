@@ -2,7 +2,7 @@ VENV = .venv
 PYTHON = $(VENV)/bin/python
 LOCAL_ENV = deploy/local/local.env
 
-.PHONY: help test lint clean run-sync run-backup run-backup-monthly run-backup-yearly run-bot
+.PHONY: help test lint format clean run-sync run-backup run-backup-monthly run-backup-yearly run-bot
 
 # ── Default ─────────────────────────────────────────────────────────────────
 
@@ -12,7 +12,8 @@ help:
 	@echo ""
 	@echo "Dev targets (local, no Docker):"
 	@echo "  test                    Run the test suite with coverage"
-	@echo "  lint                    Run ruff linter"
+	@echo "  lint                    Check lint and formatting (ruff check + format --check)"
+	@echo "  format                  Auto-fix formatting (ruff format)"
 	@echo "  run-sync                One-shot sync"
 	@echo "  run-backup              One-shot backup auto"
 	@echo "  run-backup-monthly      One-shot backup for a specific month  (PARAM=YYYY-MM)"
@@ -42,6 +43,11 @@ test:
 
 lint:
 	$(PYTHON) -m ruff check .
+	$(PYTHON) -m ruff format --check .
+
+format:
+	$(PYTHON) -m ruff format .
+	$(PYTHON) -m ruff check --fix .
 
 run-sync: _load_env
 	@set -a && . $(LOCAL_ENV) && set +a && $(PYTHON) -m app sync

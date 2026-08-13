@@ -4,7 +4,7 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -25,7 +25,7 @@ def normalize_event_time(event: dict[str, Any]) -> str:
             return value.isoformat()
         s = str(value)
         return re.sub(r"([+-])(\d{2})(\d{2})$", r"\1\2:\3", s)
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def filter_by_lookback(
@@ -40,7 +40,7 @@ def filter_by_lookback(
         except ValueError:
             parsed = None
         if parsed is not None and parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=UTC)
         if parsed is None or parsed >= since:
             filtered.append(event)
     return filtered

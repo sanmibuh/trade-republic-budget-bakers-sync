@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from requests import HTTPError
@@ -29,7 +29,7 @@ from app.wallet_client import WalletClient
 
 try:
     from pytr.exceptions import AuthenticationError
-except Exception:  # pragma: no cover  # noqa: BLE001
+except Exception:  # pragma: no cover
 
     class AuthenticationError(Exception):  # type: ignore[no-redef]  # pragma: no cover
         """Sentinel: raised only by pytr when it IS installed."""
@@ -245,7 +245,7 @@ def run() -> int:
     notifier = _prepare(cfg)
     log.info("Starting sync for owner: %s", cfg.owner_name)
 
-    since = datetime.now(timezone.utc) - timedelta(days=cfg.lookback_days)
+    since = datetime.now(UTC) - timedelta(days=cfg.lookback_days)
 
     with EventRepository(cfg.data_dir / "sync.db") as repo:
         repo.purge_old_records()
@@ -258,7 +258,7 @@ def run() -> int:
 
         notifier.fetch_summary(
             since=since.strftime("%Y-%m-%d"),
-            until=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            until=datetime.now(UTC).strftime("%Y-%m-%d"),
             fetched=len(recent_events),
             new=len(new_events),
             skipped=skipped_count,

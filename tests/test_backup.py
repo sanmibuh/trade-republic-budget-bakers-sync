@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import UTC, date
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -79,10 +79,10 @@ def test_parse_monthly_param_wrong_format_raises():
 
 
 def test_parse_yearly_param_none_returns_previous_year():
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     year = _parse_yearly_param(None)
-    assert year == datetime.now(timezone.utc).year - 1
+    assert year == datetime.now(UTC).year - 1
 
 
 def test_parse_yearly_param_valid_string():

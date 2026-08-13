@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -286,9 +287,9 @@ def test_fetch_passes_zero_not_before_when_since_is_none(tmp_path):
 
 
 def test_fetch_passes_since_as_not_before(tmp_path):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    since = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    since = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)
     captured = {}
 
     def _factory(**kwargs):

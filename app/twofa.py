@@ -16,6 +16,7 @@ attached and whether Telegram is configured. If neither applies it returns
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections.abc import Callable
@@ -83,10 +84,8 @@ class TelegramCodeProvider:
             return ""
 
     def _clear(self) -> None:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             self._code_file.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def select_code_provider(
