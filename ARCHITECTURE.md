@@ -238,15 +238,19 @@ missing, detected with `PRAGMA table_info`.
 - The backup service omits it; notifications show `"Backup"` as the owner.
 
 ### SSL circuit-breaker (`app/http_client.py`)
-- `_ssl_verify: bool = True` — module-level flag shared across all HTTP calls.
-- `_allow_insecure_ssl: bool = False` — gate flag. The circuit-breaker only opens when this is `True`.
-- `configure(allow_insecure_ssl)` — called once at startup from `main.run()` and the `backup` CLI command.
-  Resets any previously tripped state.
+- `SSLCircuitBreaker` — class that encapsulates circuit state (`verify`, `allow_insecure`) and policy.
+  - `configure(allow_insecure_ssl)` — sets the policy and resets any previously tripped state.
+  - `open()` — trips the breaker (idempotent, logs a one-time warning).
+  - `verify` property — current boolean state (`True` = verify certificates).
+  - `allow_insecure` property — whether the circuit is allowed to open on `SSLError`.
+- `breaker` — module-level singleton instance shared across all HTTP calls.
+- `configure(allow_insecure_ssl)` — module-level convenience that delegates to `breaker.configure()`.
+  Called once at startup from `main.run()` and the `backup` CLI command.
 - `http_post(url, **kwargs)` — wraps `requests.post`; on `SSLError`, only falls back to `verify=False` when
-  `_allow_insecure_ssl` is `True`. Otherwise the error propagates.
+  `breaker.allow_insecure` is `True`. Otherwise the error propagates.
 - `build_session(headers)` — returns a `requests.Session` with a custom `_SSLCircuitBreakerAdapter` that applies
-  the same fallback logic per-request.
-- Both `notifier.py` (Telegram) and `wallet_client.py` (BudgetBakers) use this module — the flag is shared.
+  the same fallback logic per-request using the shared `breaker` singleton.
+- Both `notifier.py` (Telegram) and `wallet_client.py` (BudgetBakers) use this module — the singleton is shared.
 - Controlled via `ALLOW_INSECURE_SSL` env var (default `false`). Set to `true` only in environments with broken
   certificate chains (e.g. corporate VPN).
 

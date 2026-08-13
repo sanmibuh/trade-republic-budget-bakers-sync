@@ -1,22 +1,68 @@
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
 import app.http_client as http_client_module
-from app.http_client import build_session, configure, http_post
+from app.http_client import SSLCircuitBreaker, build_session, configure, http_post
 
 # ---------------------------------------------------------------------------
-# Helpers
+# SSLCircuitBreaker — unit tests (isolated instances, no shared state)
 # ---------------------------------------------------------------------------
 
 
-def _reset_state():
-    """Restore module-level flags to initial state."""
-    http_client_module._ssl_verify = True
-    http_client_module._allow_insecure_ssl = False
+def test_circuit_breaker_verify_true_by_default():
+    cb = SSLCircuitBreaker()
+    assert cb.verify is True
+
+
+def test_circuit_breaker_allow_insecure_false_by_default():
+    cb = SSLCircuitBreaker()
+    assert cb.allow_insecure is False
+
+
+def test_circuit_breaker_configure_sets_allow_insecure():
+    cb = SSLCircuitBreaker()
+    cb.configure(allow_insecure_ssl=True)
+    assert cb.allow_insecure is True
+
+
+def test_circuit_breaker_configure_resets_verify_to_true():
+    cb = SSLCircuitBreaker()
+    cb.configure(allow_insecure_ssl=True)
+    cb.open()
+    assert cb.verify is False
+    cb.configure(allow_insecure_ssl=True)
+    assert cb.verify is True
+
+
+def test_circuit_breaker_open_flips_verify_to_false():
+    cb = SSLCircuitBreaker()
+    cb.configure(allow_insecure_ssl=True)
+    cb.open()
+    assert cb.verify is False
+
+
+def test_circuit_breaker_open_logs_warning_once(caplog):
+    cb = SSLCircuitBreaker()
+    cb.configure(allow_insecure_ssl=True)
+    with caplog.at_level(logging.WARNING, logger="app.http_client"):
+        cb.open()
+        cb.open()  # second call must NOT log again
+    warnings = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "SSL" in warnings[0]
+
+
+def test_circuit_breaker_open_is_idempotent():
+    cb = SSLCircuitBreaker()
+    cb.configure(allow_insecure_ssl=True)
+    cb.open()
+    cb.open()
+    assert cb.verify is False
 
 
 # ---------------------------------------------------------------------------
@@ -25,9 +71,8 @@ def _reset_state():
 
 
 def test_http_post_uses_ssl_verify_true_by_default():
-    _reset_state()
+    configure(allow_insecure_ssl=False)
     mock_response = MagicMock()
-    mock_response.raise_for_status = MagicMock()
 
     with patch(
         "app.http_client.requests.post", return_value=mock_response
@@ -38,7 +83,7 @@ def test_http_post_uses_ssl_verify_true_by_default():
 
 
 def test_http_post_returns_response_on_success():
-    _reset_state()
+    configure(allow_insecure_ssl=False)
     mock_response = MagicMock()
 
     with patch("app.http_client.requests.post", return_value=mock_response):
@@ -48,7 +93,7 @@ def test_http_post_returns_response_on_success():
 
 
 def test_http_post_passes_kwargs_through():
-    _reset_state()
+    configure(allow_insecure_ssl=False)
     mock_response = MagicMock()
 
     with patch(
@@ -66,10 +111,8 @@ def test_http_post_passes_kwargs_through():
 
 
 def test_http_post_falls_back_to_no_verify_on_ssl_error():
-    _reset_state()
-    http_client_module._allow_insecure_ssl = True
+    configure(allow_insecure_ssl=True)
     mock_response = MagicMock()
-
     call_verifies = []
 
     def fake_post(url, *, verify, **kwargs):
@@ -83,13 +126,12 @@ def test_http_post_falls_back_to_no_verify_on_ssl_error():
 
     assert result is mock_response
     assert call_verifies == [True, False]
-    assert http_client_module._ssl_verify is False
+    assert http_client_module.breaker.verify is False
 
 
 def test_http_post_ssl_flag_stays_false_after_circuit_break():
-    _reset_state()
-    http_client_module._ssl_verify = False
-
+    configure(allow_insecure_ssl=True)
+    http_client_module.breaker.open()  # simulate previously tripped circuit
     mock_response = MagicMock()
 
     with patch(
@@ -102,16 +144,13 @@ def test_http_post_ssl_flag_stays_false_after_circuit_break():
 
 
 def test_http_post_ssl_warning_logged_once(caplog):
-    _reset_state()
-    http_client_module._allow_insecure_ssl = True
+    configure(allow_insecure_ssl=True)
     mock_response = MagicMock()
 
     def fake_post(url, *, verify, **kwargs):
         if verify is True:
             raise requests.exceptions.SSLError("cert verify failed")
         return mock_response
-
-    import logging
 
     with (
         caplog.at_level(logging.WARNING, logger="app.http_client"),
@@ -126,8 +165,7 @@ def test_http_post_ssl_warning_logged_once(caplog):
 
 def test_http_post_ssl_error_on_fallback_reraises():
     """If the fallback call (verify=False) also raises SSLError, it propagates."""
-    _reset_state()
-    http_client_module._allow_insecure_ssl = True
+    configure(allow_insecure_ssl=True)
 
     with (
         patch(
@@ -145,28 +183,27 @@ def test_http_post_ssl_error_on_fallback_reraises():
 
 
 def test_build_session_returns_session_with_verify_true_by_default():
-    _reset_state()
+    configure(allow_insecure_ssl=False)
     session = build_session()
     assert session.verify is True
 
 
 def test_build_session_respects_circuit_breaker_state():
-    http_client_module._ssl_verify = False
+    configure(allow_insecure_ssl=True)
+    http_client_module.breaker.open()  # simulate tripped circuit
     session = build_session()
     assert session.verify is False
-    _reset_state()
 
 
 def test_build_session_applies_extra_headers():
-    _reset_state()
+    configure(allow_insecure_ssl=False)
     session = build_session(headers={"Authorization": "Bearer tok"})
     assert session.headers["Authorization"] == "Bearer tok"
 
 
 def test_build_session_ssl_circuit_breaker_on_request(monkeypatch):
     """When a Session request raises SSLError, verify is flipped and request retried."""
-    _reset_state()
-    http_client_module._allow_insecure_ssl = True
+    configure(allow_insecure_ssl=True)
 
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -192,15 +229,14 @@ def test_build_session_ssl_circuit_breaker_on_request(monkeypatch):
     result = session.get("https://example.com")
 
     assert result is mock_response
-    assert call_count[0] == 2  # first attempt (truthy verify) + retry (verify=False)
-    assert http_client_module._ssl_verify is False
+    assert call_count[0] == 2
+    assert http_client_module.breaker.verify is False
 
 
 def test_adapter_uses_current_circuit_state_not_session_verify(monkeypatch):
-    """Adapter must use _ssl_verify, not session.verify, so tripped circuit is honoured
+    """Adapter must use breaker.verify, not session.verify, so tripped circuit is honoured
     even on sessions that were built before the circuit opened."""
-    _reset_state()
-    http_client_module._allow_insecure_ssl = True
+    configure(allow_insecure_ssl=True)
 
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -225,16 +261,14 @@ def test_adapter_uses_current_circuit_state_not_session_verify(monkeypatch):
     session = build_session()
     assert session.verify is True
 
-    # Manually trip the circuit (simulates another request having already opened it)
-    http_client_module._ssl_verify = False
+    # Trip the circuit (simulates another request having already opened it)
+    http_client_module.breaker.open()
 
-    # This request should use verify=False from the module state, NOT verify=True from session
+    # This request should use verify=False from the breaker, NOT verify=True from session
     result = session.get("https://example.com")
 
     assert result is mock_response
-    # Must NOT have retried — first attempt should already use verify=False
     assert verify_values == [False], f"Expected [False], got {verify_values}"
-    _reset_state()
 
 
 # ---------------------------------------------------------------------------
@@ -243,25 +277,23 @@ def test_adapter_uses_current_circuit_state_not_session_verify(monkeypatch):
 
 
 def test_configure_sets_allow_insecure_ssl_true():
-    _reset_state()
     configure(allow_insecure_ssl=True)
-    assert http_client_module._allow_insecure_ssl is True
-    _reset_state()
+    assert http_client_module.breaker.allow_insecure is True
 
 
 def test_configure_sets_allow_insecure_ssl_false():
-    http_client_module._allow_insecure_ssl = True
+    configure(allow_insecure_ssl=True)
     configure(allow_insecure_ssl=False)
-    assert http_client_module._allow_insecure_ssl is False
-    _reset_state()
+    assert http_client_module.breaker.allow_insecure is False
 
 
 def test_configure_resets_ssl_verify_flag():
     """configure() resets the circuit-breaker so a previously tripped flag is cleared."""
-    http_client_module._ssl_verify = False  # simulates a previously tripped circuit
     configure(allow_insecure_ssl=True)
-    assert http_client_module._ssl_verify is True
-    _reset_state()
+    http_client_module.breaker.open()
+    assert http_client_module.breaker.verify is False
+    configure(allow_insecure_ssl=True)
+    assert http_client_module.breaker.verify is True
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +303,7 @@ def test_configure_resets_ssl_verify_flag():
 
 def test_http_post_ssl_error_propagates_when_insecure_not_allowed():
     """With allow_insecure_ssl=False (default), SSLError must propagate — no fallback."""
-    _reset_state()
+    configure(allow_insecure_ssl=False)
 
     with (
         patch(
@@ -282,14 +314,12 @@ def test_http_post_ssl_error_propagates_when_insecure_not_allowed():
     ):
         http_post("https://example.com", json={})
 
-    # Circuit must NOT have opened
-    assert http_client_module._ssl_verify is True
+    assert http_client_module.breaker.verify is True
 
 
 def test_http_post_ssl_fallback_only_when_allowed():
     """With allow_insecure_ssl=True, SSLError triggers the fallback."""
-    _reset_state()
-    http_client_module._allow_insecure_ssl = True
+    configure(allow_insecure_ssl=True)
 
     mock_response = MagicMock()
     calls = []
@@ -305,13 +335,12 @@ def test_http_post_ssl_fallback_only_when_allowed():
 
     assert result is mock_response
     assert calls == [True, False]
-    assert http_client_module._ssl_verify is False
-    _reset_state()
+    assert http_client_module.breaker.verify is False
 
 
 def test_build_session_ssl_error_propagates_when_insecure_not_allowed(monkeypatch):
     """SSLError in Session adapter must propagate when allow_insecure_ssl=False."""
-    _reset_state()
+    configure(allow_insecure_ssl=False)
 
     import requests.adapters
 
@@ -324,5 +353,4 @@ def test_build_session_ssl_error_propagates_when_insecure_not_allowed(monkeypatc
     with pytest.raises(requests.exceptions.SSLError):
         session.get("https://example.com")
 
-    # Circuit must NOT have opened
-    assert http_client_module._ssl_verify is True
+    assert http_client_module.breaker.verify is True
