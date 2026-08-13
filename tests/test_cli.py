@@ -15,6 +15,7 @@ def _runner() -> CliRunner:
 # Help
 # ---------------------------------------------------------------------------
 
+
 def test_help_shows_commands():
     result = _runner().invoke(cli, ["--help"])
     assert result.exit_code == 0
@@ -40,6 +41,7 @@ def test_backup_help():
 # sync command
 # ---------------------------------------------------------------------------
 
+
 def test_sync_calls_run():
     with patch("app.main.run", return_value=0) as mock_run:
         result = _runner().invoke(cli, ["sync"])
@@ -57,6 +59,7 @@ def test_sync_exits_with_run_return_code():
 # backup command — mode validation
 # ---------------------------------------------------------------------------
 
+
 def test_backup_invalid_mode_rejected():
     result = _runner().invoke(cli, ["backup", "weekly"])
     assert result.exit_code != 0
@@ -72,6 +75,7 @@ def test_backup_no_mode_shows_help():
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+
 def _mock_cfg(tmp_path):
     cfg = MagicMock()
     cfg.wallet_api_key = "key"
@@ -85,6 +89,7 @@ def _mock_cfg(tmp_path):
 # ---------------------------------------------------------------------------
 # backup auto
 # ---------------------------------------------------------------------------
+
 
 def test_backup_auto_calls_run_auto(tmp_path):
     with (
@@ -103,6 +108,7 @@ def test_backup_auto_calls_run_auto(tmp_path):
 # ---------------------------------------------------------------------------
 # backup monthly
 # ---------------------------------------------------------------------------
+
 
 def test_backup_monthly_default_calls_run_monthly(tmp_path):
     with (
@@ -128,7 +134,7 @@ def test_backup_monthly_with_param(tmp_path):
         result = _runner().invoke(cli, ["backup", "monthly", "2026-07"])
     assert result.exit_code == 0
     assert mock_monthly.call_args.args[3] == 2026  # year
-    assert mock_monthly.call_args.args[4] == 7     # month
+    assert mock_monthly.call_args.args[4] == 7  # month
 
 
 def test_backup_monthly_invalid_param_exits(tmp_path):
@@ -145,6 +151,7 @@ def test_backup_monthly_invalid_param_exits(tmp_path):
 # ---------------------------------------------------------------------------
 # backup yearly
 # ---------------------------------------------------------------------------
+
 
 def test_backup_yearly_default_calls_run_yearly(tmp_path):
     with (
@@ -187,6 +194,7 @@ def test_backup_yearly_invalid_param_exits(tmp_path):
 # login command
 # ---------------------------------------------------------------------------
 
+
 def test_login_help():
     result = _runner().invoke(cli, ["login", "--help"])
     assert result.exit_code == 0
@@ -210,6 +218,7 @@ def test_login_exits_with_return_code():
 # submit-code command
 # ---------------------------------------------------------------------------
 
+
 def test_submit_code_writes_code_file(tmp_path):
     from app.twofa import CODE_FILENAME
 
@@ -223,6 +232,7 @@ def test_submit_code_writes_code_file(tmp_path):
 # ---------------------------------------------------------------------------
 # bot command
 # ---------------------------------------------------------------------------
+
 
 def test_bot_help():
     result = _runner().invoke(cli, ["bot", "--help"])
@@ -242,6 +252,7 @@ def test_bot_calls_run():
 # ---------------------------------------------------------------------------
 # check-session command
 # ---------------------------------------------------------------------------
+
 
 def test_check_session_exits_zero_when_credentials_exist(tmp_path):
     """Exit 0 when credentials.json is present — session was previously saved."""

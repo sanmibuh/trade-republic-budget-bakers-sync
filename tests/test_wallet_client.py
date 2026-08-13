@@ -10,6 +10,7 @@ from app.wallet_client import WalletClient
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_client() -> WalletClient:
     return WalletClient(api_key="test-key", base_url="https://example.com/wallet")
 
@@ -26,11 +27,14 @@ def _mock_response(status_code: int, body: dict):
 # WalletClient.post_records
 # ---------------------------------------------------------------------------
 
+
 def test_post_records_url_uses_api_base():
     """post_records must POST to the same /v1/api base as GET endpoints."""
     client = _make_client()
     results = [{"inputIndex": 0, "success": True}]
-    client.session.post = MagicMock(return_value=_mock_response(200, {"results": results}))
+    client.session.post = MagicMock(
+        return_value=_mock_response(200, {"results": results})
+    )
 
     client.post_records([{"accountId": "x"}])
 
@@ -46,7 +50,9 @@ def test_post_records_empty_returns_empty():
 def test_post_records_200_returns_results():
     client = _make_client()
     results = [{"inputIndex": 0, "id": "abc", "success": True}]
-    client.session.post = MagicMock(return_value=_mock_response(200, {"results": results}))
+    client.session.post = MagicMock(
+        return_value=_mock_response(200, {"results": results})
+    )
 
     out = client.post_records([{"accountId": "x"}])
 
@@ -62,7 +68,9 @@ def test_post_records_207_returns_results():
         {"inputIndex": 0, "id": "abc", "success": True},
         {"inputIndex": 1, "success": False, "error": {"message": "bad"}},
     ]
-    client.session.post = MagicMock(return_value=_mock_response(207, {"results": results}))
+    client.session.post = MagicMock(
+        return_value=_mock_response(207, {"results": results})
+    )
 
     out = client.post_records([{}, {}])
     assert out == results
@@ -71,7 +79,9 @@ def test_post_records_207_returns_results():
 def test_post_records_400_returns_results():
     client = _make_client()
     results = [{"inputIndex": 0, "success": False, "error": {"message": "validation"}}]
-    client.session.post = MagicMock(return_value=_mock_response(400, {"results": results}))
+    client.session.post = MagicMock(
+        return_value=_mock_response(400, {"results": results})
+    )
 
     out = client.post_records([{}])
     assert out == results
@@ -79,8 +89,12 @@ def test_post_records_400_returns_results():
 
 def test_post_records_500_returns_results():
     client = _make_client()
-    results = [{"inputIndex": 0, "success": False, "error": {"message": "internal error"}}]
-    client.session.post = MagicMock(return_value=_mock_response(500, {"results": results}))
+    results = [
+        {"inputIndex": 0, "success": False, "error": {"message": "internal error"}}
+    ]
+    client.session.post = MagicMock(
+        return_value=_mock_response(500, {"results": results})
+    )
 
     out = client.post_records([{}])
     assert out == results
@@ -123,6 +137,7 @@ def test_post_records_chunks_at_20():
 # ---------------------------------------------------------------------------
 # WalletClient GET methods
 # ---------------------------------------------------------------------------
+
 
 def _mock_get_response(status_code: int, body):
     resp = MagicMock()

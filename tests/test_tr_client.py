@@ -8,7 +8,9 @@ import pytest
 from app.tr_client import LoginFailedError, SessionExpiredError, TRClient
 
 
-def _make_pytr_client(*, needs_authenticator: bool = True, resume: bool = False) -> MagicMock:
+def _make_pytr_client(
+    *, needs_authenticator: bool = True, resume: bool = False
+) -> MagicMock:
     client = MagicMock()
     client.resume_websession.return_value = resume
     client.weblogin_needs_authenticator = needs_authenticator
@@ -22,6 +24,7 @@ def _make_tr_client(tmp_path: Path) -> TRClient:
 # ---------------------------------------------------------------------------
 # TRClient.connect — session resume
 # ---------------------------------------------------------------------------
+
 
 def test_connect_resumes_existing_session(tmp_path):
     pytr = _make_pytr_client(resume=True)
@@ -50,6 +53,7 @@ def test_connect_does_not_notify_when_session_resumes(tmp_path):
 # ---------------------------------------------------------------------------
 # TRClient.connect — authenticator flow
 # ---------------------------------------------------------------------------
+
 
 def test_connect_authenticator_flow(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
@@ -96,8 +100,10 @@ def test_connect_authenticator_raises_login_failed_on_bad_code(tmp_path):
     code_provider = MagicMock()
     code_provider.get_code.return_value = "000000"
     tr_client = _make_tr_client(tmp_path)
-    with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         pytest.raises(LoginFailedError):
+    with (
+        patch("pytr.api.TradeRepublicApi", return_value=pytr),
+        pytest.raises(LoginFailedError),
+    ):
         tr_client.connect(code_provider=code_provider)
 
 
@@ -108,9 +114,13 @@ def test_connect_authenticator_no_success_callback_on_failure(tmp_path):
     code_provider.get_code.return_value = "000000"
     on_login_success = MagicMock()
     tr_client = _make_tr_client(tmp_path)
-    with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         pytest.raises(LoginFailedError):
-        tr_client.connect(on_login_success=on_login_success, code_provider=code_provider)
+    with (
+        patch("pytr.api.TradeRepublicApi", return_value=pytr),
+        pytest.raises(LoginFailedError),
+    ):
+        tr_client.connect(
+            on_login_success=on_login_success, code_provider=code_provider
+        )
     on_login_success.assert_not_called()
 
 
@@ -118,11 +128,14 @@ def test_connect_authenticator_no_success_callback_on_failure(tmp_path):
 # TRClient.connect — no code provider (non-interactive) bails out cleanly
 # ---------------------------------------------------------------------------
 
+
 def test_connect_authenticator_no_provider_raises_session_expired(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
     tr_client = _make_tr_client(tmp_path)
-    with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         pytest.raises(SessionExpiredError):
+    with (
+        patch("pytr.api.TradeRepublicApi", return_value=pytr),
+        pytest.raises(SessionExpiredError),
+    ):
         tr_client.connect(code_provider=None)
 
     pytr.complete_weblogin.assert_not_called()
@@ -134,8 +147,10 @@ def test_connect_authenticator_no_provider_no_success_callback(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=True)
     on_login_success = MagicMock()
     tr_client = _make_tr_client(tmp_path)
-    with patch("pytr.api.TradeRepublicApi", return_value=pytr), \
-         pytest.raises(SessionExpiredError):
+    with (
+        patch("pytr.api.TradeRepublicApi", return_value=pytr),
+        pytest.raises(SessionExpiredError),
+    ):
         tr_client.connect(on_login_success=on_login_success, code_provider=None)
     on_login_success.assert_not_called()
 
@@ -143,6 +158,7 @@ def test_connect_authenticator_no_provider_no_success_callback(tmp_path):
 # ---------------------------------------------------------------------------
 # TRClient.connect — app approval flow
 # ---------------------------------------------------------------------------
+
 
 def test_connect_app_approval_flow(tmp_path):
     pytr = _make_pytr_client(needs_authenticator=False)
@@ -160,6 +176,7 @@ def test_connect_app_approval_flow(tmp_path):
 # ---------------------------------------------------------------------------
 # TRClient.connect — API constructor arguments
 # ---------------------------------------------------------------------------
+
 
 def test_connect_passes_correct_files_to_api(tmp_path):
     pytr = _make_pytr_client(resume=True)
@@ -179,6 +196,7 @@ def test_connect_passes_correct_files_to_api(tmp_path):
 # TRClient.fetch_timeline_events — requires connect() first
 # ---------------------------------------------------------------------------
 
+
 def test_fetch_raises_if_not_connected(tmp_path):
     tr_client = _make_tr_client(tmp_path)
     with pytest.raises(RuntimeError, match="connect\\(\\)"):
@@ -189,6 +207,7 @@ def test_fetch_raises_if_not_connected(tmp_path):
 # TRClient.fetch_timeline_events — Timeline-based fetch
 # ---------------------------------------------------------------------------
 
+
 class _FakeTimeline:
     """Test double for pytr.timeline.Timeline.
 
@@ -196,7 +215,16 @@ class _FakeTimeline:
     is awaited, then returns.
     """
 
-    def __init__(self, *, tr, output_path, not_before, store_event_database, event_callback, events=None):
+    def __init__(
+        self,
+        *,
+        tr,
+        output_path,
+        not_before,
+        store_event_database,
+        event_callback,
+        events=None,
+    ):
         self.tr = tr
         self.output_path = output_path
         self.not_before = not_before
@@ -211,9 +239,11 @@ class _FakeTimeline:
 
 def _patch_timeline(events=None, side_effect=None):
     """Return a patch context manager for pytr.timeline.Timeline."""
+
     def _factory(**kwargs):
         fake = _FakeTimeline(events=events, **kwargs)
         if side_effect is not None:
+
             async def _raise():
                 raise side_effect
 

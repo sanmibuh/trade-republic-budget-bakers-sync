@@ -13,6 +13,7 @@ Two strategies exist for obtaining the authenticator code during a v2 web login:
 attached and whether Telegram is configured. If neither applies it returns
 ``None``, signalling the caller that an authenticator login cannot proceed.
 """
+
 from __future__ import annotations
 
 import logging

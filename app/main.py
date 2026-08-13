@@ -30,8 +30,10 @@ from app.wallet_client import WalletClient
 try:
     from pytr.exceptions import AuthenticationError
 except Exception:  # pragma: no cover  # noqa: BLE001
+
     class AuthenticationError(Exception):  # type: ignore[no-redef]  # pragma: no cover
         """Sentinel: raised only by pytr when it IS installed."""
+
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +41,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Result value objects
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _SyncCounts:
@@ -57,6 +60,7 @@ class _Batch:
 # ---------------------------------------------------------------------------
 # Private steps
 # ---------------------------------------------------------------------------
+
 
 def _prepare(cfg: Config) -> Notifier:
     """Shared bootstrap for the sync/login entry points.
@@ -114,7 +118,9 @@ def _fetch_events(
         notifier.login_failed()
         raise SystemExit(1) from None
     except SessionExpiredError:
-        log.warning("Session expired and no interactive terminal available — bootstrap required")
+        log.warning(
+            "Session expired and no interactive terminal available — bootstrap required"
+        )
         notifier.authentication_required()
         raise SystemExit(1) from None
     except AuthenticationError:
@@ -151,7 +157,10 @@ def _build_batch(
     for event_idx, event in enumerate(new_events):
         event_type = extract_event_type(event)
         if event_type and event_type not in KNOWN_EVENT_TYPES:
-            log.warning("Unknown TR event type %r — notifying and falling back to cash handler", event_type)
+            log.warning(
+                "Unknown TR event type %r — notifying and falling back to cash handler",
+                event_type,
+            )
             notifier.unknown_event_type(event_type)
 
         recs = build_records_for_event(
@@ -191,7 +200,9 @@ def _process_results(
         missing = [i for i in record_indices if i not in results_by_index]
         if missing:
             eid = dedup_event_id(event)
-            log.error("Event %s has no API result for record index(es): %s", eid, missing)
+            log.error(
+                "Event %s has no API result for record index(es): %s", eid, missing
+            )
             notifier.missing_api_result(eid, missing)
             failed += 1
             continue
@@ -213,7 +224,12 @@ def _process_results(
             failed += 1
             eid = dedup_event_id(event)
             for f in failures:
-                log.error("Event %s record %d failed: %s", eid, f.get("inputIndex"), f.get("error"))
+                log.error(
+                    "Event %s record %d failed: %s",
+                    eid,
+                    f.get("inputIndex"),
+                    f.get("error"),
+                )
 
     repo.commit()
     return _SyncCounts(synced=synced, failed=failed)
@@ -222,6 +238,7 @@ def _process_results(
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
+
 
 def run() -> int:
     cfg = Config.from_env()
@@ -253,12 +270,21 @@ def run() -> int:
             counts.excluded = batch.excluded_count
 
             if batch.records:
-                results = WalletClient(api_key=cfg.wallet_api_key).post_records(batch.records)
+                results = WalletClient(api_key=cfg.wallet_api_key).post_records(
+                    batch.records
+                )
                 log.debug("API results: %s", results)
-                counts = _process_results(results, new_events, batch.event_record_indices, repo, notifier)
+                counts = _process_results(
+                    results, new_events, batch.event_record_indices, repo, notifier
+                )
                 counts.excluded = batch.excluded_count
 
-            log.info("Sync complete. synced=%d excluded=%d failed=%d", counts.synced, counts.excluded, counts.failed)
+            log.info(
+                "Sync complete. synced=%d excluded=%d failed=%d",
+                counts.synced,
+                counts.excluded,
+                counts.failed,
+            )
         except Exception as exc:
             log.exception("Error syncing events to wallet")
             notifier.error(exc)
@@ -271,7 +297,9 @@ def run() -> int:
                 excluded=counts.excluded,
             )
             if not sent:
-                log.warning("sync_complete notification not sent (no credentials or request failed)")
+                log.warning(
+                    "sync_complete notification not sent (no credentials or request failed)"
+                )
 
     return 0
 
@@ -295,7 +323,9 @@ def run_login() -> int:
         notifier.login_failed()
         return 1
     except SessionExpiredError:
-        log.warning("Session expired and no code provider available — bootstrap required")
+        log.warning(
+            "Session expired and no code provider available — bootstrap required"
+        )
         notifier.authentication_required()
         return 1
     except Exception as exc:

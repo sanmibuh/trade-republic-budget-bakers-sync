@@ -100,7 +100,9 @@ class TRClient:
                 client._await_weblogin_confirmation()
                 client.save_websession()
             else:
-                log.info("Waiting for push notification approval in Trade Republic app...")
+                log.info(
+                    "Waiting for push notification approval in Trade Republic app..."
+                )
                 client.complete_weblogin()
                 client.save_websession()
 
@@ -116,7 +118,9 @@ class TRClient:
 
         self._api = client
 
-    def fetch_timeline_events(self, since: datetime | None = None) -> list[dict[str, Any]]:
+    def fetch_timeline_events(
+        self, since: datetime | None = None
+    ) -> list[dict[str, Any]]:
         """Fetch timeline events with full details via pytr's Timeline class.
 
         Runs pytr's async Timeline loop in a single asyncio.run() call so that
@@ -128,7 +132,9 @@ class TRClient:
         timelineDetailV2 payload (e.g. counterparty info for bank transfers).
         """
         if self._api is None:
-            raise RuntimeError("TRClient.connect() must be called before fetch_timeline_events()")
+            raise RuntimeError(
+                "TRClient.connect() must be called before fetch_timeline_events()"
+            )
 
         from pytr.timeline import Timeline
 
@@ -150,5 +156,3 @@ class TRClient:
 
         log.debug("Got %d events from Timeline", len(collected))
         return collected
-
-

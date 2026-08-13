@@ -47,10 +47,11 @@ class WalletClient:
 
         all_results: list[dict[str, Any]] = []
         for chunk_start in range(0, len(records), self._BATCH_SIZE):
-            chunk = records[chunk_start: chunk_start + self._BATCH_SIZE]
+            chunk = records[chunk_start : chunk_start + self._BATCH_SIZE]
             log.debug(
                 "POST /v1/api/records chunk offset=%d size=%d",
-                chunk_start, len(chunk),
+                chunk_start,
+                len(chunk),
             )
             response = self.session.post(
                 f"{self._get_base}/records",
@@ -76,7 +77,9 @@ class WalletClient:
     # GET methods — Wallet backup API
     # ------------------------------------------------------------------
 
-    def _get_all(self, resource: str, params: dict[str, Any] | None = None) -> list[dict]:
+    def _get_all(
+        self, resource: str, params: dict[str, Any] | None = None
+    ) -> list[dict]:
         """Fetch all pages for a given resource, following nextOffset pagination."""
         results: list[dict] = []
         offset: int | None = None

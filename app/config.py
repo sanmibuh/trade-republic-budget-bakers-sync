@@ -103,7 +103,9 @@ class Config:
     @classmethod
     def from_env(cls) -> Config:
         notifier_env = _read_notifier_env()
-        instance = os.getenv("INSTANCE", "").strip() or str(notifier_env["owner_name"]).lower()
+        instance = (
+            os.getenv("INSTANCE", "").strip() or str(notifier_env["owner_name"]).lower()
+        )
         return cls(
             **notifier_env,
             phone_number=_required_env("PHONE_NUMBER"),

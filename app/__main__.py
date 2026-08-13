@@ -9,6 +9,7 @@ Usage:
     python -m app backup yearly            # backup previous year
     python -m app backup yearly 2025       # backup specific year
 """
+
 from __future__ import annotations
 
 import sys
@@ -129,13 +130,17 @@ def backup(mode: str, param: str | None) -> None:
         try:
             year, month = _parse_monthly_param(param)
         except ValueError:
-            raise click.BadParameter(f"Expected YYYY-MM, got {param!r}", param_hint="PARAM") from None
+            raise click.BadParameter(
+                f"Expected YYYY-MM, got {param!r}", param_hint="PARAM"
+            ) from None
         run_monthly(client, notifier, cfg.data_dir, year, month)
     elif mode == "yearly":
         try:
             year = _parse_yearly_param(param)
         except ValueError:
-            raise click.BadParameter(f"Expected YYYY, got {param!r}", param_hint="PARAM") from None
+            raise click.BadParameter(
+                f"Expected YYYY, got {param!r}", param_hint="PARAM"
+            ) from None
         run_yearly(client, notifier, cfg.data_dir, year)
 
 

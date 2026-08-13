@@ -19,6 +19,7 @@ _TTL_DAYS = 60
 # Pure helpers (no state)
 # ---------------------------------------------------------------------------
 
+
 def event_id(event: dict[str, Any]) -> str:
     for key in ("id", "eventId", "event_id"):
         value = event.get(key)
@@ -37,7 +38,12 @@ def dedup_event_id(event: dict[str, Any]) -> str:
             extract_event_type(event),
             normalize_event_time(event),
             str(event.get("amount") or event.get("value") or ""),
-            str(event.get("title") or event.get("name") or event.get("description") or ""),
+            str(
+                event.get("title")
+                or event.get("name")
+                or event.get("description")
+                or ""
+            ),
         ]
     )
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
@@ -97,7 +103,10 @@ class EventRepository:
             self._conn.execute(_MIGRATE_ADD_WALLET_RECORD_ID)
 
     def _column_names(self, table: str) -> set[str]:
-        return {row[1] for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        return {
+            row[1]
+            for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
 
     def filter_unprocessed(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         events_with_ids = [(event, dedup_event_id(event)) for event in events]
@@ -107,13 +116,18 @@ class EventRepository:
 
         placeholders = ",".join("?" for _ in ids)
         rows = self._conn.execute(
-            f"SELECT event_id FROM processed_events WHERE event_id IN ({placeholders})", ids
+            f"SELECT event_id FROM processed_events WHERE event_id IN ({placeholders})",
+            ids,
         ).fetchall()
         processed = {row[0] for row in rows}
 
-        return [event for event, dedup_id in events_with_ids if dedup_id not in processed]
+        return [
+            event for event, dedup_id in events_with_ids if dedup_id not in processed
+        ]
 
-    def mark_processed(self, event: dict[str, Any], *, wallet_record_id: str | None = None) -> None:
+    def mark_processed(
+        self, event: dict[str, Any], *, wallet_record_id: str | None = None
+    ) -> None:
         eid = dedup_event_id(event)
         event_type = extract_event_type(event)
         event_timestamp = normalize_event_time(event)
@@ -128,7 +142,15 @@ class EventRepository:
             "INSERT OR IGNORE INTO processed_events "
             "(event_id, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (eid, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id),
+            (
+                eid,
+                event_type,
+                event_timestamp,
+                amount,
+                raw,
+                synced_at,
+                wallet_record_id,
+            ),
         )
 
     def get_wallet_record_id(self, event: dict[str, Any]) -> str | None:
@@ -150,7 +172,11 @@ class EventRepository:
         )
         deleted = cursor.rowcount
         if deleted:
-            log.info("Purged %d processed_events records older than %d days", deleted, ttl_days)
+            log.info(
+                "Purged %d processed_events records older than %d days",
+                deleted,
+                ttl_days,
+            )
         self._conn.commit()
         return deleted
 

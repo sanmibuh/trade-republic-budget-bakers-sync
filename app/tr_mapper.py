@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 # Time normalisation
 # ---------------------------------------------------------------------------
 
+
 def normalize_event_time(event: dict[str, Any]) -> str:
     for key in ("timestamp", "createdAt", "created_at", "date", "recordDate"):
         value = event.get(key)
@@ -23,11 +24,13 @@ def normalize_event_time(event: dict[str, Any]) -> str:
         if isinstance(value, datetime):
             return value.isoformat()
         s = str(value)
-        return re.sub(r'([+-])(\d{2})(\d{2})$', r'\1\2:\3', s)
+        return re.sub(r"([+-])(\d{2})(\d{2})$", r"\1\2:\3", s)
     return datetime.now(timezone.utc).isoformat()
 
 
-def filter_by_lookback(events: list[dict[str, Any]], since: datetime) -> list[dict[str, Any]]:
+def filter_by_lookback(
+    events: list[dict[str, Any]], since: datetime
+) -> list[dict[str, Any]]:
     filtered = []
     for event in events:
         event_time = normalize_event_time(event)
@@ -46,6 +49,7 @@ def filter_by_lookback(events: list[dict[str, Any]], since: datetime) -> list[di
 # ---------------------------------------------------------------------------
 # Amount extraction
 # ---------------------------------------------------------------------------
+
 
 def _to_decimal(value: Any) -> Decimal:
     if value is None:
@@ -78,12 +82,7 @@ def extract_event_type(event: dict[str, Any]) -> str:
     Checks ``eventType``, ``type``, and ``event_type`` in order, skipping
     falsy values.  Returns an empty string if none are present or all are falsy.
     """
-    value = (
-        event.get("eventType")
-        or event.get("type")
-        or event.get("event_type")
-        or ""
-    )
+    value = event.get("eventType") or event.get("type") or event.get("event_type") or ""
     return str(value).upper()
 
 
@@ -99,6 +98,7 @@ def extract_amount(event: dict[str, Any], *keys: str) -> Decimal:
 # ---------------------------------------------------------------------------
 # Details extraction helpers
 # ---------------------------------------------------------------------------
+
 
 def _resolve_detail_text(detail: dict[str, Any]) -> str | None:
     """Extract display text from a detail dict, preferring displayValue.text."""
@@ -126,10 +126,9 @@ def _extract_detail_row(details: dict[str, Any], row_title: str) -> str | None:
 def _resolve_iban(item: dict[str, Any]) -> str | None:
     """Extract full or masked IBAN from a detail item."""
     try:
-        full_iban: str = (
-            item["detail"]["action"]["payload"]
-            ["sections"][0]["data"][0]["title"]
-        )
+        full_iban: str = item["detail"]["action"]["payload"]["sections"][0]["data"][0][
+            "title"
+        ]
         return full_iban.replace(" ", "")
     except (KeyError, IndexError, TypeError):
         return (item.get("detail") or {}).get("text") or None
@@ -176,20 +175,27 @@ _EVENT_TITLES: dict[str, str] = {
     "BANK_TRANSACTION_OUTGOING": "Bank Transfer Out",
 }
 
-_PREFIXED_TYPES: frozenset[str] = frozenset({
-    "INTEREST_PAYOUT",
-    "INTEREST_PAYMENT",
-    "SAVEBACK_AGGREGATE",
-    "SPARE_CHANGE_AGGREGATE",
-    "TRADING_SAVINGSPLAN_EXECUTED",
-})
+_PREFIXED_TYPES: frozenset[str] = frozenset(
+    {
+        "INTEREST_PAYOUT",
+        "INTEREST_PAYMENT",
+        "SAVEBACK_AGGREGATE",
+        "SPARE_CHANGE_AGGREGATE",
+        "TRADING_SAVINGSPLAN_EXECUTED",
+    }
+)
 
 _BANK_DIRECTION: dict[str, str] = {
     "BANK_TRANSACTION_INCOMING": "From",
     "BANK_TRANSACTION_OUTGOING": "To",
 }
 
-_ORIGIN_REF_KEYS: tuple[str, ...] = ("relatedId", "originalId", "originEventId", "referenceId")
+_ORIGIN_REF_KEYS: tuple[str, ...] = (
+    "relatedId",
+    "originalId",
+    "originEventId",
+    "referenceId",
+)
 
 
 def _gross_tax_note(gross: str | None, tax: str | None) -> str | None:
@@ -255,7 +261,9 @@ def _build_note(event: dict[str, Any], event_type: str) -> str:
     4. Everything else → raw title, mapped label, event_type, or generic fallback.
     In all cases, detail extras (Transaktion, gross/tax) are appended when present.
     """
-    tr_title = str(_get_first_match(event, "title", "name", "description") or "").strip()
+    tr_title = str(
+        _get_first_match(event, "title", "name", "description") or ""
+    ).strip()
 
     # 1. Bank transactions: directional prefix, no further extras
     direction = _BANK_DIRECTION.get(event_type)
@@ -297,7 +305,8 @@ def _make_record(
         "amount": {"value": float(amount)},
         "recordDate": record_date,
         "note": note,
-        "paymentType": payment_type or ("transfer" if transfer_account_id else "web_payment"),
+        "paymentType": payment_type
+        or ("transfer" if transfer_account_id else "web_payment"),
     }
     if transfer_account_id:
         r["transfer"] = {"pairingMode": "new", "accountId": transfer_account_id}
@@ -318,6 +327,7 @@ def _make_record(
 # Handler context
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class _EventContext:
     event: dict[str, Any]
@@ -333,34 +343,60 @@ class _EventContext:
 # Adding a new event type = add one line in _HANDLERS + one handler if needed.
 # ---------------------------------------------------------------------------
 
+
 def _handle_cash(ctx: _EventContext) -> list[dict[str, Any]]:
     return [_make_record(ctx.cash_account_id, ctx.amount, ctx.note, ctx.record_date)]
 
 
 def _handle_transfer_to_portfolio(ctx: _EventContext) -> list[dict[str, Any]]:
-    return [_make_record(ctx.cash_account_id, ctx.amount, ctx.note, ctx.record_date, transfer_account_id=ctx.portfolio_account_id)]
+    return [
+        _make_record(
+            ctx.cash_account_id,
+            ctx.amount,
+            ctx.note,
+            ctx.record_date,
+            transfer_account_id=ctx.portfolio_account_id,
+        )
+    ]
 
 
 def _handle_saveback(ctx: _EventContext) -> list[dict[str, Any]]:
-    return [_make_record(ctx.portfolio_account_id, ctx.amount, ctx.note, ctx.record_date)]
+    return [
+        _make_record(ctx.portfolio_account_id, ctx.amount, ctx.note, ctx.record_date)
+    ]
 
 
 def _handle_card(ctx: _EventContext) -> list[dict[str, Any]]:
-    return [_make_record(ctx.cash_account_id, ctx.amount, ctx.note, ctx.record_date, payment_type="debit_card")]
+    return [
+        _make_record(
+            ctx.cash_account_id,
+            ctx.amount,
+            ctx.note,
+            ctx.record_date,
+            payment_type="debit_card",
+        )
+    ]
 
 
 def _handle_bank_transaction(ctx: _EventContext) -> list[dict[str, Any]]:
     """Cash record with an unpaired transfer and optional IBAN counter-party."""
-    tr_title = str(_get_first_match(ctx.event, "title", "name", "description") or "").strip()
+    tr_title = str(
+        _get_first_match(ctx.event, "title", "name", "description") or ""
+    ).strip()
     details = ctx.event.get("details") or {}
     iban = _extract_iban_from_details(details)
     counter_party = iban or tr_title or None
-    return [_make_record(
-        ctx.cash_account_id, ctx.amount, ctx.note, ctx.record_date,
-        payment_type="transfer",
-        counter_party=counter_party,
-        unpaired_transfer=True,
-    )]
+    return [
+        _make_record(
+            ctx.cash_account_id,
+            ctx.amount,
+            ctx.note,
+            ctx.record_date,
+            payment_type="transfer",
+            counter_party=counter_party,
+            unpaired_transfer=True,
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -371,29 +407,31 @@ def _handle_bank_transaction(ctx: _EventContext) -> list[dict[str, Any]]:
 _EventHandler = Callable[[_EventContext], list[dict[str, Any]]]
 
 _HANDLERS: dict[str, _EventHandler] = {
-    "INTEREST_PAYMENT":                         _handle_cash,
-    "INTEREST_PAYOUT":                          _handle_cash,
-    "PAYMENT_INBOUND":                          _handle_cash,
-    "BUY_ORDER":                                _handle_transfer_to_portfolio,
-    "SELL_ORDER":                               _handle_transfer_to_portfolio,
-    "SAVINGS_PLAN":                             _handle_transfer_to_portfolio,
-    "TRADING_SAVINGSPLAN_EXECUTED":             _handle_transfer_to_portfolio,
-    "SAVEBACK_AGGREGATE":                       _handle_transfer_to_portfolio,
-    "SPARE_CHANGE_AGGREGATE":                   _handle_transfer_to_portfolio,
-    "SAVEBACK":                                 _handle_saveback,
-    "CARD_TRANSACTION":                         _handle_card,
-    "BANK_TRANSACTION_INCOMING":                _handle_bank_transaction,
-    "BANK_TRANSACTION_OUTGOING":                _handle_bank_transaction,
+    "INTEREST_PAYMENT": _handle_cash,
+    "INTEREST_PAYOUT": _handle_cash,
+    "PAYMENT_INBOUND": _handle_cash,
+    "BUY_ORDER": _handle_transfer_to_portfolio,
+    "SELL_ORDER": _handle_transfer_to_portfolio,
+    "SAVINGS_PLAN": _handle_transfer_to_portfolio,
+    "TRADING_SAVINGSPLAN_EXECUTED": _handle_transfer_to_portfolio,
+    "SAVEBACK_AGGREGATE": _handle_transfer_to_portfolio,
+    "SPARE_CHANGE_AGGREGATE": _handle_transfer_to_portfolio,
+    "SAVEBACK": _handle_saveback,
+    "CARD_TRANSACTION": _handle_card,
+    "BANK_TRANSACTION_INCOMING": _handle_bank_transaction,
+    "BANK_TRANSACTION_OUTGOING": _handle_bank_transaction,
 }
 
 # These event types are always zero-amount (document-only or verification events).
 # They are excluded from KNOWN_EVENT_TYPES so they don't trigger unknown-type warnings,
 # but no handler is needed since build_records_for_event short-circuits on zero amount.
-_ZERO_AMOUNT_TYPES: frozenset[str] = frozenset({
-    "CARD_VERIFICATION",
-    "QUARTERLY_NET_WORTH_STATEMENT_CREATED",
-    "EX_POST_COST_REPORT_CREATED",
-})
+_ZERO_AMOUNT_TYPES: frozenset[str] = frozenset(
+    {
+        "CARD_VERIFICATION",
+        "QUARTERLY_NET_WORTH_STATEMENT_CREATED",
+        "EX_POST_COST_REPORT_CREATED",
+    }
+)
 
 KNOWN_EVENT_TYPES: frozenset[str] = frozenset(_HANDLERS) | _ZERO_AMOUNT_TYPES
 
@@ -401,6 +439,7 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset(_HANDLERS) | _ZERO_AMOUNT_TYPES
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def build_records_for_event(
     event: dict[str, Any],
@@ -426,17 +465,21 @@ def build_records_for_event(
     note = _build_note(event, event_type)
     handler = _HANDLERS.get(event_type)
     if handler is None:
-        log.warning("Unknown TR event type %r — falling back to cash handler", event_type)
+        log.warning(
+            "Unknown TR event type %r — falling back to cash handler", event_type
+        )
         handler = _handle_cash
 
-    records = handler(_EventContext(
-        event=event,
-        amount=amount,
-        note=note,
-        record_date=record_date,
-        cash_account_id=cash_account_id,
-        portfolio_account_id=portfolio_account_id,
-    ))
+    records = handler(
+        _EventContext(
+            event=event,
+            amount=amount,
+            note=note,
+            record_date=record_date,
+            cash_account_id=cash_account_id,
+            portfolio_account_id=portfolio_account_id,
+        )
+    )
 
     label_id = (label_ids or {}).get(event_type)
     if label_id:

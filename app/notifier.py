@@ -22,7 +22,27 @@ class _FetchContext(TypedDict):
 
 def _escape_markdown(value: str) -> str:
     escaped = value
-    for token in ("\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"):
+    for token in (
+        "\\",
+        "_",
+        "*",
+        "[",
+        "]",
+        "(",
+        ")",
+        "~",
+        "`",
+        ">",
+        "#",
+        "+",
+        "-",
+        "=",
+        "|",
+        "{",
+        "}",
+        ".",
+        "!",
+    ):
         escaped = escaped.replace(token, f"\\{token}")
     return escaped
 
@@ -37,7 +57,9 @@ def _escape_code(value: str) -> str:
     return value.replace("\\", "\\\\").replace("`", "\\`")
 
 
-def send_telegram_message(bot_token: str | None, chat_id: str | None, message: str) -> bool:
+def send_telegram_message(
+    bot_token: str | None, chat_id: str | None, message: str
+) -> bool:
     if not bot_token or not chat_id:
         return False
 
@@ -48,7 +70,9 @@ def send_telegram_message(bot_token: str | None, chat_id: str | None, message: s
         "disable_web_page_preview": True,
     }
     try:
-        response = http_post(TELEGRAM_API.format(token=bot_token), json=payload, timeout=20)
+        response = http_post(
+            TELEGRAM_API.format(token=bot_token), json=payload, timeout=20
+        )
         response.raise_for_status()
     except requests.HTTPError as exc:
         log.warning(
@@ -93,45 +117,42 @@ class Notifier:
 
     def authentication_required(self) -> bool:
         return self._send(
-            self._header("🚨", "Session Expired") +
-            "The saved Trade Republic session is no longer valid\\.\n"
+            self._header("🚨", "Session Expired")
+            + "The saved Trade Republic session is no longer valid\\.\n"
             "Run the bootstrap command to renew the 2FA session\\."
         )
 
     def login_required(self) -> bool:
         return self._send(
-            self._header("🔐", "Login Required") +
-            "No saved session found\\. A new 2FA login has been initiated\\.\n"
+            self._header("🔐", "Login Required")
+            + "No saved session found\\. A new 2FA login has been initiated\\.\n"
             "Check your Trade Republic app to approve the request\\."
         )
 
     def login_failed(self) -> bool:
         return self._send(
-            self._header("❌", "Login Failed") +
-            "The 2FA code was incorrect or the login request was rejected\\.\n"
+            self._header("❌", "Login Failed")
+            + "The 2FA code was incorrect or the login request was rejected\\.\n"
             "Run the bootstrap command again to retry\\."
         )
 
     def login_code_request(self, instance: str) -> bool:
         safe_instance = _escape_code(instance)
         return self._send(
-            self._header("🔐", "2FA Code Required") +
-            "Reply with your authenticator code using:\n"
+            self._header("🔐", "2FA Code Required")
+            + "Reply with your authenticator code using:\n"
             f"`/code {safe_instance} <code>`"
         )
 
     def login_success(self) -> bool:
         return self._send(
-            self._header("✅", "Login Successful") +
-            "Session saved\\. Future syncs will run automatically\\."
+            self._header("✅", "Login Successful")
+            + "Session saved\\. Future syncs will run automatically\\."
         )
 
     def error(self, exc: Exception) -> bool:
         safe_error = _escape_markdown(f"{type(exc).__name__}: {exc}")
-        return self._send(
-            self._header("❌", "Sync Failed") +
-            f"Error: `{safe_error}`"
-        )
+        return self._send(self._header("❌", "Sync Failed") + f"Error: `{safe_error}`")
 
     def fetch_summary(
         self,
@@ -154,8 +175,8 @@ class Notifier:
     def unknown_event_type(self, event_type: str) -> bool:
         safe_type = _escape_markdown(event_type)
         return self._send(
-            self._header("⚠️", "Unknown Event Type") +
-            f"Event type `{safe_type}` is not recognised\\.\n"
+            self._header("⚠️", "Unknown Event Type")
+            + f"Event type `{safe_type}` is not recognised\\.\n"
             "It has been processed using the default cash handler\\.\n"
             "Please report this type so a proper handler can be added\\."
         )
@@ -164,8 +185,8 @@ class Notifier:
         safe_id = _escape_markdown(event_id)
         safe_indices = _escape_markdown(", ".join(str(i) for i in missing_indices))
         return self._send(
-            self._header("⚠️", "Incomplete API Response") +
-            f"Event `{safe_id}` has no result for record index\\(es\\): `{safe_indices}`\\.\n"
+            self._header("⚠️", "Incomplete API Response")
+            + f"Event `{safe_id}` has no result for record index\\(es\\): `{safe_indices}`\\.\n"
             "The event has not been marked as processed and will be retried\\."
         )
 
@@ -235,4 +256,3 @@ class Notifier:
         if filename:
             lines.append(f"File: `{_escape_markdown(filename)}`")
         return self._send("\n".join(lines))
-

@@ -19,6 +19,7 @@ from app.tr_mapper import filter_by_lookback
 # _required_env
 # ---------------------------------------------------------------------------
 
+
 def test_required_env_present(monkeypatch):
     monkeypatch.setenv("MY_VAR", "hello")
     assert _required_env("MY_VAR") == "hello"
@@ -39,6 +40,7 @@ def test_required_env_blank(monkeypatch):
 # ---------------------------------------------------------------------------
 # _positive_int_env
 # ---------------------------------------------------------------------------
+
 
 def test_positive_int_env_uses_default(monkeypatch):
     monkeypatch.delenv("LOOKBACK_DAYS", raising=False)
@@ -72,6 +74,7 @@ def test_positive_int_env_rejects_negative(monkeypatch):
 # event_id
 # ---------------------------------------------------------------------------
 
+
 def test_event_id_uses_id_field():
     assert event_id({"id": "abc"}) == "abc"
 
@@ -96,33 +99,55 @@ def test_event_id_prefers_id_over_eventId():
 # dedup_event_id
 # ---------------------------------------------------------------------------
 
+
 def test_dedup_event_id_returns_native_id_when_present():
     assert dedup_event_id({"id": "native-id"}) == "native-id"
 
 
 def test_dedup_event_id_falls_back_to_hash():
-    event = {"eventType": "INTEREST_PAYMENT", "timestamp": "2024-01-01T00:00:00Z", "amount": "5.00", "title": "Interest"}
+    event = {
+        "eventType": "INTEREST_PAYMENT",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "5.00",
+        "title": "Interest",
+    }
     result = dedup_event_id(event)
     assert result.startswith("hash:")
     assert len(result) == len("hash:") + 64
 
 
 def test_dedup_event_id_hash_is_deterministic():
-    event = {"eventType": "BUY_ORDER", "timestamp": "2024-06-01T10:00:00Z", "amount": "100", "title": "AAPL"}
+    event = {
+        "eventType": "BUY_ORDER",
+        "timestamp": "2024-06-01T10:00:00Z",
+        "amount": "100",
+        "title": "AAPL",
+    }
     first = dedup_event_id(event)
     second = dedup_event_id(event)
     assert first == second
 
 
 def test_dedup_event_id_different_events_produce_different_hashes():
-    e1 = {"eventType": "BUY_ORDER", "timestamp": "2024-06-01T10:00:00Z", "amount": "100", "title": "AAPL"}
-    e2 = {"eventType": "SELL_ORDER", "timestamp": "2024-06-01T10:00:00Z", "amount": "100", "title": "AAPL"}
+    e1 = {
+        "eventType": "BUY_ORDER",
+        "timestamp": "2024-06-01T10:00:00Z",
+        "amount": "100",
+        "title": "AAPL",
+    }
+    e2 = {
+        "eventType": "SELL_ORDER",
+        "timestamp": "2024-06-01T10:00:00Z",
+        "amount": "100",
+        "title": "AAPL",
+    }
     assert dedup_event_id(e1) != dedup_event_id(e2)
 
 
 # ---------------------------------------------------------------------------
 # EventRepository — schema
 # ---------------------------------------------------------------------------
+
 
 def test_repo_creates_table(tmp_path):
     with EventRepository(tmp_path / "test.db") as repo:
@@ -152,6 +177,7 @@ def test_repo_idempotent_init(tmp_path):
 # EventRepository — filter_unprocessed
 # ---------------------------------------------------------------------------
 
+
 def test_repo_filter_unprocessed_all_new(tmp_path):
     with EventRepository(tmp_path / "db") as repo:
         assert len(repo.filter_unprocessed([{"id": "a"}, {"id": "b"}])) == 2
@@ -175,6 +201,7 @@ def test_repo_filter_unprocessed_empty_input(tmp_path):
 # ---------------------------------------------------------------------------
 # EventRepository — mark_processed
 # ---------------------------------------------------------------------------
+
 
 def test_repo_mark_processed_stores_all_fields(tmp_path):
     event = {
@@ -202,7 +229,11 @@ def test_repo_mark_processed_stores_all_fields(tmp_path):
 
 
 def test_repo_mark_processed_raw_is_valid_json(tmp_path):
-    event = {"id": "evt-json", "eventType": "SELL_ORDER", "timestamp": "2024-01-01T00:00:00Z"}
+    event = {
+        "id": "evt-json",
+        "eventType": "SELL_ORDER",
+        "timestamp": "2024-01-01T00:00:00Z",
+    }
     with EventRepository(tmp_path / "db") as repo:
         repo.mark_processed(event)
         repo.commit()
@@ -233,7 +264,11 @@ def test_repo_mark_processed_handles_non_serializable_event(tmp_path):
         def __repr__(self):
             return "<Unserializable>"
 
-    event = {"id": "evt-bad", "timestamp": "2024-01-01T00:00:00Z", "data": _Unserializable()}
+    event = {
+        "id": "evt-bad",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "data": _Unserializable(),
+    }
     with EventRepository(tmp_path / "db") as repo:
         repo.mark_processed(event)
         repo.commit()
@@ -248,6 +283,7 @@ def test_repo_mark_processed_handles_non_serializable_event(tmp_path):
 # ---------------------------------------------------------------------------
 # EventRepository — purge_old_records
 # ---------------------------------------------------------------------------
+
 
 def _insert_record(repo: EventRepository, event_id: str, synced_at: str) -> None:
     repo._conn.execute(
@@ -293,6 +329,7 @@ def test_purge_empty_db_returns_zero(tmp_path):
 # EventRepository — context manager
 # ---------------------------------------------------------------------------
 
+
 def test_repo_context_manager_closes_connection(tmp_path):
     with EventRepository(tmp_path / "db") as repo:
         conn = repo._conn
@@ -303,6 +340,7 @@ def test_repo_context_manager_closes_connection(tmp_path):
 # ---------------------------------------------------------------------------
 # filter_by_lookback
 # ---------------------------------------------------------------------------
+
 
 def _make_event(timestamp: str, **kwargs) -> dict:
     return {"timestamp": timestamp, **kwargs}
@@ -352,6 +390,7 @@ def test_filter_by_lookback_multiple_events():
 # _build_batch — unknown event type triggers notifier
 # ---------------------------------------------------------------------------
 
+
 def test_build_batch_notifies_on_unknown_event_type(tmp_path):
     from app.config import Config
     from app.main import _build_batch
@@ -364,7 +403,11 @@ def test_build_batch_notifies_on_unknown_event_type(tmp_path):
 
     notifier = MagicMock(spec=Notifier)
 
-    event = {"eventType": "TOTALLY_NEW_TYPE", "timestamp": "2024-01-01T00:00:00Z", "amount": "5.00"}
+    event = {
+        "eventType": "TOTALLY_NEW_TYPE",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "5.00",
+    }
     with EventRepository(tmp_path / "test.db") as repo:
         _build_batch([event], cfg, repo, notifier)
 
@@ -383,7 +426,11 @@ def test_build_batch_no_notification_for_known_event_type(tmp_path):
 
     notifier = MagicMock(spec=Notifier)
 
-    event = {"eventType": "BUY_ORDER", "timestamp": "2024-01-01T00:00:00Z", "amount": "100.00"}
+    event = {
+        "eventType": "BUY_ORDER",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "100.00",
+    }
     with EventRepository(tmp_path / "test.db") as repo:
         _build_batch([event], cfg, repo, notifier)
 
@@ -393,6 +440,7 @@ def test_build_batch_no_notification_for_known_event_type(tmp_path):
 # ---------------------------------------------------------------------------
 # _build_batch — zero-amount events are excluded
 # ---------------------------------------------------------------------------
+
 
 def test_build_batch_excludes_zero_amount_event(tmp_path):
     from app.config import Config
@@ -407,7 +455,12 @@ def test_build_batch_excludes_zero_amount_event(tmp_path):
     notifier = MagicMock(spec=Notifier)
 
     # A zero-amount event produces no records → should be excluded
-    event = {"eventType": "SAVINGS_PLAN_EXECUTED", "id": "ev-zero", "timestamp": "2024-01-01T00:00:00Z", "amount": "0.00"}
+    event = {
+        "eventType": "SAVINGS_PLAN_EXECUTED",
+        "id": "ev-zero",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "0.00",
+    }
     with EventRepository(tmp_path / "test.db") as repo:
         batch = _build_batch([event], cfg, repo, notifier)
 
@@ -418,6 +471,7 @@ def test_build_batch_excludes_zero_amount_event(tmp_path):
 # ---------------------------------------------------------------------------
 # _fetch_events — error branches
 # ---------------------------------------------------------------------------
+
 
 def test_fetch_events_login_failed_exits():
     from unittest.mock import patch
@@ -544,6 +598,7 @@ def test_fetch_events_success_returns_events():
 # _process_results
 # ---------------------------------------------------------------------------
 
+
 def test_process_results_marks_successful_events(tmp_path):
     from app.main import _process_results
     from app.notifier import Notifier
@@ -553,7 +608,9 @@ def test_process_results_marks_successful_events(tmp_path):
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
+        counts = _process_results(
+            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
+        )
         unprocessed = repo.filter_unprocessed([event])
 
     assert counts.synced == 1
@@ -570,7 +627,9 @@ def test_process_results_counts_failures(tmp_path):
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
+        counts = _process_results(
+            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
+        )
         unprocessed = repo.filter_unprocessed([event])
 
     assert counts.synced == 0
@@ -587,7 +646,9 @@ def test_process_results_skips_events_with_no_records(tmp_path):
     event_record_indices = [[]]  # event produced no records
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
+        counts = _process_results(
+            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
+        )
 
     assert counts.synced == 0
     assert counts.failed == 0
@@ -597,12 +658,20 @@ def test_process_results_skips_events_with_no_records(tmp_path):
 # run() — orchestrator
 # ---------------------------------------------------------------------------
 
+
 def test_run_returns_zero_on_success(tmp_path):
     from unittest.mock import patch
 
     from app.main import run
 
-    fake_events = [{"id": "e1", "timestamp": "2024-01-01T00:00:00Z", "amount": "10.00", "eventType": "PAYMENT"}]
+    fake_events = [
+        {
+            "id": "e1",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "amount": "10.00",
+            "eventType": "PAYMENT",
+        }
+    ]
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
@@ -626,6 +695,7 @@ def test_run_returns_zero_on_success(tmp_path):
         mock_batch.return_value = batch
 
         from app.main import _SyncCounts
+
         mock_results.return_value = _SyncCounts(synced=1, failed=0)
         mock_wallet.return_value.post_records.return_value = [{}]
 
@@ -675,6 +745,7 @@ def test_run_authentication_error_exits(tmp_path):
 
     # Import the sentinel class the module uses and raise it
     import app.main as main_module
+
     AuthErr = main_module.AuthenticationError
 
     with patch("app.main.TRClient") as MockTR:
@@ -759,6 +830,7 @@ def test_run_logs_warning_when_sync_complete_not_sent(tmp_path):
 # EventRepository — wallet_record_id schema & migration
 # ---------------------------------------------------------------------------
 
+
 def test_repo_schema_has_wallet_record_id_column(tmp_path):
     with EventRepository(tmp_path / "db") as repo:
         cols = [
@@ -797,6 +869,7 @@ def test_repo_migration_adds_wallet_record_id_to_existing_db(tmp_path):
 # ---------------------------------------------------------------------------
 # EventRepository — wallet_record_id read / write
 # ---------------------------------------------------------------------------
+
 
 def test_mark_processed_stores_wallet_record_id(tmp_path):
     event = {"id": "evt-wr", "timestamp": "2024-01-01T00:00:00Z"}
@@ -850,6 +923,7 @@ def test_get_wallet_record_id_returns_none_when_id_is_null(tmp_path):
 # _process_results — passes wallet_record_id to mark_processed
 # ---------------------------------------------------------------------------
 
+
 def test_process_results_passes_wallet_record_id(tmp_path):
     from app.main import _process_results
     from app.notifier import Notifier
@@ -859,7 +933,9 @@ def test_process_results_passes_wallet_record_id(tmp_path):
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
+        _process_results(
+            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
+        )
         wallet_id = repo.get_wallet_record_id(event)
 
     assert wallet_id == "wallet-record-1"
@@ -878,7 +954,9 @@ def test_process_results_stores_joined_ids_for_multi_record_event(tmp_path):
     event_record_indices = [[0, 1]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
+        _process_results(
+            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
+        )
         wallet_id = repo.get_wallet_record_id(event)
 
     assert wallet_id == "wid-1,wid-2"
@@ -894,7 +972,9 @@ def test_process_results_no_wallet_id_when_result_has_no_id(tmp_path):
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
+        _process_results(
+            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
+        )
         wallet_id = repo.get_wallet_record_id(event)
 
     assert wallet_id is None
@@ -910,7 +990,9 @@ def test_process_results_missing_index_counts_as_failure(tmp_path):
     event_record_indices = [[0]]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = _process_results(results, [event], event_record_indices, repo, MagicMock(spec=Notifier))
+        counts = _process_results(
+            results, [event], event_record_indices, repo, MagicMock(spec=Notifier)
+        )
         unprocessed = repo.filter_unprocessed([event])
 
     assert counts.failed == 1
@@ -936,6 +1018,7 @@ def test_process_results_missing_index_notifies(tmp_path):
 # ---------------------------------------------------------------------------
 # _read_label_ids
 # ---------------------------------------------------------------------------
+
 
 def test_read_label_ids_returns_empty_when_no_env(monkeypatch):
     from app.config import LABELABLE_EVENT_TYPES, _read_label_ids
@@ -978,7 +1061,14 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
 
     from app.main import run
 
-    fake_events = [{"id": "e1", "timestamp": "2024-01-01T00:00:00Z", "amount": "10.00", "eventType": "PAYMENT"}]
+    fake_events = [
+        {
+            "id": "e1",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "amount": "10.00",
+            "eventType": "PAYMENT",
+        }
+    ]
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
@@ -996,7 +1086,7 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
 
         batch = MagicMock()
         batch.records = [{"amount": 10}]
-        batch.excluded_count = 3   # excluded events present
+        batch.excluded_count = 3  # excluded events present
         batch.event_record_indices = [[0]]
         mock_batch.return_value = batch
 
@@ -1016,6 +1106,7 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
 # ---------------------------------------------------------------------------
 # run_login — on-demand re-authentication
 # ---------------------------------------------------------------------------
+
 
 def test_run_login_connects_and_returns_zero(tmp_path):
     from unittest.mock import patch
@@ -1124,6 +1215,7 @@ def test_run_login_unexpected_error_notifies_and_exits(tmp_path):
 # _prepare — shared bootstrap
 # ---------------------------------------------------------------------------
 
+
 def test_prepare_configures_environment_and_returns_notifier(tmp_path):
     from unittest.mock import patch
 
@@ -1153,6 +1245,7 @@ def test_prepare_configures_environment_and_returns_notifier(tmp_path):
 # ---------------------------------------------------------------------------
 # _connect — shared TR client creation + login
 # ---------------------------------------------------------------------------
+
 
 def test_connect_builds_client_and_calls_connect_with_code_provider():
     from unittest.mock import patch
