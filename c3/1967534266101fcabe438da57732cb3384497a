@@ -1,0 +1,19 @@
+tests/test_main.py
+  s_30785fbb2ea9a3::t_10554a0f6bbcb4 10,19,23-39,41-46,50-55,59-61,64,68,70-73,77,79-82,86,89-92,96,99-102,106,109,1076-1077,1082-1085,1089,1093-1095,1099,1102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "c31967534266101fcabe438da57732cb3384497a",
+  "prompts": {},
+  "sessions": {
+    "s_30785fbb2ea9a3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_004332557ffeCt5dADQJeSLxsj",
+        "model": "unknown"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
