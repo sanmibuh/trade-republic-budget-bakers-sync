@@ -1,0 +1,19 @@
+app/persistence.py
+  s_30785fbb2ea9a3::t_5b75141bff4101 163-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "5127a85fbe513c0bc7c10a78270e890e73927e16",
+  "prompts": {},
+  "sessions": {
+    "s_30785fbb2ea9a3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_004332557ffeCt5dADQJeSLxsj",
+        "model": "unknown"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
