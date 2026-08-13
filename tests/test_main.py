@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.config import _positive_int_env, _required_env
+from app.config import BackupConfig, Config
 from app.persistence import (
     EventRepository,
     dedup_event_id,
@@ -16,58 +16,97 @@ from app.persistence import (
 from app.tr_mapper import filter_by_lookback
 
 # ---------------------------------------------------------------------------
-# _required_env
+# Config.from_env / BackupConfig.from_env — env var parsing (public API)
 # ---------------------------------------------------------------------------
+
+
+def _set_sync_env(monkeypatch, **overrides: str) -> None:
+    """Set the minimum env vars required for Config.from_env() to succeed."""
+    defaults = {
+        "PHONE_NUMBER": "+49123456789",
+        "PIN": "1234",
+        "WALLET_API_KEY": "key",
+        "WALLET_CASH_ACCOUNT_ID": "cash-id",
+        "WALLET_PORTFOLIO_ACCOUNT_ID": "portfolio-id",
+    }
+    defaults.update(overrides)
+    for key, value in defaults.items():
+        monkeypatch.setenv(key, value)
+
+
+# required env var — present
 
 
 def test_required_env_present(monkeypatch):
-    monkeypatch.setenv("MY_VAR", "hello")
-    assert _required_env("MY_VAR") == "hello"
+    monkeypatch.setenv("WALLET_API_KEY", "my-key")
+    cfg = BackupConfig.from_env()
+    assert cfg.wallet_api_key == "my-key"
+
+
+# required env var — missing
 
 
 def test_required_env_missing(monkeypatch):
-    monkeypatch.delenv("MY_VAR", raising=False)
-    with pytest.raises(ValueError, match="MY_VAR"):
-        _required_env("MY_VAR")
+    monkeypatch.delenv("WALLET_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="WALLET_API_KEY"):
+        BackupConfig.from_env()
+
+
+# required env var — blank
 
 
 def test_required_env_blank(monkeypatch):
-    monkeypatch.setenv("MY_VAR", "   ")
-    with pytest.raises(ValueError, match="MY_VAR"):
-        _required_env("MY_VAR")
+    monkeypatch.setenv("WALLET_API_KEY", "   ")
+    with pytest.raises(ValueError, match="WALLET_API_KEY"):
+        BackupConfig.from_env()
 
 
-# ---------------------------------------------------------------------------
-# _positive_int_env
-# ---------------------------------------------------------------------------
+# positive-int env var — default used when var is absent
 
 
 def test_positive_int_env_uses_default(monkeypatch):
+    _set_sync_env(monkeypatch)
     monkeypatch.delenv("LOOKBACK_DAYS", raising=False)
-    assert _positive_int_env("LOOKBACK_DAYS", default=7) == 7
+    assert Config.from_env().lookback_days == 7
+
+
+# positive-int env var — explicit value is read
 
 
 def test_positive_int_env_reads_env(monkeypatch):
+    _set_sync_env(monkeypatch)
     monkeypatch.setenv("LOOKBACK_DAYS", "14")
-    assert _positive_int_env("LOOKBACK_DAYS", default=7) == 14
+    assert Config.from_env().lookback_days == 14
+
+
+# positive-int env var — non-integer value is rejected
 
 
 def test_positive_int_env_rejects_non_integer(monkeypatch):
+    _set_sync_env(monkeypatch)
     monkeypatch.setenv("LOOKBACK_DAYS", "abc")
     with pytest.raises(ValueError, match="integer"):
-        _positive_int_env("LOOKBACK_DAYS", default=7)
+        Config.from_env()
+
+
+# positive-int env var — zero is rejected
 
 
 def test_positive_int_env_rejects_zero(monkeypatch):
+    _set_sync_env(monkeypatch)
     monkeypatch.setenv("LOOKBACK_DAYS", "0")
     with pytest.raises(ValueError, match="positive"):
-        _positive_int_env("LOOKBACK_DAYS", default=7)
+        Config.from_env()
+
+
+# positive-int env var — negative is rejected
 
 
 def test_positive_int_env_rejects_negative(monkeypatch):
+    _set_sync_env(monkeypatch)
     monkeypatch.setenv("LOOKBACK_DAYS", "-5")
     with pytest.raises(ValueError, match="positive"):
-        _positive_int_env("LOOKBACK_DAYS", default=7)
+        Config.from_env()
 
 
 # ---------------------------------------------------------------------------
@@ -1034,38 +1073,33 @@ def test_process_results_missing_index_notifies(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _read_label_ids
+# ---------------------------------------------------------------------------
+# Config.from_env().label_ids — LABEL_* env var parsing (public API)
 # ---------------------------------------------------------------------------
 
 
 def test_read_label_ids_returns_empty_when_no_env(monkeypatch):
-    from app.config import LABELABLE_EVENT_TYPES, _read_label_ids
-
-    for et in LABELABLE_EVENT_TYPES:
-        monkeypatch.delenv(f"LABEL_{et}", raising=False)
-
-    result = _read_label_ids()
-    assert result == {}
+    _set_sync_env(monkeypatch)
+    monkeypatch.delenv("LABEL_BANK_TRANSACTION_INCOMING", raising=False)
+    monkeypatch.delenv("LABEL_BUY_ORDER", raising=False)
+    assert Config.from_env().label_ids == {}
 
 
 def test_read_label_ids_picks_up_set_vars(monkeypatch):
-    from app.config import _read_label_ids
-
+    _set_sync_env(monkeypatch)
     monkeypatch.setenv("LABEL_BANK_TRANSACTION_INCOMING", "label-abc-123")
     monkeypatch.setenv("LABEL_BUY_ORDER", "label-xyz-456")
 
-    result = _read_label_ids()
-    assert result["BANK_TRANSACTION_INCOMING"] == "label-abc-123"
-    assert result["BUY_ORDER"] == "label-xyz-456"
+    label_ids = Config.from_env().label_ids
+    assert label_ids["BANK_TRANSACTION_INCOMING"] == "label-abc-123"
+    assert label_ids["BUY_ORDER"] == "label-xyz-456"
 
 
 def test_read_label_ids_ignores_blank_values(monkeypatch):
-    from app.config import _read_label_ids
-
+    _set_sync_env(monkeypatch)
     monkeypatch.setenv("LABEL_BANK_TRANSACTION_INCOMING", "   ")
 
-    result = _read_label_ids()
-    assert "BANK_TRANSACTION_INCOMING" not in result
+    assert "BANK_TRANSACTION_INCOMING" not in Config.from_env().label_ids
 
 
 def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
