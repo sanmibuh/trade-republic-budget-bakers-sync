@@ -433,3 +433,36 @@ def test_notifier_missing_api_result_returns_send_result():
     with patch("app.notifier.send_telegram_message", return_value=False):
         result = _make_notifier().missing_api_result("evt-x", [0])
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# send_telegram_message — reply_markup
+# ---------------------------------------------------------------------------
+
+
+def test_send_telegram_message_includes_reply_markup_in_payload():
+    """When reply_markup is provided, it is included in the request payload."""
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    markup = {"force_reply": True}
+
+    with patch("app.notifier.http_post", return_value=mock_response) as mock_post:
+        result = send_telegram_message("tok", "chat", "msg", reply_markup=markup)
+
+    assert result is True
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["reply_markup"] == markup
+
+
+# ---------------------------------------------------------------------------
+# Notifier.sync_complete — excluded
+# ---------------------------------------------------------------------------
+
+
+def test_notifier_sync_complete_includes_excluded_line_when_nonzero():
+    """When excluded > 0, sync_complete must mention the excluded count."""
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().sync_complete(synced=5, failed=0, skipped=0, excluded=3)
+    msg = mock_send.call_args.kwargs["message"]
+    assert "3" in msg
+    assert "zero amount" in msg.lower() or "excluded" in msg.lower()

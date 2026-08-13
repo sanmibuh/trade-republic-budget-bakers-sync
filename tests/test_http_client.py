@@ -307,3 +307,22 @@ def test_http_post_ssl_fallback_only_when_allowed():
     assert calls == [True, False]
     assert http_client_module._ssl_verify is False
     _reset_state()
+
+
+def test_build_session_ssl_error_propagates_when_insecure_not_allowed(monkeypatch):
+    """SSLError in Session adapter must propagate when allow_insecure_ssl=False."""
+    _reset_state()
+
+    import requests.adapters
+
+    def fake_base_send(self_adapter, request, **kwargs):
+        raise requests.exceptions.SSLError("cert verify failed")
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", fake_base_send)
+
+    session = build_session()
+    with pytest.raises(requests.exceptions.SSLError):
+        session.get("https://example.com")
+
+    # Circuit must NOT have opened
+    assert http_client_module._ssl_verify is True
