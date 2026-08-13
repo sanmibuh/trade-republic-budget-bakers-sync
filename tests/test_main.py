@@ -194,18 +194,26 @@ def test_dedup_event_id_different_events_produce_different_hashes():
 
 def test_repo_creates_table(tmp_path):
     with EventRepository(tmp_path / "test.db") as repo:
-        # Verify table exists by exercising public API — if table is missing this raises
-        repo.filter_unprocessed([])
+        # Verify table exists: mark_processed + is_processed queries the table;
+        # a missing table would raise OperationalError.
+        event = {"id": "table-check", "timestamp": "2024-01-01T00:00:00Z"}
+        repo.mark_processed(event)
+        repo.commit()
+        assert repo.is_processed("table-check")
 
 
 def test_repo_creates_index(tmp_path):
-    with EventRepository(tmp_path / "test.db") as repo:
-        # Verify index exists: mark + count via public API (index absence would cause no failure
-        # here, but the table must exist for these calls to succeed)
-        event = {"id": "idx-check", "timestamp": "2024-01-01T00:00:00Z"}
-        repo.mark_processed(event)
-        repo.commit()
-        assert repo.is_processed("idx-check")
+    db_path = tmp_path / "test.db"
+    with EventRepository(db_path):
+        pass
+    # Verify the index exists via an independent sqlite3 connection to avoid
+    # using the private repo._conn while still checking the actual schema.
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_synced_at'"
+    ).fetchall()
+    conn.close()
+    assert rows
 
 
 def test_repo_idempotent_init(tmp_path):
@@ -246,7 +254,7 @@ def test_repo_filter_unprocessed_empty_input(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_repo_mark_processed_stores_all_fields(tmp_path):
+def test_repo_mark_processed_raw_contains_event_payload(tmp_path):
     event = {
         "id": "evt-1",
         "eventType": "BUY_ORDER",
@@ -333,22 +341,25 @@ def test_repo_mark_processed_raw_falls_back_to_str_on_type_error(tmp_path, monke
 # ---------------------------------------------------------------------------
 
 
-def _insert_record(repo: EventRepository, event_id: str, synced_at: str) -> None:
-    repo._conn.execute(
-        "INSERT OR IGNORE INTO processed_events "
-        "(event_id, event_type, event_timestamp, amount, raw, synced_at) "
-        "VALUES (?, '', '', '', '', ?)",
-        (event_id, synced_at),
-    )
-    repo._conn.commit()
+def _mark_processed_at(
+    repo: EventRepository, event_id: str, synced_at: datetime, monkeypatch
+) -> None:
+    """Insert a processed event with a specific synced_at timestamp via monkeypatching."""
+    import app.persistence as persistence_mod
+
+    fake_now = MagicMock(return_value=synced_at)
+    monkeypatch.setattr(persistence_mod, "datetime", MagicMock(now=fake_now, UTC=UTC))
+    repo.mark_processed({"id": event_id, "timestamp": synced_at.isoformat()})
+    repo.commit()
+    monkeypatch.undo()
 
 
-def test_purge_removes_old_records(tmp_path):
+def test_purge_removes_old_records(tmp_path, monkeypatch):
     with EventRepository(tmp_path / "db") as repo:
-        old = (datetime.now(UTC) - timedelta(days=90)).isoformat()
-        recent = datetime.now(UTC).isoformat()
-        _insert_record(repo, "old-evt", old)
-        _insert_record(repo, "recent-evt", recent)
+        old = datetime.now(UTC) - timedelta(days=90)
+        recent = datetime.now(UTC)
+        _mark_processed_at(repo, "old-evt", old, monkeypatch)
+        _mark_processed_at(repo, "recent-evt", recent, monkeypatch)
 
         deleted = repo.purge_old_records(ttl_days=60)
 
@@ -357,10 +368,10 @@ def test_purge_removes_old_records(tmp_path):
         assert not repo.is_processed("old-evt")
 
 
-def test_purge_returns_zero_when_nothing_to_delete(tmp_path):
+def test_purge_returns_zero_when_nothing_to_delete(tmp_path, monkeypatch):
     with EventRepository(tmp_path / "db") as repo:
-        recent = datetime.now(UTC).isoformat()
-        _insert_record(repo, "recent-evt", recent)
+        recent = datetime.now(UTC)
+        _mark_processed_at(repo, "recent-evt", recent, monkeypatch)
         assert repo.purge_old_records(ttl_days=60) == 0
 
 
