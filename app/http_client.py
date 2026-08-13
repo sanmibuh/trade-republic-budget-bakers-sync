@@ -13,6 +13,7 @@ Public API
 - ``build_session(headers)`` — returns a ``requests.Session`` whose
   ``verify`` flag tracks the circuit-breaker and retries on ``SSLError``.
 """
+
 from __future__ import annotations
 
 import logging
@@ -72,21 +73,27 @@ def http_post(url: str, **kwargs: Any) -> requests.Response:
         if not _allow_insecure_ssl:
             raise
         _open_circuit()
-        return requests.post(url, verify=False, **kwargs)  # NOSONAR — intentional fallback after circuit-breaker trips
+        return requests.post(
+            url, verify=False, **kwargs
+        )  # NOSONAR — intentional fallback after circuit-breaker trips
 
 
 class _SSLCircuitBreakerAdapter(requests.adapters.HTTPAdapter):
     """Transport adapter that applies the SSL circuit-breaker to every request."""
 
     def send(self, request, **kwargs):  # type: ignore[override]
-        kwargs["verify"] = _ssl_verify  # always use current circuit state, not session.verify
+        kwargs["verify"] = (
+            _ssl_verify  # always use current circuit state, not session.verify
+        )
         try:
             return super().send(request, **kwargs)
         except requests.exceptions.SSLError:
             if not _allow_insecure_ssl:
                 raise
             _open_circuit()
-            kwargs["verify"] = False  # NOSONAR — intentional fallback after circuit-breaker trips
+            kwargs["verify"] = (
+                False  # NOSONAR — intentional fallback after circuit-breaker trips
+            )
             return super().send(request, **kwargs)
 
 

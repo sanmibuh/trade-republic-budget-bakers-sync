@@ -23,6 +23,7 @@ from app.backup import (
 # Date helpers
 # ---------------------------------------------------------------------------
 
+
 def test_month_range_regular():
     assert _month_range(2026, 7) == ("2026-07-01", "2026-07-31")
 
@@ -51,6 +52,7 @@ def test_previous_month_january_wraps():
 # _parse_monthly_param
 # ---------------------------------------------------------------------------
 
+
 def test_parse_monthly_param_none_returns_previous_month():
     year, month = _parse_monthly_param(None)
     assert isinstance(year, int)
@@ -75,8 +77,10 @@ def test_parse_monthly_param_wrong_format_raises():
 # _parse_yearly_param
 # ---------------------------------------------------------------------------
 
+
 def test_parse_yearly_param_none_returns_previous_year():
     from datetime import datetime, timezone
+
     year = _parse_yearly_param(None)
     assert year == datetime.now(timezone.utc).year - 1
 
@@ -94,13 +98,18 @@ def test_parse_yearly_param_invalid_raises():
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_client(**overrides):
     client = MagicMock()
     client.get_accounts.return_value = overrides.get("accounts", [{"id": "a1"}])
-    client.get_categories.return_value = overrides.get("categories", [{"id": "c1"}, {"id": "c2"}])
+    client.get_categories.return_value = overrides.get(
+        "categories", [{"id": "c1"}, {"id": "c2"}]
+    )
     client.get_budgets.return_value = overrides.get("budgets", [])
     client.get_labels.return_value = overrides.get("labels", [{"id": "l1"}])
-    client.get_records.return_value = overrides.get("records", [{"id": "r1"}, {"id": "r2"}, {"id": "r3"}])
+    client.get_records.return_value = overrides.get(
+        "records", [{"id": "r1"}, {"id": "r2"}, {"id": "r3"}]
+    )
     return client
 
 
@@ -113,6 +122,7 @@ def _make_notifier():
 # ---------------------------------------------------------------------------
 # run_monthly
 # ---------------------------------------------------------------------------
+
 
 def test_run_monthly_creates_file(tmp_path):
     client = _make_client()
@@ -172,6 +182,7 @@ def test_run_monthly_passes_date_range_to_client(tmp_path):
 # ---------------------------------------------------------------------------
 # run_yearly
 # ---------------------------------------------------------------------------
+
 
 def test_run_yearly_creates_file(tmp_path):
     client = _make_client()
@@ -240,6 +251,7 @@ def test_run_yearly_notifies(tmp_path):
 # run_auto — normal month (not February)
 # ---------------------------------------------------------------------------
 
+
 def test_run_auto_backs_up_current_and_previous_month(tmp_path):
     client = _make_client()
     notifier = _make_notifier()
@@ -277,6 +289,7 @@ def test_run_auto_january_wraps_previous_month(tmp_path):
 # ---------------------------------------------------------------------------
 # run_auto — February trigger for yearly
 # ---------------------------------------------------------------------------
+
 
 def test_run_auto_february_generates_yearly_when_missing(tmp_path):
     client = _make_client()
@@ -340,6 +353,7 @@ def test_run_auto_february_yearly_idempotent(tmp_path):
 # _write_json — atomic write
 # ---------------------------------------------------------------------------
 
+
 def test_write_json_creates_file_with_correct_content(tmp_path):
     path = tmp_path / "sub" / "out.json"
     payload = {"foo": "bar", "nums": [1, 2, 3]}
@@ -354,7 +368,9 @@ def test_write_json_no_tmp_file_remains(tmp_path):
     path = tmp_path / "out.json"
     _write_json(path, {"x": 1})
 
-    assert not any(tmp_path.glob("*.tmp")), "no .tmp files should remain after successful write"
+    assert not any(tmp_path.glob("*.tmp")), (
+        "no .tmp files should remain after successful write"
+    )
 
 
 def test_write_json_uses_unique_tmp_then_rename(tmp_path, monkeypatch):

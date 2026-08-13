@@ -21,6 +21,7 @@ BACKUP_ENV = {
 # Config
 # ---------------------------------------------------------------------------
 
+
 def test_owner_name_default_is_backup(monkeypatch):
     """OWNER_NAME not set → defaults to 'Backup' (for the backup service)."""
     for key, value in BASE_ENV.items():
@@ -80,6 +81,7 @@ def test_missing_required_env_raises(monkeypatch):
 # ---------------------------------------------------------------------------
 # BackupConfig
 # ---------------------------------------------------------------------------
+
 
 def test_backup_config_from_env_minimal(monkeypatch):
     """BackupConfig only requires WALLET_API_KEY."""
@@ -157,6 +159,7 @@ def test_backup_config_telegram_fields_optional(monkeypatch):
 # ALLOW_INSECURE_SSL parsing — tested via BackupConfig (minimal config)
 # ---------------------------------------------------------------------------
 
+
 def test_allow_insecure_ssl_default_false(monkeypatch):
     monkeypatch.setenv("WALLET_API_KEY", "key")
     monkeypatch.delenv("ALLOW_INSECURE_SSL", raising=False)
@@ -167,14 +170,18 @@ def test_allow_insecure_ssl_true_values(monkeypatch):
     monkeypatch.setenv("WALLET_API_KEY", "key")
     for value in ("true", "True", "TRUE", "1", "yes", "YES"):
         monkeypatch.setenv("ALLOW_INSECURE_SSL", value)
-        assert BackupConfig.from_env().allow_insecure_ssl is True, f"failed for {value!r}"
+        assert BackupConfig.from_env().allow_insecure_ssl is True, (
+            f"failed for {value!r}"
+        )
 
 
 def test_allow_insecure_ssl_false_values(monkeypatch):
     monkeypatch.setenv("WALLET_API_KEY", "key")
     for value in ("false", "False", "FALSE", "0", "no", "NO"):
         monkeypatch.setenv("ALLOW_INSECURE_SSL", value)
-        assert BackupConfig.from_env().allow_insecure_ssl is False, f"failed for {value!r}"
+        assert BackupConfig.from_env().allow_insecure_ssl is False, (
+            f"failed for {value!r}"
+        )
 
 
 def test_allow_insecure_ssl_invalid_raises(monkeypatch):
@@ -187,6 +194,7 @@ def test_allow_insecure_ssl_invalid_raises(monkeypatch):
 # ---------------------------------------------------------------------------
 # allow_insecure_ssl in Config and BackupConfig
 # ---------------------------------------------------------------------------
+
 
 def test_config_allow_insecure_ssl_defaults_to_false(monkeypatch):
     for key, value in BASE_ENV.items():

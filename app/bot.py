@@ -41,6 +41,7 @@ Interaction flow for /backup with args:
     /backup yearly           → skips step 2, shows year keyboard directly.
     /backup yearly YYYY      → executes immediately.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -62,20 +63,24 @@ from app.notifier import _escape_markdown as _esc
 log = logging.getLogger(__name__)
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
-_YEAR_BUTTON_COUNT = 3   # number of recent years offered in the yearly backup keyboard
-_MONTH_BUTTON_COUNT = 4  # number of recent months offered in the monthly backup keyboard
+_YEAR_BUTTON_COUNT = 3  # number of recent years offered in the yearly backup keyboard
+_MONTH_BUTTON_COUNT = (
+    4  # number of recent months offered in the monthly backup keyboard
+)
 
 # Separator used inside callback_data to encode command + param + instance.
 # Must not appear in instance names or period params (YYYY-MM / YYYY contain only digits and hyphens).
 _CB_SEP = ":"
 
 _MAX_LOG_CHARS = 3800  # safe limit below Telegram's 4096-char message cap
-_STATUS_LOG_TAIL_LINES = 500  # inspect enough recent lines to find the latest sync summary in noisy logs
+_STATUS_LOG_TAIL_LINES = (
+    500  # inspect enough recent lines to find the latest sync summary in noisy logs
+)
 
 # Icons used in backup ACK messages — must stay in sync with _backup_type_buttons().
 _BACKUP_ICONS: dict[str, str] = {
     "monthly": "📅",
-    "yearly":  "📆",
+    "yearly": "📆",
 }
 
 _LAST_SYNC_SUMMARY_SCRIPT = """
@@ -157,9 +162,10 @@ print(json.dumps(result))
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class InstanceConfig:
-    name: str            # human-readable, used in commands (e.g. "david")
+    name: str  # human-readable, used in commands (e.g. "david")
     container_name: str  # Docker container name (e.g. "myproject-sync-david-1")
 
 
@@ -183,7 +189,11 @@ class BotConfig:
                 container_name=container_name,
             )
 
-        backup_container = f"{env.container_prefix}-{env.backup_service}-1" if env.backup_service else None
+        backup_container = (
+            f"{env.container_prefix}-{env.backup_service}-1"
+            if env.backup_service
+            else None
+        )
 
         return cls(
             bot_token=env.bot_token,
@@ -199,6 +209,7 @@ class BotConfig:
 # ---------------------------------------------------------------------------
 # _esc is imported from app.notifier._escape_markdown — single source of truth.
 
+
 def _auth_icon(auth: bool | None) -> str:
     """Return a status icon for a Trade Republic session auth check result."""
     if auth is True:
@@ -211,6 +222,7 @@ def _auth_icon(auth: bool | None) -> str:
 # ---------------------------------------------------------------------------
 # Bot
 # ---------------------------------------------------------------------------
+
 
 class TelegramBot:
     """Long-polling Telegram bot that dispatches commands to Docker containers."""
@@ -227,9 +239,14 @@ class TelegramBot:
     # ------------------------------------------------------------------
 
     def run(self) -> None:
-        log.info("Telegram bot started — polling for updates (authorized chat: %s)", self._cfg.chat_id)
+        log.info(
+            "Telegram bot started — polling for updates (authorized chat: %s)",
+            self._cfg.chat_id,
+        )
         self._register_commands()
-        self._send_message("🤖 *Bot started and ready\\.* Use /help to see available commands\\.")
+        self._send_message(
+            "🤖 *Bot started and ready\\.* Use /help to see available commands\\."
+        )
         while True:
             try:
                 self._poll_once()
@@ -246,15 +263,27 @@ class TelegramBot:
 
     def _register_commands(self) -> None:
         commands = [
-            {"command": "sync",   "description": "Force Trade Republic sync (choose instance)"},
-            {"command": "login",  "description": "Renew Trade Republic 2FA session (choose instance)"},
-            {"command": "logs",   "description": "Show today's logs for an instance"},
-            {"command": "status", "description": "Show instances and backup service availability"},
-            {"command": "help",   "description": "Show available commands"},
+            {
+                "command": "sync",
+                "description": "Force Trade Republic sync (choose instance)",
+            },
+            {
+                "command": "login",
+                "description": "Renew Trade Republic 2FA session (choose instance)",
+            },
+            {"command": "logs", "description": "Show today's logs for an instance"},
+            {
+                "command": "status",
+                "description": "Show instances and backup service availability",
+            },
+            {"command": "help", "description": "Show available commands"},
         ]
         if self._cfg.backup_container:
             commands[1:1] = [
-                {"command": "backup", "description": "Force a Wallet backup (monthly or yearly)"},
+                {
+                    "command": "backup",
+                    "description": "Force a Wallet backup (monthly or yearly)",
+                },
             ]
         try:
             resp = requests.post(
@@ -289,7 +318,9 @@ class TelegramBot:
             try:
                 self._handle_update(update)
             except Exception as exc:  # noqa: BLE001
-                log.warning("Error handling update %s: %s", update.get("update_id"), exc)
+                log.warning(
+                    "Error handling update %s: %s", update.get("update_id"), exc
+                )
 
     # ------------------------------------------------------------------
     # Update routing
@@ -316,13 +347,13 @@ class TelegramBot:
         args = parts[1:]
 
         dispatch = {
-            "help":    self._cmd_help,
-            "status":  self._cmd_status,
-            "sync":    self._cmd_sync,
-            "login":   self._cmd_login,
-            "logs":    self._cmd_logs,
-            "code":    self._cmd_code,
-            "backup":  self._cmd_backup,
+            "help": self._cmd_help,
+            "status": self._cmd_status,
+            "sync": self._cmd_sync,
+            "login": self._cmd_login,
+            "logs": self._cmd_logs,
+            "code": self._cmd_code,
+            "backup": self._cmd_backup,
         }
         handler = dispatch.get(raw_cmd)
         if handler is None:
@@ -363,9 +394,14 @@ class TelegramBot:
         if cmd == "backup_type":
             subtype = parts[1]
             if subtype == "monthly":
-                self._send_message("📅 *Monthly backup* — Choose month:", keyboard=self._month_buttons())
+                self._send_message(
+                    "📅 *Monthly backup* — Choose month:",
+                    keyboard=self._month_buttons(),
+                )
             elif subtype == "yearly":
-                self._send_message("📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons())
+                self._send_message(
+                    "📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons()
+                )
             return
 
         if cmd == "backup_yearly":
@@ -437,13 +473,25 @@ class TelegramBot:
 
         self._send_message("\n".join(lines))
 
-    def _instance_status_line(self, inst: InstanceConfig, client: docker.DockerClient | None) -> str:
+    def _instance_status_line(
+        self, inst: InstanceConfig, client: docker.DockerClient | None
+    ) -> str:
         """Build a Telegram-formatted status line for a single sync instance."""
-        running_state = _docker_container_status(inst.container_name, client=client) if client else None
+        running_state = (
+            _docker_container_status(inst.container_name, client=client)
+            if client
+            else None
+        )
         is_running = client and running_state == "running"
-        auth = _docker_check_session(inst.container_name, client=client) if is_running else None
+        auth = (
+            _docker_check_session(inst.container_name, client=client)
+            if is_running
+            else None
+        )
         last_sync = (
-            _docker_last_sync_summary(inst.container_name, client=client) if is_running else None
+            _docker_last_sync_summary(inst.container_name, client=client)
+            if is_running
+            else None
         ) or "unavailable"
         auth_icon = _auth_icon(auth)
         return (
@@ -456,7 +504,9 @@ class TelegramBot:
         self._pick_instance("sync", "🔄 *Sync* — Choose instance:")
 
     def _cmd_login(self, _args: list[str]) -> None:
-        self._pick_instance("login", "🔐 *Login* — Choose instance to re\\-authenticate:")
+        self._pick_instance(
+            "login", "🔐 *Login* — Choose instance to re\\-authenticate:"
+        )
 
     def _cmd_logs(self, _args: list[str]) -> None:
         self._pick_instance("logs", "📋 *Logs* — Choose instance:")
@@ -464,7 +514,9 @@ class TelegramBot:
     def _cmd_code(self, args: list[str]) -> None:
         """Deliver an authenticator code to a waiting login process: /code <instance> <code>."""
         if len(args) != 2:
-            self._send_message("Usage: `/code <instance> <code>` — e\\.g\\. `/code david 123456`")
+            self._send_message(
+                "Usage: `/code <instance> <code>` — e\\.g\\. `/code david 123456`"
+            )
             return
 
         instance_key, code = args[0].lower(), args[1]
@@ -477,14 +529,18 @@ class TelegramBot:
             return
 
         self._send_message(f"🔑 Sending code to *{_esc(inst.name)}*\\.\\.\\.")
-        self._exec_in_thread(inst.container_name, ["submit-code", code], on_error=self._send_message)
+        self._exec_in_thread(
+            inst.container_name, ["submit-code", code], on_error=self._send_message
+        )
 
     def _cmd_backup(self, args: list[str]) -> None:
         if not self._cfg.backup_container:
             self._send_message("🚫 Backup service is not configured\\.")
             return
         if not args:
-            self._send_message("📦 *Backup* — Choose type:", keyboard=self._backup_type_buttons())
+            self._send_message(
+                "📦 *Backup* — Choose type:", keyboard=self._backup_type_buttons()
+            )
             return
 
         type_arg = args[0].lower()
@@ -494,12 +550,17 @@ class TelegramBot:
             if period_arg:
                 self._launch_backup("monthly", period_arg)
             else:
-                self._send_message("📅 *Monthly backup* — Choose month:", keyboard=self._month_buttons())
+                self._send_message(
+                    "📅 *Monthly backup* — Choose month:",
+                    keyboard=self._month_buttons(),
+                )
         elif type_arg == "yearly":
             if period_arg:
                 self._launch_backup("yearly", period_arg)
             else:
-                self._send_message("📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons())
+                self._send_message(
+                    "📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons()
+                )
         else:
             self._send_message(
                 f"⚠️ Unknown backup type: `{_esc(type_arg)}`\\. Use `monthly` or `yearly`\\."
@@ -513,15 +574,19 @@ class TelegramBot:
         label = _esc(f"{mode.capitalize()} backup ({period})")
         self._send_message(f"{icon} *{label}*\\.\\.\\.")
         self._exec_in_thread(
-            self._cfg.backup_container, ["backup", mode, period], on_error=self._send_message
+            self._cfg.backup_container,
+            ["backup", mode, period],
+            on_error=self._send_message,
         )
 
     def _backup_type_buttons(self) -> list[list[dict]]:
         """Inline keyboard with Monthly and Yearly type-selection buttons."""
-        return [[
-            {"text": "📅 Monthly", "callback_data": f"backup_type{_CB_SEP}monthly"},
-            {"text": "📆 Yearly",  "callback_data": f"backup_type{_CB_SEP}yearly"},
-        ]]
+        return [
+            [
+                {"text": "📅 Monthly", "callback_data": f"backup_type{_CB_SEP}monthly"},
+                {"text": "📆 Yearly", "callback_data": f"backup_type{_CB_SEP}yearly"},
+            ]
+        ]
 
     def _year_buttons(self) -> list[list[dict]]:
         """Inline keyboard with the most recent years (previous year first)."""
@@ -544,9 +609,12 @@ class TelegramBot:
     def _launch_login(self, inst: InstanceConfig) -> None:
         self._send_message(f"🔐 Re\\-authenticating *{_esc(inst.name)}*\\.\\.\\.")
         self._exec_in_thread(
-            inst.container_name, ["login"],
+            inst.container_name,
+            ["login"],
             on_error=self._send_message,
-            on_success=lambda: self._send_message(f"✅ *{_esc(inst.name)}* session is ready\\."),
+            on_success=lambda: self._send_message(
+                f"✅ *{_esc(inst.name)}* session is ready\\."
+            ),
         )
 
     def _fetch_and_send_logs(self, inst: InstanceConfig) -> None:
@@ -557,7 +625,9 @@ class TelegramBot:
         try:
             text = _docker_logs_today(inst.container_name, since=today_start)
         except Exception as exc:  # noqa: BLE001
-            self._send_message(f"❌ Could not fetch logs for `{_esc(inst.container_name)}`: {_esc(str(exc))}")
+            self._send_message(
+                f"❌ Could not fetch logs for `{_esc(inst.container_name)}`: {_esc(str(exc))}"
+            )
             return
 
         header = f"📋 Logs for *{_esc(inst.name)}* \\({_esc(today_start.strftime('%Y-%m-%d'))} UTC\\)\n\n"
@@ -585,7 +655,7 @@ class TelegramBot:
             {"text": inst.name, "callback_data": f"{cmd}{_CB_SEP}{inst.name.lower()}"}
             for inst in self._cfg.instances.values()
         ]
-        return [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+        return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
 
     def _month_buttons(self) -> list[list[dict]]:
         """Inline keyboard with the most recent months (previous month first)."""
@@ -599,8 +669,7 @@ class TelegramBot:
                 year -= 1
             months.append(f"{year}-{month:02d}")
         buttons = [
-            {"text": m, "callback_data": f"backup_monthly{_CB_SEP}{m}"}
-            for m in months
+            {"text": m, "callback_data": f"backup_monthly{_CB_SEP}{m}"} for m in months
         ]
         return [buttons]
 
@@ -623,7 +692,12 @@ class TelegramBot:
             daemon=True,
         ).start()
 
-    def _send_message(self, text: str, keyboard: list[list[dict]] | None = None, parse_mode: str | None = "MarkdownV2") -> None:
+    def _send_message(
+        self,
+        text: str,
+        keyboard: list[list[dict]] | None = None,
+        parse_mode: str | None = "MarkdownV2",
+    ) -> None:
         payload: dict = {
             "chat_id": self._cfg.chat_id,
             "text": text,
@@ -675,6 +749,7 @@ class TelegramBot:
 # Docker helpers
 # ---------------------------------------------------------------------------
 
+
 @contextlib.contextmanager
 def _docker_client_ctx() -> Generator[docker.DockerClient | None, None, None]:
     """Context manager that yields a Docker client and closes it on exit.
@@ -694,7 +769,9 @@ def _docker_client_ctx() -> Generator[docker.DockerClient | None, None, None]:
             client.close()
 
 
-def _docker_check_session(container_name: str, client: docker.DockerClient | None = None) -> bool | None:
+def _docker_check_session(
+    container_name: str, client: docker.DockerClient | None = None
+) -> bool | None:
     """Check whether the saved Trade Republic session is valid for *container_name*.
 
     Runs ``python -m app check-session`` inside the container via the Docker SDK.
@@ -713,7 +790,11 @@ def _docker_check_session(container_name: str, client: docker.DockerClient | Non
         if exit_code == 1:
             return False
         # Unexpected exit code (e.g. crash, missing module) — treat as unknown.
-        log.warning("check-session exited with unexpected code %s for %s", exit_code, container_name)
+        log.warning(
+            "check-session exited with unexpected code %s for %s",
+            exit_code,
+            container_name,
+        )
         return None
     except Exception as exc:  # noqa: BLE001
         log.debug("check-session exec failed for %s: %s", container_name, exc)
@@ -754,7 +835,9 @@ def _docker_last_sync_summary(
     try:
         client = client or docker.from_env()
         container = client.containers.get(container_name)
-        exit_code, output = container.exec_run(["python", "-c", _LAST_SYNC_SUMMARY_SCRIPT])
+        exit_code, output = container.exec_run(
+            ["python", "-c", _LAST_SYNC_SUMMARY_SCRIPT]
+        )
         if exit_code != 0:
             return None
         payload = json.loads(output.decode(errors="replace"))
@@ -786,7 +869,11 @@ def _docker_last_sync_summary(
     return None
 
 
-def _docker_logs_today(container_name: str, since: datetime.datetime, client: docker.DockerClient | None = None) -> str:
+def _docker_logs_today(
+    container_name: str,
+    since: datetime.datetime,
+    client: docker.DockerClient | None = None,
+) -> str:
     """Return stdout/stderr logs for *container_name* since *since* (UTC datetime)."""
     client = client or docker.from_env()
     container = client.containers.get(container_name)
@@ -815,7 +902,9 @@ def _docker_exec_silent(
         env = container.attrs["Config"]["Env"]
         exit_code, output = container.exec_run(cmd, environment=env)
         if exit_code == 0:
-            log.info("docker exec finished successfully for container %s", container_name)
+            log.info(
+                "docker exec finished successfully for container %s", container_name
+            )
             if on_success:
                 on_success()
         else:
@@ -827,7 +916,9 @@ def _docker_exec_silent(
                 details,
             )
             if on_error:
-                on_error(f"❌ Command failed on `{container_name}` \\(exit {exit_code}\\)\\.")
+                on_error(
+                    f"❌ Command failed on `{container_name}` \\(exit {exit_code}\\)\\."
+                )
     except Exception as exc:  # noqa: BLE001
         log.warning("docker exec failed for container %s: %s", container_name, exc)
         if on_error:
@@ -837,6 +928,7 @@ def _docker_exec_silent(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def run() -> None:
     """Load config from environment and start the bot."""

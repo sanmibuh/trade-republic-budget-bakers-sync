@@ -12,6 +12,7 @@ from app.http_client import build_session, configure, http_post
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _reset_state():
     """Restore module-level flags to initial state."""
     http_client_module._ssl_verify = True
@@ -22,12 +23,15 @@ def _reset_state():
 # http_post — basic behaviour
 # ---------------------------------------------------------------------------
 
+
 def test_http_post_uses_ssl_verify_true_by_default():
     _reset_state()
     mock_response = MagicMock()
     mock_response.raise_for_status = MagicMock()
 
-    with patch("app.http_client.requests.post", return_value=mock_response) as mock_post:
+    with patch(
+        "app.http_client.requests.post", return_value=mock_response
+    ) as mock_post:
         http_post("https://example.com", json={"a": 1})
 
     assert mock_post.call_args.kwargs["verify"] is True
@@ -47,7 +51,9 @@ def test_http_post_passes_kwargs_through():
     _reset_state()
     mock_response = MagicMock()
 
-    with patch("app.http_client.requests.post", return_value=mock_response) as mock_post:
+    with patch(
+        "app.http_client.requests.post", return_value=mock_response
+    ) as mock_post:
         http_post("https://example.com", json={"x": 1}, timeout=42)
 
     assert mock_post.call_args.kwargs["timeout"] == 42
@@ -57,6 +63,7 @@ def test_http_post_passes_kwargs_through():
 # ---------------------------------------------------------------------------
 # http_post — SSL circuit breaker
 # ---------------------------------------------------------------------------
+
 
 def test_http_post_falls_back_to_no_verify_on_ssl_error():
     _reset_state()
@@ -85,7 +92,9 @@ def test_http_post_ssl_flag_stays_false_after_circuit_break():
 
     mock_response = MagicMock()
 
-    with patch("app.http_client.requests.post", return_value=mock_response) as mock_post:
+    with patch(
+        "app.http_client.requests.post", return_value=mock_response
+    ) as mock_post:
         http_post("https://example.com", json={})
 
     assert mock_post.call_count == 1
@@ -103,7 +112,11 @@ def test_http_post_ssl_warning_logged_once(caplog):
         return mock_response
 
     import logging
-    with caplog.at_level(logging.WARNING, logger="app.http_client"), patch("app.http_client.requests.post", side_effect=fake_post):
+
+    with (
+        caplog.at_level(logging.WARNING, logger="app.http_client"),
+        patch("app.http_client.requests.post", side_effect=fake_post),
+    ):
         http_post("https://example.com", json={})
 
     warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
@@ -116,13 +129,20 @@ def test_http_post_ssl_error_on_fallback_reraises():
     _reset_state()
     http_client_module._allow_insecure_ssl = True
 
-    with patch("app.http_client.requests.post", side_effect=requests.exceptions.SSLError("still fails")), pytest.raises(requests.exceptions.SSLError):
+    with (
+        patch(
+            "app.http_client.requests.post",
+            side_effect=requests.exceptions.SSLError("still fails"),
+        ),
+        pytest.raises(requests.exceptions.SSLError),
+    ):
         http_post("https://example.com", json={})
 
 
 # ---------------------------------------------------------------------------
 # build_session — basic behaviour
 # ---------------------------------------------------------------------------
+
 
 def test_build_session_returns_session_with_verify_true_by_default():
     _reset_state()
@@ -221,6 +241,7 @@ def test_adapter_uses_current_circuit_state_not_session_verify(monkeypatch):
 # configure()
 # ---------------------------------------------------------------------------
 
+
 def test_configure_sets_allow_insecure_ssl_true():
     _reset_state()
     configure(allow_insecure_ssl=True)
@@ -247,11 +268,18 @@ def test_configure_resets_ssl_verify_flag():
 # http_post — circuit breaker blocked when allow_insecure_ssl=False
 # ---------------------------------------------------------------------------
 
+
 def test_http_post_ssl_error_propagates_when_insecure_not_allowed():
     """With allow_insecure_ssl=False (default), SSLError must propagate — no fallback."""
     _reset_state()
 
-    with patch("app.http_client.requests.post", side_effect=requests.exceptions.SSLError("cert failed")), pytest.raises(requests.exceptions.SSLError):
+    with (
+        patch(
+            "app.http_client.requests.post",
+            side_effect=requests.exceptions.SSLError("cert failed"),
+        ),
+        pytest.raises(requests.exceptions.SSLError),
+    ):
         http_post("https://example.com", json={})
 
     # Circuit must NOT have opened

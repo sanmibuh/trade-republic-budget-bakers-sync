@@ -9,6 +9,7 @@ Modes:
   yearly  [YYYY]    Explicit yearly backup. Default: previous calendar year.
                     Always executes; removes covered monthly files afterwards.
 """
+
 from __future__ import annotations
 
 import calendar
@@ -27,6 +28,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Date helpers
 # ---------------------------------------------------------------------------
+
 
 def _month_range(year: int, month: int) -> tuple[str, str]:
     """Return (YYYY-MM-DD, YYYY-MM-DD) for the first and last day of a month."""
@@ -52,8 +54,11 @@ def _previous_month(today: date) -> tuple[int, int]:
 # Filesystem helpers
 # ---------------------------------------------------------------------------
 
+
 def _monthly_path(data_dir: Path, year: int, month: int) -> Path:
-    return data_dir / "backups" / "monthly" / f"wallet-monthly-{year:04d}-{month:02d}.json"
+    return (
+        data_dir / "backups" / "monthly" / f"wallet-monthly-{year:04d}-{month:02d}.json"
+    )
 
 
 def _yearly_path(data_dir: Path, year: int) -> Path:
@@ -97,6 +102,7 @@ def _payload_counts(payload: dict) -> dict[str, int]:
 # Core fetch
 # ---------------------------------------------------------------------------
 
+
 def _fetch_snapshot(
     client: WalletClient,
     date_from: str,
@@ -127,6 +133,7 @@ def _fetch_snapshot(
 # ---------------------------------------------------------------------------
 # Individual backup operations
 # ---------------------------------------------------------------------------
+
 
 def run_monthly(
     client: WalletClient,
@@ -191,6 +198,7 @@ def run_yearly(
 # Auto mode
 # ---------------------------------------------------------------------------
 
+
 def run_auto(
     client: WalletClient,
     notifier: Notifier,
@@ -234,6 +242,7 @@ def run_auto(
 # ---------------------------------------------------------------------------
 # CLI helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_monthly_param(param: str | None) -> tuple[int, int]:
     """Parse an optional YYYY-MM string. Returns (year, month); raises ValueError on bad input."""

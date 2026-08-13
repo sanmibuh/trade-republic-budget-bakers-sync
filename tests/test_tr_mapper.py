@@ -21,6 +21,7 @@ from app.tr_mapper import (
 # extract_event_type
 # ---------------------------------------------------------------------------
 
+
 def test_extract_event_type_reads_eventType():
     assert extract_event_type({"eventType": "BUY_ORDER"}) == "BUY_ORDER"
 
@@ -34,7 +35,9 @@ def test_extract_event_type_reads_event_type():
 
 
 def test_extract_event_type_prefers_eventType_over_type():
-    assert extract_event_type({"eventType": "BUY_ORDER", "type": "OTHER"}) == "BUY_ORDER"
+    assert (
+        extract_event_type({"eventType": "BUY_ORDER", "type": "OTHER"}) == "BUY_ORDER"
+    )
 
 
 def test_extract_event_type_returns_uppercase():
@@ -53,19 +56,23 @@ def test_extract_event_type_none_value_falls_through():
 # _to_decimal
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("value,expected", [
-    (None, Decimal(0)),
-    (0, Decimal(0)),
-    (5, Decimal(5)),
-    (3.14, Decimal("3.14")),
-    (Decimal("1.5"), Decimal("1.5")),
-    ("10.50", Decimal("10.50")),
-    ("10,50", Decimal("10.50")),
-    ("€ 9.99", Decimal("9.99")),
-    ("", Decimal(0)),
-    ("  ", Decimal(0)),
-    ("not-a-number", Decimal(0)),
-])
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (None, Decimal(0)),
+        (0, Decimal(0)),
+        (5, Decimal(5)),
+        (3.14, Decimal("3.14")),
+        (Decimal("1.5"), Decimal("1.5")),
+        ("10.50", Decimal("10.50")),
+        ("10,50", Decimal("10.50")),
+        ("€ 9.99", Decimal("9.99")),
+        ("", Decimal(0)),
+        ("  ", Decimal(0)),
+        ("not-a-number", Decimal(0)),
+    ],
+)
 def test_to_decimal(value, expected):
     assert _to_decimal(value) == expected
 
@@ -79,6 +86,7 @@ def test_to_decimal_unsupported_type_returns_zero():
 # ---------------------------------------------------------------------------
 # extract_amount
 # ---------------------------------------------------------------------------
+
 
 def test_extract_amount_top_level():
     assert extract_amount({"amount": "50.00"}, "amount") == Decimal("50.00")
@@ -102,6 +110,7 @@ def test_extract_amount_tr_dict_format():
 # ---------------------------------------------------------------------------
 # normalize_event_time
 # ---------------------------------------------------------------------------
+
 
 def test_normalize_event_time_timestamp_key():
     event = {"timestamp": "2024-01-01T10:00:00Z"}
@@ -150,6 +159,7 @@ def test_normalize_event_time_fixes_nonzero_tz_offset():
 # build_records_for_event
 # ---------------------------------------------------------------------------
 
+
 def test_build_interest_payment_no_tax():
     event = {
         "eventType": "INTEREST_PAYMENT",
@@ -157,7 +167,9 @@ def test_build_interest_payment_no_tax():
         "amount": "10.00",
         "title": "Zinsen",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
 
     assert len(records) == 1
     r = records[0]
@@ -175,7 +187,9 @@ def test_build_interest_payout_note_format():
         "amount": "63.73",
         "title": "Zinsen",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
 
     assert len(records) == 1
     assert records[0]["note"] == "Interest Payout: Zinsen"
@@ -184,20 +198,33 @@ def test_build_interest_payout_note_format():
 
 
 def test_build_interest_no_tr_title_uses_mapped():
-    event = {"eventType": "INTEREST_PAYOUT", "timestamp": "2024-01-01T00:00:00Z", "amount": "10.00"}
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    event = {
+        "eventType": "INTEREST_PAYOUT",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "10.00",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "Interest Payout"
 
 
 def test_build_unknown_event_no_title_uses_event_type():
-    event = {"eventType": "SOME_FUTURE_TYPE", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00"}
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    event = {
+        "eventType": "SOME_FUTURE_TYPE",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "1.00",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "SOME_FUTURE_TYPE"
 
 
 # ---------------------------------------------------------------------------
 # build_records_for_event — unknown refund event types
 # ---------------------------------------------------------------------------
+
 
 def test_build_card_refund_note_prefixed_with_title():
     event = {
@@ -206,15 +233,23 @@ def test_build_card_refund_note_prefixed_with_title():
         "amount": "15.00",
         "title": "Supermarket",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert len(records) == 1
     assert records[0]["note"] == "Refund: Supermarket"
     assert records[0]["accountId"] == "cash"
 
 
 def test_build_refund_no_title_uses_refund_fallback():
-    event = {"eventType": "CARD_REFUND", "timestamp": "2024-01-01T00:00:00Z", "amount": "5.00"}
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    event = {
+        "eventType": "CARD_REFUND",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "5.00",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "Refund"
 
 
@@ -226,7 +261,9 @@ def test_build_refund_with_related_id_appended_to_note():
         "title": "Coffee Shop",
         "relatedId": "orig-tx-abc123",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "Refund: Coffee Shop (ref: orig-tx-abc123)"
 
 
@@ -238,7 +275,9 @@ def test_build_refund_with_original_id_appended_to_note():
         "title": "Online Store",
         "originalId": "orig-99",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "Refund: Online Store (ref: orig-99)"
 
 
@@ -249,22 +288,47 @@ def test_build_refund_posts_to_cash_account():
         "amount": "8.50",
         "title": "Pharmacy",
     }
-    records = build_records_for_event(event, cash_account_id="cash-acc", portfolio_account_id="port-acc")
+    records = build_records_for_event(
+        event, cash_account_id="cash-acc", portfolio_account_id="port-acc"
+    )
     assert records[0]["accountId"] == "cash-acc"
     assert "transfer" not in records[0]
 
 
 def test_build_non_refund_unknown_type_not_affected():
     """Unknown non-refund types should still use the raw title, not the Refund prefix."""
-    event = {"eventType": "SOME_NEW_TYPE", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00", "title": "Misc"}
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    event = {
+        "eventType": "SOME_NEW_TYPE",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "1.00",
+        "title": "Misc",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "Misc"
 
 
-@pytest.mark.parametrize("event_type", ["BUY_ORDER", "SAVINGS_PLAN", "SELL_ORDER", "TRADING_SAVINGSPLAN_EXECUTED", "SAVEBACK_AGGREGATE", "SPARE_CHANGE_AGGREGATE"])
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        "BUY_ORDER",
+        "SAVINGS_PLAN",
+        "SELL_ORDER",
+        "TRADING_SAVINGSPLAN_EXECUTED",
+        "SAVEBACK_AGGREGATE",
+        "SPARE_CHANGE_AGGREGATE",
+    ],
+)
 def test_build_order_events_use_transfer(event_type):
-    event = {"eventType": event_type, "timestamp": "2024-01-01T00:00:00Z", "amount": "200.00"}
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    event = {
+        "eventType": event_type,
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "200.00",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
 
     assert len(records) == 1
     r = records[0]
@@ -274,8 +338,15 @@ def test_build_order_events_use_transfer(event_type):
 
 
 def test_build_saveback_no_tax():
-    event = {"eventType": "SAVEBACK", "timestamp": "2024-01-01T00:00:00Z", "amount": "5.00", "title": "Saveback"}
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    event = {
+        "eventType": "SAVEBACK",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "5.00",
+        "title": "Saveback",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
 
     assert len(records) == 1
     assert records[0]["accountId"] == "port"
@@ -289,7 +360,9 @@ def test_build_saveback_aggregate_note_prefixed():
         "amount": "12.15",
         "title": "Core MSCI World USD (Acc)",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "Saveback: Core MSCI World USD (Acc)"
 
 
@@ -300,19 +373,34 @@ def test_build_spare_change_aggregate_note_prefixed():
         "amount": "6.21",
         "title": "Core MSCI World USD (Acc)",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "Round-up Investment: Core MSCI World USD (Acc)"
 
 
 def test_build_saveback_aggregate_no_title_uses_mapped():
-    event = {"eventType": "SAVEBACK_AGGREGATE", "timestamp": "2024-01-01T00:00:00Z", "amount": "5.00"}
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    event = {
+        "eventType": "SAVEBACK_AGGREGATE",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "5.00",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "Saveback"
 
 
 def test_build_card_transaction_uses_debit_card():
-    event = {"eventType": "CARD_TRANSACTION", "timestamp": "2024-01-01T00:00:00Z", "amount": "-20.00", "title": "Supermarket"}
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "-20.00",
+        "title": "Supermarket",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
 
     assert len(records) == 1
     assert records[0]["paymentType"] == "debit_card"
@@ -328,7 +416,9 @@ def test_build_bank_transaction_incoming_uses_transfer():
         "title": "Salary Corp",
         "subtitle": "Erhalten",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
 
     assert len(records) == 1
     r = records[0]
@@ -347,7 +437,9 @@ def test_build_bank_transaction_outgoing_uses_to():
         "title": "Landlord",
         "subtitle": "Gesendet",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
 
     assert len(records) == 1
     r = records[0]
@@ -366,7 +458,9 @@ def test_build_bank_transaction_counter_party_truncated():
         "title": long_title,
         "subtitle": "Erhalten",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert len(records[0]["counterParty"]) == 255
 
 
@@ -377,15 +471,24 @@ def test_build_bank_transaction_incoming_no_title():
         "amount": "500.00",
         "subtitle": "Erhalten",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
 
     assert "counterParty" not in records[0]
     assert records[0]["transfer"] == {"pairingMode": "unpaired"}
 
 
 def test_build_unknown_event_type_posts_to_cash():
-    event = {"eventType": "UNKNOWN_EVENT", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00", "title": "Something"}
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    event = {
+        "eventType": "UNKNOWN_EVENT",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "1.00",
+        "title": "Something",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
 
     assert len(records) == 1
     assert records[0]["accountId"] == "cash"
@@ -393,44 +496,81 @@ def test_build_unknown_event_type_posts_to_cash():
 
 
 def test_build_unknown_event_type_logs_warning():
-    event = {"eventType": "MYSTERY_TYPE", "timestamp": "2024-01-01T00:00:00Z", "amount": "1.00"}
+    event = {
+        "eventType": "MYSTERY_TYPE",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "1.00",
+    }
     import logging
+
     with patch.object(logging.getLogger("app.tr_mapper"), "warning") as mock_warn:
-        build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+        build_records_for_event(
+            event, cash_account_id="cash", portfolio_account_id="port"
+        )
     mock_warn.assert_called_once()
     assert "MYSTERY_TYPE" in mock_warn.call_args.args[1]
 
 
 def test_known_event_types_contains_expected_types():
-    for t in ("BUY_ORDER", "SELL_ORDER", "CARD_TRANSACTION", "INTEREST_PAYMENT",
-              "BANK_TRANSACTION_INCOMING", "BANK_TRANSACTION_OUTGOING"):
+    for t in (
+        "BUY_ORDER",
+        "SELL_ORDER",
+        "CARD_TRANSACTION",
+        "INTEREST_PAYMENT",
+        "BANK_TRANSACTION_INCOMING",
+        "BANK_TRANSACTION_OUTGOING",
+    ):
         assert t in KNOWN_EVENT_TYPES
 
 
 def test_known_event_type_does_not_log_warning():
-    event = {"eventType": "BUY_ORDER", "timestamp": "2024-01-01T00:00:00Z", "amount": "100.00"}
+    event = {
+        "eventType": "BUY_ORDER",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "100.00",
+    }
     import logging
+
     with patch.object(logging.getLogger("app.tr_mapper"), "warning") as mock_warn:
-        build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+        build_records_for_event(
+            event, cash_account_id="cash", portfolio_account_id="port"
+        )
     mock_warn.assert_not_called()
 
 
 def test_build_zero_amount_returns_empty():
-    event = {"eventType": "CARD_VERIFICATION", "timestamp": "2024-01-01T00:00:00Z", "amount": "0.00"}
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    event = {
+        "eventType": "CARD_VERIFICATION",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "0.00",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records == []
 
 
 def test_build_zero_amount_tr_dict_format():
-    event = {"eventType": "CARD_VERIFICATION", "timestamp": "2024-01-01T00:00:00Z",
-             "amount": {"value": 0.0, "currency": "EUR"}}
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    event = {
+        "eventType": "CARD_VERIFICATION",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": {"value": 0.0, "currency": "EUR"},
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records == []
 
 
 def test_build_uses_lowercase_type_field():
-    event = {"type": "interest_payment", "timestamp": "2024-01-01T00:00:00Z", "amount": "3.00"}
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    event = {
+        "type": "interest_payment",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "amount": "3.00",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
 
     assert len(records) == 1
     assert records[0]["accountId"] == "cash"
@@ -440,6 +580,7 @@ def test_build_uses_lowercase_type_field():
 # ---------------------------------------------------------------------------
 # _extract_iban_from_details
 # ---------------------------------------------------------------------------
+
 
 def _make_iban_details(full_iban: str, event_id: str = "abc") -> dict:
     """Build a minimal TR details payload containing a full IBAN in the nested structure."""
@@ -462,7 +603,9 @@ def _make_iban_details(full_iban: str, event_id: str = "abc") -> dict:
                                             "data": [
                                                 {
                                                     "title": full_iban,
-                                                    "detail": {"type": "listItemAvatarDefault"},
+                                                    "detail": {
+                                                        "type": "listItemAvatarDefault"
+                                                    },
                                                 }
                                             ]
                                         }
@@ -480,7 +623,9 @@ def _make_iban_details(full_iban: str, event_id: str = "abc") -> dict:
 
 def test_extract_iban_full_iban_no_spaces():
     details = _make_iban_details("ES86 0182 5297 2402 0031 7648")
-    assert _extract_iban_from_details(details) == "ES860182529724020031 7648".replace(" ", "")
+    assert _extract_iban_from_details(details) == "ES860182529724020031 7648".replace(
+        " ", ""
+    )
 
 
 def test_extract_iban_returns_none_when_no_iban_section():
@@ -526,6 +671,7 @@ def test_extract_iban_ignores_non_iban_rows():
 # build_records_for_event — IBAN extraction in bank transactions
 # ---------------------------------------------------------------------------
 
+
 def test_build_bank_transaction_uses_iban_as_counter_party():
     event = {
         "eventType": "BANK_TRANSACTION_OUTGOING",
@@ -534,7 +680,9 @@ def test_build_bank_transaction_uses_iban_as_counter_party():
         "title": "Landlord",
         "details": _make_iban_details("ES86 0182 5297 2402 0031 7648"),
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
 
     assert records[0]["counterParty"] == "ES860182529724020031 7648".replace(" ", "")
     assert records[0]["note"] == "To: Landlord"
@@ -547,7 +695,9 @@ def test_build_bank_transaction_falls_back_to_title_when_no_details():
         "amount": "500.00",
         "title": "Salary Corp",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["counterParty"] == "Salary Corp"
 
 
@@ -563,13 +713,16 @@ def test_build_bank_transaction_falls_back_to_title_when_iban_absent_in_details(
         "title": "Salary Corp",
         "details": details_without_iban,
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["counterParty"] == "Salary Corp"
 
 
 # ---------------------------------------------------------------------------
 # KNOWN_EVENT_TYPES — document-only types
 # ---------------------------------------------------------------------------
+
 
 def test_known_event_types_includes_document_types():
     assert "QUARTERLY_NET_WORTH_STATEMENT_CREATED" in KNOWN_EVENT_TYPES
@@ -578,14 +731,27 @@ def test_known_event_types_includes_document_types():
 
 def test_document_event_types_are_zero_amount_excluded():
     """Document-only events always have zero amount and should produce no records."""
-    for event_type in ("QUARTERLY_NET_WORTH_STATEMENT_CREATED", "EX_POST_COST_REPORT_CREATED"):
-        event = {"eventType": event_type, "timestamp": "2024-01-01T00:00:00Z", "amount": "0.00"}
-        assert build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port") == []
+    for event_type in (
+        "QUARTERLY_NET_WORTH_STATEMENT_CREATED",
+        "EX_POST_COST_REPORT_CREATED",
+    ):
+        event = {
+            "eventType": event_type,
+            "timestamp": "2024-01-01T00:00:00Z",
+            "amount": "0.00",
+        }
+        assert (
+            build_records_for_event(
+                event, cash_account_id="cash", portfolio_account_id="port"
+            )
+            == []
+        )
 
 
 # ---------------------------------------------------------------------------
 # _extract_detail_row
 # ---------------------------------------------------------------------------
+
 
 def _make_table_details(*rows: tuple[str, str]) -> dict:
     """Build a minimal details payload with a table section containing the given (title, text) rows."""
@@ -603,7 +769,9 @@ def _make_table_details(*rows: tuple[str, str]) -> dict:
 
 
 def test_extract_detail_row_found():
-    details = _make_table_details(("Transaktion", "0,39713 × 125,90 €"), ("Gebühr", "Kostenlos"))
+    details = _make_table_details(
+        ("Transaktion", "0,39713 × 125,90 €"), ("Gebühr", "Kostenlos")
+    )
     assert _extract_detail_row(details, "Transaktion") == "0,39713 × 125,90 €"
 
 
@@ -639,8 +807,11 @@ def test_extract_detail_row_empty_details():
 # build_records_for_event — Transaktion in investment events
 # ---------------------------------------------------------------------------
 
+
 def test_build_investment_appends_transaktion_to_note():
-    details = _make_table_details(("Transaktion", "0,397 × 125,90 €"), ("Gebühr", "Kostenlos"))
+    details = _make_table_details(
+        ("Transaktion", "0,397 × 125,90 €"), ("Gebühr", "Kostenlos")
+    )
     event = {
         "eventType": "TRADING_SAVINGSPLAN_EXECUTED",
         "timestamp": "2024-01-01T00:00:00Z",
@@ -648,8 +819,13 @@ def test_build_investment_appends_transaktion_to_note():
         "title": "Core MSCI World USD (Acc)",
         "details": details,
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
-    assert records[0]["note"] == "Savings Plan: Core MSCI World USD (Acc) · 0,397 × 125,90 €"
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert (
+        records[0]["note"]
+        == "Savings Plan: Core MSCI World USD (Acc) · 0,397 × 125,90 €"
+    )
 
 
 def test_build_spare_change_appends_transaktion_to_note():
@@ -661,8 +837,13 @@ def test_build_spare_change_appends_transaktion_to_note():
         "title": "Core MSCI World USD (Acc)",
         "details": details,
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
-    assert records[0]["note"] == "Round-up Investment: Core MSCI World USD (Acc) · 0,049 × 125,92 €"
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert (
+        records[0]["note"]
+        == "Round-up Investment: Core MSCI World USD (Acc) · 0,049 × 125,92 €"
+    )
 
 
 def test_build_investment_note_without_details():
@@ -672,7 +853,9 @@ def test_build_investment_note_without_details():
         "amount": "-50.00",
         "title": "Core MSCI World USD (Acc)",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "Savings Plan: Core MSCI World USD (Acc)"
 
 
@@ -680,8 +863,11 @@ def test_build_investment_note_without_details():
 # build_records_for_event — gross + tax in INTEREST_PAYOUT
 # ---------------------------------------------------------------------------
 
+
 def test_build_interest_appends_gross_and_tax():
-    details = _make_table_details(("Angesammelt", "78,68 €"), ("Steuern", "14,95 €"), ("Gesamt", "63,73 €"))
+    details = _make_table_details(
+        ("Angesammelt", "78,68 €"), ("Steuern", "14,95 €"), ("Gesamt", "63,73 €")
+    )
     event = {
         "eventType": "INTEREST_PAYOUT",
         "timestamp": "2024-01-01T00:00:00Z",
@@ -689,7 +875,9 @@ def test_build_interest_appends_gross_and_tax():
         "title": "Zinsen",
         "details": details,
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "Interest Payout: Zinsen · gross 78,68 €, tax 14,95 €"
 
 
@@ -700,13 +888,16 @@ def test_build_interest_note_without_details():
         "amount": "63.73",
         "title": "Zinsen",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "Interest Payout: Zinsen"
 
 
 # ---------------------------------------------------------------------------
 # build_records_for_event — Transaktion + gross + tax in SAVEBACK_AGGREGATE
 # ---------------------------------------------------------------------------
+
 
 def test_build_saveback_aggregate_appends_transaktion_and_tax():
     details = _make_table_details(
@@ -721,8 +912,13 @@ def test_build_saveback_aggregate_appends_transaktion_and_tax():
         "title": "Core MSCI World USD (Acc)",
         "details": details,
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
-    assert records[0]["note"] == "Saveback: Core MSCI World USD (Acc) · 0,097 × 125,85 € · gross + 15,00 €, tax 2,85 €"
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert (
+        records[0]["note"]
+        == "Saveback: Core MSCI World USD (Acc) · 0,097 × 125,85 € · gross + 15,00 €, tax 2,85 €"
+    )
 
 
 def test_build_saveback_aggregate_note_without_details():
@@ -732,13 +928,16 @@ def test_build_saveback_aggregate_note_without_details():
         "amount": "-12.15",
         "title": "Core MSCI World USD (Acc)",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert records[0]["note"] == "Saveback: Core MSCI World USD (Acc)"
 
 
 # ---------------------------------------------------------------------------
 # build_records_for_event — label_ids
 # ---------------------------------------------------------------------------
+
 
 def test_build_bank_transaction_with_label_id():
     event = {
@@ -763,7 +962,9 @@ def test_build_bank_transaction_without_label_id():
         "amount": "-200.00",
         "title": "Landlord",
     }
-    records = build_records_for_event(event, cash_account_id="cash", portfolio_account_id="port")
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
     assert "labelIds" not in records[0]
 
 
@@ -803,6 +1004,7 @@ def test_build_event_label_not_applied_to_other_types():
 # _extract_detail_row — section data is not a list
 # ---------------------------------------------------------------------------
 
+
 def test_extract_detail_row_skips_non_list_section_data():
     """Section where data is not a list should be skipped (line 101 branch)."""
     details = {
@@ -821,6 +1023,7 @@ def test_extract_detail_row_skips_non_list_section_data():
 # ---------------------------------------------------------------------------
 # _gross_tax_note — gross only (no tax)
 # ---------------------------------------------------------------------------
+
 
 def test_gross_tax_note_gross_only():
     from app.tr_mapper import _gross_tax_note
@@ -845,6 +1048,7 @@ def test_gross_tax_note_neither():
 # ---------------------------------------------------------------------------
 # _make_record — label_ids populated
 # ---------------------------------------------------------------------------
+
 
 def test_build_records_includes_label_ids_when_matched():
     """label_ids branch (line 201) is hit when a matching label is provided."""

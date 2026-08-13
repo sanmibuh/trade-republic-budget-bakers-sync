@@ -14,6 +14,7 @@ from app.twofa import (
 # TerminalCodeProvider
 # ---------------------------------------------------------------------------
 
+
 def test_terminal_provider_reads_and_strips_input(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda: "  123456 \n")
     assert TerminalCodeProvider().get_code() == "123456"
@@ -22,6 +23,7 @@ def test_terminal_provider_reads_and_strips_input(monkeypatch):
 # ---------------------------------------------------------------------------
 # TelegramCodeProvider
 # ---------------------------------------------------------------------------
+
 
 def _fake_clock():
     """Return a monotonic-like clock that advances by 1.0 on every call."""
@@ -137,6 +139,7 @@ def test_telegram_provider_ignores_empty_file(tmp_path):
 # ---------------------------------------------------------------------------
 # select_code_provider
 # ---------------------------------------------------------------------------
+
 
 def test_select_returns_terminal_when_tty(tmp_path):
     provider = select_code_provider(

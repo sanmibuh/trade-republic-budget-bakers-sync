@@ -23,6 +23,7 @@ from app.bot import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _cfg(
     instances: dict[str, InstanceConfig] | None = None,
     backup_container: str | None = "proj-backup-1",
@@ -30,9 +31,14 @@ def _cfg(
     if instances is None:
         instances = {
             "david": InstanceConfig(name="David", container_name="proj-sync-david-1"),
-            "eli":   InstanceConfig(name="Eli",   container_name="proj-sync-eli-1"),
+            "eli": InstanceConfig(name="Eli", container_name="proj-sync-eli-1"),
         }
-    return BotConfig(bot_token="tok", chat_id="42", instances=instances, backup_container=backup_container)
+    return BotConfig(
+        bot_token="tok",
+        chat_id="42",
+        instances=instances,
+        backup_container=backup_container,
+    )
 
 
 def _bot(
@@ -158,6 +164,7 @@ def test_botconfig_telegram_verify_ssl_invalid(monkeypatch):
 # _docker_exec_silent
 # ---------------------------------------------------------------------------
 
+
 def _make_docker_client(exit_code: int = 0, output: bytes = b"") -> MagicMock:
     """Return a mock docker client where exec_run returns (exit_code, output)."""
     container = MagicMock()
@@ -229,6 +236,7 @@ def test_docker_exec_silent_failure_does_not_call_on_success():
 
 def test_docker_exec_silent_container_not_found_does_not_raise():
     import docker.errors
+
     client = MagicMock()
     client.containers.get.side_effect = docker.errors.NotFound("not found")
     with patch("app.bot.docker.from_env", return_value=client):
@@ -255,6 +263,7 @@ def test_docker_exec_silent_passes_app_command_args():
 # ---------------------------------------------------------------------------
 # TelegramBot._register_commands
 # ---------------------------------------------------------------------------
+
 
 def test_register_commands_includes_backup_when_configured():
     bot = _bot(backup_container="proj-backup-1")
@@ -294,6 +303,7 @@ def test_register_commands_does_not_raise_on_failure():
 # ---------------------------------------------------------------------------
 # TelegramBot._handle_message — authorization
 # ---------------------------------------------------------------------------
+
 
 def test_handle_message_ignores_unauthorized_chat():
     bot = _bot()
@@ -359,6 +369,7 @@ def test_handle_message_does_not_delete_non_code_commands():
 # TelegramBot._delete_message
 # ---------------------------------------------------------------------------
 
+
 def test_delete_message_calls_telegram_api():
     bot = _bot()
     with patch("app.bot.requests.post") as mock_post:
@@ -386,6 +397,7 @@ def test_delete_message_ignores_missing_id():
 # TelegramBot._cmd_help
 # ---------------------------------------------------------------------------
 
+
 def test_cmd_help_includes_backup_when_configured():
     bot = _bot(backup_container="proj-backup-1")
     with patch.object(bot, "_send_message") as mock_send:
@@ -407,6 +419,7 @@ def test_cmd_help_excludes_backup_when_not_configured():
 # ---------------------------------------------------------------------------
 # TelegramBot._cmd_backup
 # ---------------------------------------------------------------------------
+
 
 def test_cmd_backup_no_backup_container_sends_error():
     bot = _bot(backup_container=None)
@@ -512,6 +525,7 @@ def test_handle_message_dispatches_backup_with_args():
 # backup_type callback — type selection step
 # ---------------------------------------------------------------------------
 
+
 def test_callback_query_backup_type_monthly_shows_month_keyboard():
     """`backup_type:monthly` callback → show month selection keyboard."""
     bot = _bot(backup_container="proj-backup-1")
@@ -519,11 +533,13 @@ def test_callback_query_backup_type_monthly_shows_month_keyboard():
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
     ):
-        bot._handle_callback_query({
-            "id": "cq1",
-            "data": "backup_type:monthly",
-            "message": {"chat": {"id": 42}},
-        })
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "backup_type:monthly",
+                "message": {"chat": {"id": 42}},
+            }
+        )
     keyboard = mock_send.call_args.kwargs.get("keyboard")
     assert keyboard is not None
     all_buttons = [btn for row in keyboard for btn in row]
@@ -537,11 +553,13 @@ def test_callback_query_backup_type_yearly_shows_year_keyboard():
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
     ):
-        bot._handle_callback_query({
-            "id": "cq1",
-            "data": "backup_type:yearly",
-            "message": {"chat": {"id": 42}},
-        })
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "backup_type:yearly",
+                "message": {"chat": {"id": 42}},
+            }
+        )
     keyboard = mock_send.call_args.kwargs.get("keyboard")
     assert keyboard is not None
     all_buttons = [btn for row in keyboard for btn in row]
@@ -575,11 +593,13 @@ def test_callback_backup_monthly_with_no_backup_container_sends_error():
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
     ):
-        bot._handle_callback_query({
-            "id": "cq1",
-            "data": "backup_monthly:2026-07",
-            "message": {"chat": {"id": 42}},
-        })
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "backup_monthly:2026-07",
+                "message": {"chat": {"id": 42}},
+            }
+        )
     mock_send.assert_called_once()
     assert "not configured" in mock_send.call_args.args[0].lower()
 
@@ -591,11 +611,13 @@ def test_callback_backup_yearly_with_no_backup_container_sends_error():
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
     ):
-        bot._handle_callback_query({
-            "id": "cq1",
-            "data": "backup_yearly:2025",
-            "message": {"chat": {"id": 42}},
-        })
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "backup_yearly:2025",
+                "message": {"chat": {"id": 42}},
+            }
+        )
     mock_send.assert_called_once()
     assert "not configured" in mock_send.call_args.args[0].lower()
 
@@ -607,11 +629,13 @@ def test_callback_query_backup_monthly_dispatches_launch():
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_launch_backup") as mock_launch,
     ):
-        bot._handle_callback_query({
-            "id": "cq1",
-            "data": "backup_monthly:2026-07",
-            "message": {"chat": {"id": 42}},
-        })
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "backup_monthly:2026-07",
+                "message": {"chat": {"id": 42}},
+            }
+        )
     mock_launch.assert_called_once_with("monthly", "2026-07")
 
 
@@ -634,11 +658,13 @@ def test_callback_query_backup_yearly_dispatches_launch():
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_launch_backup") as mock_launch,
     ):
-        bot._handle_callback_query({
-            "id": "cq1",
-            "data": "backup_yearly:2025",
-            "message": {"chat": {"id": 42}},
-        })
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "backup_yearly:2025",
+                "message": {"chat": {"id": 42}},
+            }
+        )
     mock_launch.assert_called_once_with("yearly", "2025")
 
 
@@ -669,6 +695,7 @@ def test_launch_backup_yearly_executes_correct_args():
 # _BACKUP_ICONS — consistent icon mapping
 # ---------------------------------------------------------------------------
 
+
 def test_backup_icons_has_monthly_and_yearly():
     assert "monthly" in _BACKUP_ICONS
     assert "yearly" in _BACKUP_ICONS
@@ -698,6 +725,7 @@ def test_launch_backup_uses_correct_icon_for_yearly():
 # TelegramBot._exec_in_thread
 # ---------------------------------------------------------------------------
 
+
 def test_exec_in_thread_starts_daemon_thread():
     """_exec_in_thread must start a daemon thread targeting _docker_exec_silent."""
     bot = _bot()
@@ -725,6 +753,7 @@ def test_exec_in_thread_passes_on_error_and_on_success():
 # TelegramBot._instance_buttons
 # ---------------------------------------------------------------------------
 
+
 def test_instance_buttons_returns_one_button_per_instance():
     bot = _bot()
     rows = bot._instance_buttons("sync")
@@ -746,7 +775,10 @@ def test_instance_buttons_callback_data_encodes_cmd_and_instance():
 
 def test_instance_buttons_rows_split_at_three():
     """More than 3 instances → buttons split into rows of max 3."""
-    instances = {str(i): InstanceConfig(name=str(i), container_name=f"proj-sync-{i}-1") for i in range(5)}
+    instances = {
+        str(i): InstanceConfig(name=str(i), container_name=f"proj-sync-{i}-1")
+        for i in range(5)
+    }
     bot = _bot(instances)
     rows = bot._instance_buttons("sync")
     assert all(len(row) <= 3 for row in rows)
@@ -757,13 +789,16 @@ def test_instance_buttons_rows_split_at_three():
 # TelegramBot._handle_callback_query
 # ---------------------------------------------------------------------------
 
+
 def test_callback_query_noop_is_acknowledged_and_ignored():
     bot = _bot()
     with (
         patch.object(bot, "_answer_callback_query") as mock_ack,
         patch.object(bot, "_launch_sync") as mock_sync,
     ):
-        bot._handle_callback_query({"id": "cq1", "data": "noop", "message": {"chat": {"id": 42}}})
+        bot._handle_callback_query(
+            {"id": "cq1", "data": "noop", "message": {"chat": {"id": 42}}}
+        )
     mock_ack.assert_called_once_with("cq1")
     mock_sync.assert_not_called()
 
@@ -774,7 +809,9 @@ def test_callback_query_unauthorized_chat_ignored():
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_launch_sync") as mock_sync,
     ):
-        bot._handle_callback_query({"id": "cq1", "data": "sync:david", "message": {"chat": {"id": 9999}}})
+        bot._handle_callback_query(
+            {"id": "cq1", "data": "sync:david", "message": {"chat": {"id": 9999}}}
+        )
     mock_sync.assert_not_called()
 
 
@@ -784,7 +821,9 @@ def test_callback_query_sync_dispatches_launch_sync():
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_launch_sync") as mock_sync,
     ):
-        bot._handle_callback_query({"id": "cq1", "data": "sync:david", "message": {"chat": {"id": 42}}})
+        bot._handle_callback_query(
+            {"id": "cq1", "data": "sync:david", "message": {"chat": {"id": 42}}}
+        )
     mock_sync.assert_called_once()
     assert mock_sync.call_args.args[0].name == "David"
 
@@ -795,7 +834,9 @@ def test_callback_query_unknown_instance_replies():
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
     ):
-        bot._handle_callback_query({"id": "cq1", "data": "sync:nobody", "message": {"chat": {"id": 42}}})
+        bot._handle_callback_query(
+            {"id": "cq1", "data": "sync:nobody", "message": {"chat": {"id": 42}}}
+        )
     mock_send.assert_called_once()
     assert "Unknown" in mock_send.call_args.args[0]
 
@@ -806,7 +847,9 @@ def test_callback_query_malformed_data_does_not_raise():
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message"),
     ):
-        bot._handle_callback_query({"id": "cq1", "data": "malformed", "message": {"chat": {"id": 42}}})
+        bot._handle_callback_query(
+            {"id": "cq1", "data": "malformed", "message": {"chat": {"id": 42}}}
+        )
     # must not raise
 
 
@@ -816,13 +859,16 @@ def test_callback_query_unknown_cmd_logs_warning_and_does_not_raise():
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
     ):
-        bot._handle_callback_query({"id": "cq1", "data": "badcmd:david", "message": {"chat": {"id": 42}}})
+        bot._handle_callback_query(
+            {"id": "cq1", "data": "badcmd:david", "message": {"chat": {"id": 42}}}
+        )
     mock_send.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
 # TelegramBot._launch_sync
 # ---------------------------------------------------------------------------
+
 
 def test_launch_sync_sends_ack_and_starts_thread():
     bot = _bot()
@@ -844,14 +890,13 @@ def test_launch_sync_passes_correct_args_to_exec():
         patch.object(bot, "_exec_in_thread") as mock_exec,
     ):
         bot._launch_sync(inst)
-    mock_exec.assert_called_once_with(
-        inst.container_name, ["sync"], on_error=ANY
-    )
+    mock_exec.assert_called_once_with(inst.container_name, ["sync"], on_error=ANY)
 
 
 # ---------------------------------------------------------------------------
 # TelegramBot._cmd_login / _launch_login
 # ---------------------------------------------------------------------------
+
 
 def test_cmd_login_sends_keyboard_with_instances():
     bot = _bot()
@@ -880,7 +925,9 @@ def test_callback_query_login_dispatches_launch_login():
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_launch_login") as mock_login,
     ):
-        bot._handle_callback_query({"id": "cq1", "data": "login:david", "message": {"chat": {"id": 42}}})
+        bot._handle_callback_query(
+            {"id": "cq1", "data": "login:david", "message": {"chat": {"id": 42}}}
+        )
     mock_login.assert_called_once()
     assert mock_login.call_args.args[0].name == "David"
 
@@ -929,6 +976,7 @@ def test_launch_login_reports_success_via_on_success():
 # ---------------------------------------------------------------------------
 # TelegramBot._cmd_code
 # ---------------------------------------------------------------------------
+
 
 def test_cmd_code_executes_submit_code_for_instance():
     bot = _bot()
@@ -989,6 +1037,7 @@ def test_handle_message_dispatches_code():
 # TelegramBot._send_message
 # ---------------------------------------------------------------------------
 
+
 def test_send_message_posts_to_telegram():
     bot = _bot()
     mock_resp = MagicMock()
@@ -1017,13 +1066,16 @@ def test_send_message_with_keyboard_includes_reply_markup():
 
 def test_send_message_does_not_raise_on_request_exception():
     bot = _bot()
-    with patch("app.bot.requests.post", side_effect=requests.RequestException("network error")):
+    with patch(
+        "app.bot.requests.post", side_effect=requests.RequestException("network error")
+    ):
         bot._send_message("hello")  # must not raise
 
 
 # ---------------------------------------------------------------------------
 # TelegramBot._answer_callback_query
 # ---------------------------------------------------------------------------
+
 
 def test_answer_callback_query_calls_api():
     bot = _bot()
@@ -1045,17 +1097,29 @@ def test_answer_callback_query_does_not_raise_on_failure():
 # TelegramBot._handle_update — routing
 # ---------------------------------------------------------------------------
 
+
 def test_handle_update_routes_message():
     bot = _bot()
     with patch.object(bot, "_handle_message") as mock_msg:
-        bot._handle_update({"update_id": 1, "message": {"chat": {"id": 42}, "text": "/help"}})
+        bot._handle_update(
+            {"update_id": 1, "message": {"chat": {"id": 42}, "text": "/help"}}
+        )
     mock_msg.assert_called_once()
 
 
 def test_handle_update_routes_callback_query():
     bot = _bot()
     with patch.object(bot, "_handle_callback_query") as mock_cb:
-        bot._handle_update({"update_id": 1, "callback_query": {"id": "cq1", "data": "noop", "message": {"chat": {"id": 42}}}})
+        bot._handle_update(
+            {
+                "update_id": 1,
+                "callback_query": {
+                    "id": "cq1",
+                    "data": "noop",
+                    "message": {"chat": {"id": 42}},
+                },
+            }
+        )
     mock_cb.assert_called_once()
 
 
@@ -1073,6 +1137,7 @@ def test_handle_update_ignores_unknown_type():
 # ---------------------------------------------------------------------------
 # _docker_logs_today
 # ---------------------------------------------------------------------------
+
 
 def test_docker_logs_today_returns_decoded_output():
     import datetime
@@ -1130,6 +1195,7 @@ def test_docker_logs_today_uses_explicit_client():
 # TelegramBot._cmd_logs
 # ---------------------------------------------------------------------------
 
+
 def test_cmd_logs_sends_keyboard_with_instances():
     bot = _bot()
     with patch.object(bot, "_send_message") as mock_send:
@@ -1163,6 +1229,7 @@ def test_handle_message_dispatches_logs():
 # TelegramBot callback logs:
 # ---------------------------------------------------------------------------
 
+
 def test_callback_query_logs_dispatches_fetch_and_send_logs():
     bot = _bot()
     with (
@@ -1170,11 +1237,13 @@ def test_callback_query_logs_dispatches_fetch_and_send_logs():
         patch("app.bot.threading.Thread") as mock_thread,
     ):
         mock_thread.return_value.start = MagicMock()
-        bot._handle_callback_query({
-            "id": "cq1",
-            "data": "logs:david",
-            "message": {"chat": {"id": 42}},
-        })
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "logs:david",
+                "message": {"chat": {"id": 42}},
+            }
+        )
     mock_thread.assert_called_once()
     assert mock_thread.call_args.kwargs["target"] == bot._fetch_and_send_logs
     assert mock_thread.call_args.kwargs["args"][0].name == "David"
@@ -1184,11 +1253,14 @@ def test_callback_query_logs_dispatches_fetch_and_send_logs():
 # TelegramBot._fetch_and_send_logs
 # ---------------------------------------------------------------------------
 
+
 def test_fetch_and_send_logs_sends_todays_logs():
     bot = _bot()
     inst = bot._cfg.instances["david"]
     with (
-        patch("app.bot._docker_logs_today", return_value="INFO sync: all done\n") as mock_logs,
+        patch(
+            "app.bot._docker_logs_today", return_value="INFO sync: all done\n"
+        ) as mock_logs,
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._fetch_and_send_logs(inst)
@@ -1214,6 +1286,7 @@ def test_fetch_and_send_logs_empty_logs_sends_notice():
 
 def test_fetch_and_send_logs_truncates_long_output():
     from app.bot import _MAX_LOG_CHARS
+
     bot = _bot()
     inst = bot._cfg.instances["david"]
     long_log = "x" * (_MAX_LOG_CHARS + 500)
@@ -1232,7 +1305,9 @@ def test_fetch_and_send_logs_sends_error_on_exception():
     bot = _bot()
     inst = bot._cfg.instances["david"]
     with (
-        patch("app.bot._docker_logs_today", side_effect=Exception("container not found")),
+        patch(
+            "app.bot._docker_logs_today", side_effect=Exception("container not found")
+        ),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._fetch_and_send_logs(inst)
@@ -1243,6 +1318,7 @@ def test_fetch_and_send_logs_sends_error_on_exception():
 # ---------------------------------------------------------------------------
 # _register_commands includes /logs
 # ---------------------------------------------------------------------------
+
 
 def test_register_commands_includes_logs():
     bot = _bot()
@@ -1258,6 +1334,7 @@ def test_register_commands_includes_logs():
 # ---------------------------------------------------------------------------
 # _send_message parse_mode param
 # ---------------------------------------------------------------------------
+
 
 def test_send_message_default_parse_mode_is_markdownv2():
     bot = _bot()
@@ -1282,6 +1359,7 @@ def test_send_message_no_parse_mode_omits_field():
 # ---------------------------------------------------------------------------
 # _docker_check_session
 # ---------------------------------------------------------------------------
+
 
 def test_docker_check_session_returns_true_when_exit_zero():
     """Exit code 0 from check-session → session is valid."""
@@ -1329,21 +1407,29 @@ def test_docker_check_session_invokes_check_session_command():
 # _docker_client_ctx
 # ---------------------------------------------------------------------------
 
+
 def test_docker_client_ctx_yields_client_and_closes_it():
     client = MagicMock()
-    with patch("app.bot.docker.from_env", return_value=client), _docker_client_ctx() as c:
+    with (
+        patch("app.bot.docker.from_env", return_value=client),
+        _docker_client_ctx() as c,
+    ):
         assert c is client
     client.close.assert_called_once()
 
 
 def test_docker_client_ctx_yields_none_on_init_failure():
-    with patch("app.bot.docker.from_env", side_effect=Exception("daemon unreachable")), _docker_client_ctx() as c:
+    with (
+        patch("app.bot.docker.from_env", side_effect=Exception("daemon unreachable")),
+        _docker_client_ctx() as c,
+    ):
         assert c is None
 
 
 # ---------------------------------------------------------------------------
 # _docker_container_status / _docker_last_sync_summary
 # ---------------------------------------------------------------------------
+
 
 def test_docker_container_status_returns_running_state():
     client = MagicMock()
@@ -1367,7 +1453,9 @@ def test_docker_last_sync_summary_parses_success_from_log():
     )
     with patch("app.bot.docker.from_env", return_value=client):
         result = _docker_last_sync_summary("my-container")
-    assert result == "✅ success at 2026/08/11 10:00 UTC · saved 3 · failed 0 · excluded 1"
+    assert (
+        result == "✅ success at 2026/08/11 10:00 UTC · saved 3 · failed 0 · excluded 1"
+    )
 
 
 def test_docker_last_sync_summary_uses_explicit_client():
@@ -1404,11 +1492,14 @@ def test_docker_last_sync_summary_returns_none_on_nonzero_exit_code():
 # _auth_icon
 # ---------------------------------------------------------------------------
 
+
 def test_auth_icon_true():
     assert _auth_icon(True) == "✅"
 
+
 def test_auth_icon_false():
     assert _auth_icon(False) == "⚠️"
+
 
 def test_auth_icon_none():
     assert _auth_icon(None) == "❓"
@@ -1418,6 +1509,7 @@ def test_auth_icon_none():
 # _cmd_status — auth state decoration
 # ---------------------------------------------------------------------------
 
+
 def test_cmd_status_shows_checkmark_for_authenticated_instance():
     """✅ icon when the session check passes for an instance."""
     bot = _bot()
@@ -1425,7 +1517,10 @@ def test_cmd_status_shows_checkmark_for_authenticated_instance():
         patch("app.bot.docker.from_env", return_value=MagicMock()),
         patch("app.bot._docker_container_status", return_value="running"),
         patch("app.bot._docker_check_session", return_value=True),
-        patch("app.bot._docker_last_sync_summary", return_value="✅ success at 2026/08/11 10:00 UTC"),
+        patch(
+            "app.bot._docker_last_sync_summary",
+            return_value="✅ success at 2026/08/11 10:00 UTC",
+        ),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._cmd_status([])
@@ -1477,7 +1572,10 @@ def test_cmd_status_checks_each_instance():
         patch("app.bot.docker.from_env", return_value=MagicMock()),
         patch("app.bot._docker_container_status", return_value="running"),
         patch("app.bot._docker_check_session", return_value=True) as mock_check,
-        patch("app.bot._docker_last_sync_summary", return_value="✅ success at 2026/08/11 10:00 UTC"),
+        patch(
+            "app.bot._docker_last_sync_summary",
+            return_value="✅ success at 2026/08/11 10:00 UTC",
+        ),
         patch.object(bot, "_send_message"),
     ):
         bot._cmd_status([])
