@@ -10,7 +10,6 @@ from app.tr_mapper import (
     KNOWN_EVENT_TYPES,
     _extract_detail_row,
     _extract_iban_from_details,
-    _make_record,
     _to_decimal,
     build_records_for_event,
     extract_amount,
@@ -1047,12 +1046,12 @@ def test_gross_tax_note_neither():
 
 
 # ---------------------------------------------------------------------------
-# _make_record — label_ids populated
+# build_records_for_event — label_ids
 # ---------------------------------------------------------------------------
 
 
 def test_build_records_includes_label_ids_when_matched():
-    """label_ids branch (line 201) is hit when a matching label is provided."""
+    """label_ids injected by build_records_for_event when a matching label is provided."""
     event = {
         "eventType": "BANK_TRANSACTION_INCOMING",
         "id": "ev-label",
@@ -1067,35 +1066,3 @@ def test_build_records_includes_label_ids_when_matched():
         label_ids={"BANK_TRANSACTION_INCOMING": "uuid-label-in"},
     )
     assert records[0].get("labelIds") == ["uuid-label-in"]
-
-
-# ---------------------------------------------------------------------------
-# _make_record — label_ids kwarg sets labelIds directly on the record
-# ---------------------------------------------------------------------------
-
-
-def test_make_record_sets_label_ids_when_provided():
-    """Passing label_ids to _make_record must include them in the returned dict."""
-    from decimal import Decimal
-
-    record = _make_record(
-        "cash-123",
-        Decimal("10.00"),
-        "Test note",
-        "2024-06-01",
-        label_ids=["uuid-xyz"],
-    )
-    assert record["labelIds"] == ["uuid-xyz"]
-
-
-def test_make_record_omits_label_ids_when_none():
-    """Without label_ids, the key must be absent from the returned dict."""
-    from decimal import Decimal
-
-    record = _make_record(
-        "cash-123",
-        Decimal("10.00"),
-        "Test note",
-        "2024-06-01",
-    )
-    assert "labelIds" not in record
