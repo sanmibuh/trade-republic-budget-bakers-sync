@@ -25,8 +25,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install ruff
-        run: pip install ruff==0.16.2
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
 
       - name: Check lint
         run: ruff check .

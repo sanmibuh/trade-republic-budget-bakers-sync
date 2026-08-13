@@ -13,7 +13,7 @@ help:
 	@echo "Dev targets (local, no Docker):"
 	@echo "  test                    Run the test suite with coverage"
 	@echo "  lint                    Check lint and formatting (ruff check + format --check)"
-	@echo "  format                  Auto-fix formatting (ruff format)"
+	@echo "  format                  Auto-fix formatting and lint (ruff format + check --fix)"
 	@echo "  run-sync                One-shot sync"
 	@echo "  run-backup              One-shot backup auto"
 	@echo "  run-backup-monthly      One-shot backup for a specific month  (PARAM=YYYY-MM)"
