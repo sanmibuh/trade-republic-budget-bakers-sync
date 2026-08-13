@@ -17,6 +17,7 @@ from app.bot import (
     _docker_exec_silent,
     _docker_last_sync_summary,
     _docker_logs_today,
+    _format_sync_timestamp,
 )
 
 # ---------------------------------------------------------------------------
@@ -1751,3 +1752,249 @@ def test_cmd_status_checks_each_instance():
     ):
         bot._cmd_status([])
     assert mock_check.call_count == len(bot._cfg.instances)
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot.__init__ — telegram_verify_ssl=False disables urllib3 warnings
+# ---------------------------------------------------------------------------
+
+
+def test_init_disables_urllib3_warnings_when_ssl_verify_false():
+    """When telegram_verify_ssl=False, urllib3 InsecureRequestWarning is suppressed."""
+    import urllib3
+
+    with patch.object(urllib3, "disable_warnings") as mock_dw:
+        TelegramBot(
+            BotConfig(
+                bot_token="tok",
+                chat_id="42",
+                instances={},
+                telegram_verify_ssl=False,
+            )
+        )
+    mock_dw.assert_called_once_with(urllib3.exceptions.InsecureRequestWarning)
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot.run — polling loop
+# ---------------------------------------------------------------------------
+
+
+def test_run_stops_on_keyboard_interrupt():
+    """KeyboardInterrupt inside the loop causes run() to exit cleanly."""
+    bot = _bot()
+    with (
+        patch.object(bot, "_register_commands"),
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_poll_once", side_effect=KeyboardInterrupt),
+    ):
+        bot.run()  # must not raise
+
+
+def test_run_recovers_from_polling_exception_then_stops():
+    """A generic exception is caught; a subsequent KeyboardInterrupt stops the loop."""
+    bot = _bot()
+    call_count = [0]
+
+    def flaky_poll():
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise RuntimeError("transient error")
+        raise KeyboardInterrupt
+
+    with (
+        patch.object(bot, "_register_commands"),
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_poll_once", side_effect=flaky_poll),
+        patch("app.bot.time.sleep"),
+    ):
+        bot.run()
+
+    assert call_count[0] == 2
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._poll_once
+# ---------------------------------------------------------------------------
+
+
+def test_poll_once_dispatches_update():
+    """_poll_once fetches updates and routes each one through _handle_update."""
+    bot = _bot()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {
+        "result": [{"update_id": 10, "message": {"chat": {"id": 42}, "text": "/help"}}]
+    }
+    with (
+        patch("app.bot.requests.get", return_value=mock_resp),
+        patch.object(bot, "_handle_update") as mock_handle,
+    ):
+        bot._poll_once()
+    mock_handle.assert_called_once()
+    assert bot._offset == 11
+
+
+def test_poll_once_advances_offset_for_multiple_updates():
+    """Offset is set to last update_id + 1."""
+    bot = _bot()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {
+        "result": [
+            {"update_id": 5, "message": {"chat": {"id": 42}, "text": "/help"}},
+            {"update_id": 6, "message": {"chat": {"id": 42}, "text": "/status"}},
+        ]
+    }
+    with (
+        patch("app.bot.requests.get", return_value=mock_resp),
+        patch.object(bot, "_handle_update"),
+    ):
+        bot._poll_once()
+    assert bot._offset == 7
+
+
+def test_poll_once_continues_on_handle_update_exception():
+    """Exception inside _handle_update is caught; remaining updates are still processed."""
+    bot = _bot()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {
+        "result": [
+            {"update_id": 1, "message": {"chat": {"id": 42}, "text": "/help"}},
+            {"update_id": 2, "message": {"chat": {"id": 42}, "text": "/status"}},
+        ]
+    }
+    handle_calls = []
+
+    def flaky_handle(update):
+        handle_calls.append(update["update_id"])
+        if update["update_id"] == 1:
+            raise RuntimeError("boom")
+
+    with (
+        patch("app.bot.requests.get", return_value=mock_resp),
+        patch.object(bot, "_handle_update", side_effect=flaky_handle),
+    ):
+        bot._poll_once()
+
+    assert handle_calls == [1, 2]
+    assert bot._offset == 3
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._cmd_status — no instances configured
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_status_no_instances_sends_warning():
+    """When no instances are configured, _cmd_status sends a clear warning."""
+    bot = _bot(instances={})
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_status([])
+    mock_send.assert_called_once()
+    assert "no instances" in mock_send.call_args.args[0].lower()
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._cmd_status — backup not configured
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_status_mentions_backup_not_configured_when_absent():
+    """When backup_container is None, the status message must say it is not configured."""
+    bot = _bot(backup_container=None)
+    with (
+        patch("app.bot.docker.from_env", return_value=MagicMock()),
+        patch("app.bot._docker_container_status", return_value=None),
+        patch("app.bot._docker_check_session", return_value=None),
+        patch("app.bot._docker_last_sync_summary", return_value=None),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._cmd_status([])
+    msg = mock_send.call_args.args[0]
+    assert "not configured" in msg
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._cmd_sync
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_sync_sends_instance_picker_keyboard():
+    """_cmd_sync must send a prompt with an inline keyboard of instances."""
+    bot = _bot()
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_sync([])
+    mock_send.assert_called_once()
+    keyboard = mock_send.call_args.kwargs.get("keyboard")
+    assert keyboard is not None
+    all_buttons = [btn for row in keyboard for btn in row]
+    cb_data = [b["callback_data"] for b in all_buttons]
+    assert any(d.startswith("sync:") for d in cb_data)
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._month_buttons — January wraps to December of previous year
+# ---------------------------------------------------------------------------
+
+
+def test_month_buttons_wraps_year_when_run_in_january():
+    """When today is January, the most recent months must include December of the prior year."""
+    import datetime
+
+    bot = _bot()
+    fixed = datetime.datetime(2026, 1, 15, 12, 0, tzinfo=datetime.UTC)
+    with patch("app.bot.datetime.datetime") as mock_dt:
+        mock_dt.now.return_value = fixed
+        buttons = bot._month_buttons()
+    all_buttons = [b for row in buttons for b in row]
+    periods = [b["text"] for b in all_buttons]
+    assert "2025-12" in periods
+
+
+# ---------------------------------------------------------------------------
+# _format_sync_timestamp — invalid string falls back to raw value
+# ---------------------------------------------------------------------------
+
+
+def test_format_sync_timestamp_returns_raw_on_invalid_string():
+    """An unparseable timestamp string must be returned unchanged."""
+    raw = "not-a-timestamp"
+    assert _format_sync_timestamp(raw) == raw
+
+
+# ---------------------------------------------------------------------------
+# _docker_last_sync_summary — returns None when payload has no status or synced_at
+# ---------------------------------------------------------------------------
+
+
+def test_docker_last_sync_summary_returns_none_when_empty_payload():
+    """Payload with no status and no synced_at → return None."""
+    client = _make_docker_client(
+        output=b'{"status":null,"timestamp":null,"synced":null,"failed":null,"excluded":null,"synced_at":null}'
+    )
+    with patch("app.bot.docker.from_env", return_value=client):
+        result = _docker_last_sync_summary("my-container")
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# run() entry point
+# ---------------------------------------------------------------------------
+
+
+def test_run_entry_point_creates_bot_and_calls_run():
+    """run() must build a BotConfig from env, construct a TelegramBot, and call bot.run()."""
+    from app.bot import run
+
+    mock_cfg = MagicMock()
+    mock_bot = MagicMock()
+    with (
+        patch("app.bot.BotConfig.from_env", return_value=mock_cfg),
+        patch("app.bot.TelegramBot", return_value=mock_bot) as mock_cls,
+    ):
+        run()
+
+    mock_cls.assert_called_once_with(mock_cfg)
+    mock_bot.run.assert_called_once()
