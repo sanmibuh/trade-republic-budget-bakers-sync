@@ -725,6 +725,64 @@ def test_process_results_skips_events_with_no_records(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# run() — zero-amount events are committed even when no records are posted
+# ---------------------------------------------------------------------------
+
+
+def test_run_excluded_events_not_reprocessed_on_next_run(tmp_path):
+    """Regression: repo.commit() must be called even when all events are excluded.
+
+    Before the fix, mark_processed() writes for zero-amount events were left
+    uncommitted when batch.records was empty, causing them to be reprocessed
+    on the next run.
+    """
+    from unittest.mock import patch
+
+    from app.main import run
+
+    excluded_event = {
+        "id": "ev-zero-persist",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "eventType": "SAVINGS_PLAN_EXECUTED",
+        "amount": "0.00",
+    }
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.setup_logging"),
+        patch("app.main.Notifier"),
+        patch("app.main.SyncRunner") as mock_runner_cls,
+        patch("app.main.filter_by_lookback", return_value=[excluded_event]),
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        cfg.lookback_days = 7
+        mock_cfg_cls.return_value = cfg
+
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = [excluded_event]
+
+        # Simulate build_batch marking the event as processed in a real repo
+        # and returning an empty batch (all excluded)
+        def fake_build_batch(new_events, repo):
+            from app.main import _Batch
+
+            for ev in new_events:
+                repo.mark_processed(ev)
+            return _Batch(records=[], event_record_indices=[[]], excluded_count=1)
+
+        runner.build_batch.side_effect = fake_build_batch
+
+        run()
+
+    # After run(), the event must be persisted (committed) in the DB
+    with EventRepository(tmp_path / "sync.db") as repo:
+        assert repo.is_processed("ev-zero-persist"), (
+            "Excluded event was not committed — it will be reprocessed on the next run"
+        )
+
+
+# ---------------------------------------------------------------------------
 # run() — orchestrator
 # ---------------------------------------------------------------------------
 
@@ -757,9 +815,11 @@ def test_run_returns_zero_on_success(tmp_path):
         runner = mock_runner_cls.return_value
         runner.fetch_events.return_value = fake_events
 
-        from app.main import _SyncCounts
-
-        runner.process_results.return_value = _SyncCounts(synced=1, failed=0)
+        mock_counts = MagicMock()
+        mock_counts.synced = 1
+        mock_counts.failed = 0
+        mock_counts.excluded = 0
+        runner.process_results.return_value = mock_counts
 
         batch = MagicMock()
         batch.records = [{"amount": 10}]

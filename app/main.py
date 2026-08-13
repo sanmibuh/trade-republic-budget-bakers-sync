@@ -287,6 +287,8 @@ def run() -> int:
                     results, new_events, batch.event_record_indices, repo
                 )
                 counts.excluded = batch.excluded_count
+            else:
+                repo.commit()
 
             log.info(
                 "Sync complete. synced=%d excluded=%d failed=%d",
