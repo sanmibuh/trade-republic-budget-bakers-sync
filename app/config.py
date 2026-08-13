@@ -104,10 +104,7 @@ def has_valid_session(data_dir: Path) -> bool:
         return False
 
     now = time.time()
-    return any(
-        c.expires is None or c.expires > now
-        for c in jar
-    )
+    return any(c.expires is None or c.expires > now for c in jar)
 
 
 @dataclass(frozen=True)

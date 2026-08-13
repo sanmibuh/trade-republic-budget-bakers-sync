@@ -1130,9 +1130,6 @@ def test_handle_message_unknown_plain_text_ignored_from_other_chat():
     mock_send.assert_not_called()
 
 
-
-
-
 def test_cmd_code_executes_submit_code_for_instance():
     bot = _bot()
     with (

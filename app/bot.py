@@ -655,9 +655,7 @@ class TelegramBot:
                 inst.container_name, ["submit-code", code], on_error=self._send_message
             )
             return True
-        names = ", ".join(
-            f"`{_esc(k)}`" for k in sorted(self._pending_login)
-        )
+        names = ", ".join(f"`{_esc(k)}`" for k in sorted(self._pending_login))
         self._send_message(
             f"⚠️ Multiple logins pending: {names}\\. "
             "Use `/code <instance> <code>` to specify which one\\."

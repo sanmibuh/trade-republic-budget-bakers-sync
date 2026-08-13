@@ -266,7 +266,9 @@ def _netscape_cookie(name: str, value: str, expires: int) -> str:
 
 def test_check_session_exits_zero_when_valid_cookie_present(tmp_path):
     """Exit 0 when cookies.txt contains at least one non-expired cookie."""
-    (tmp_path / "cookies.txt").write_text(_netscape_cookie("tr_session", "abc", _FAR_FUTURE))
+    (tmp_path / "cookies.txt").write_text(
+        _netscape_cookie("tr_session", "abc", _FAR_FUTURE)
+    )
     with patch("app.config.read_data_dir", return_value=tmp_path):
         result = _runner().invoke(cli, ["check-session"])
     assert result.exit_code == 0
