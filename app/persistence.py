@@ -74,6 +74,14 @@ _CREATE_INDEX = """
     CREATE INDEX IF NOT EXISTS idx_synced_at ON processed_events (synced_at)
 """
 
+_CREATE_AUTH_STATE_TABLE = """
+    CREATE TABLE IF NOT EXISTS auth_state (
+        instance    TEXT PRIMARY KEY,
+        status      TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    )
+"""
+
 
 class EventRepository:
     """Manages the SQLite dedup database.
@@ -95,6 +103,7 @@ class EventRepository:
         self._conn = sqlite3.connect(db_path)
         self._conn.execute(_CREATE_TABLE)
         self._conn.execute(_CREATE_INDEX)
+        self._conn.execute(_CREATE_AUTH_STATE_TABLE)
         self._migrate()
         self._conn.commit()
 
@@ -235,6 +244,28 @@ class EventRepository:
             )
         self._conn.commit()
         return deleted
+
+    def set_auth_state(self, instance: str, status: str) -> None:
+        """Persist authentication status for *instance* to the ``auth_state`` table.
+
+        Args:
+            instance: Logical instance name (e.g. ``"david"``).
+            status:   One of ``"ok"``, ``"failed"``, or ``"expired"``.
+        """
+        updated_at = datetime.now(UTC).isoformat()
+        self._conn.execute(
+            "INSERT OR REPLACE INTO auth_state (instance, status, updated_at) "
+            "VALUES (?, ?, ?)",
+            (instance, status, updated_at),
+        )
+        self._conn.commit()
+
+    def get_auth_state(self, instance: str) -> str | None:
+        """Return the persisted auth status for *instance*, or ``None`` if absent."""
+        row = self._conn.execute(
+            "SELECT status FROM auth_state WHERE instance = ?", (instance,)
+        ).fetchone()
+        return row[0] if row else None
 
     def commit(self) -> None:
         self._conn.commit()

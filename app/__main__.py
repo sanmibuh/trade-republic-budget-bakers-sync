@@ -78,10 +78,34 @@ def check_session() -> None:
     pytr persists the session as cookies.txt (written by save_websession()).
     The check reads the cookie expiry timestamps so that a file with only
     expired cookies is correctly reported as needing re-authentication.
-    """
-    from app.config import has_valid_session, read_data_dir
 
-    sys.exit(0 if has_valid_session(read_data_dir()) else 1)
+    Additionally, if ``sync.db`` contains an ``auth_state`` row for this
+    instance with status ``"failed"`` or ``"expired"``, the command exits 1
+    even when a cookies file is present — this catches the case where a failed
+    login left the old session file in place.
+    """
+    import os
+
+    from app.config import has_valid_session, read_data_dir
+    from app.persistence import EventRepository
+
+    data_dir = read_data_dir()
+    if not has_valid_session(data_dir):
+        sys.exit(1)
+
+    # Resolve the instance name the same way Config.from_env() does.
+    instance = (
+        os.getenv("INSTANCE", "").strip() or os.getenv("OWNER_NAME", "backup").lower()
+    )
+
+    db_path = data_dir / "sync.db"
+    if db_path.exists():
+        with EventRepository(db_path) as repo:
+            auth_status = repo.get_auth_state(instance)
+        if auth_status in ("failed", "expired"):
+            sys.exit(1)
+
+    sys.exit(0)
 
 
 @cli.command()
