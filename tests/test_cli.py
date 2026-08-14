@@ -321,3 +321,32 @@ def test_check_session_exits_zero_when_mixed_cookies_one_valid(tmp_path):
 def test_check_session_help():
     result = _runner().invoke(cli, ["check-session", "--help"])
     assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# resync command
+# ---------------------------------------------------------------------------
+
+
+def test_resync_help():
+    result = _runner().invoke(cli, ["resync", "--help"])
+    assert result.exit_code == 0
+    assert "resync" in result.output.lower() or "date" in result.output.lower()
+
+
+def test_resync_calls_run_resync_with_date():
+    with patch("app.main.run_resync", return_value=0) as mock_run:
+        result = _runner().invoke(cli, ["resync", "2026-07-15"])
+    assert result.exit_code == 0
+    mock_run.assert_called_once_with("2026-07-15")
+
+
+def test_resync_exits_with_run_resync_return_code():
+    with patch("app.main.run_resync", return_value=1):
+        result = _runner().invoke(cli, ["resync", "2026-07-15"])
+    assert result.exit_code == 1
+
+
+def test_resync_requires_date_argument():
+    result = _runner().invoke(cli, ["resync"])
+    assert result.exit_code != 0

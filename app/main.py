@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from requests import HTTPError
@@ -242,6 +242,228 @@ class SyncRunner:
         repo.commit()
         return _SyncCounts(synced=synced, failed=failed)
 
+    # ------------------------------------------------------------------
+    # resync_day helpers
+    # ------------------------------------------------------------------
+
+    def _warn_unknown_event_type(self, event: dict[str, Any]) -> None:
+        """Log a warning and notify if *event* carries an unrecognised type."""
+        event_type = extract_event_type(event)
+        if event_type and event_type not in KNOWN_EVENT_TYPES:
+            log.warning(
+                "Unknown TR event type %r — falling back to cash handler", event_type
+            )
+            self._notifier.unknown_event_type(event_type)
+
+    @staticmethod
+    def _parse_existing_ids(raw: str | None) -> list[str]:
+        """Split a comma-joined wallet-record-id string into a list."""
+        return [wid for wid in raw.split(",") if wid] if raw else []
+
+    def _resync_put_single(
+        self,
+        wid: str,
+        record: dict,
+        event: dict[str, Any],
+        wallet_client: WalletClient,
+    ) -> tuple[bool, str]:
+        """PUT one record; return ``(failed, new_id)``."""
+        try:
+            resp = wallet_client.put_record(wid, record)
+            return False, resp.get("id") or wid
+        except Exception:
+            log.exception(
+                "PUT failed for event %s record %s", dedup_event_id(event), wid
+            )
+            return True, ""
+
+    def _resync_post_extra(
+        self,
+        record: dict,
+        event: dict[str, Any],
+        wallet_client: WalletClient,
+    ) -> tuple[bool, str]:
+        """POST a single extra record; return ``(failed, new_id)``."""
+        try:
+            results = wallet_client.post_records([record])
+            if not results:
+                log.error(
+                    "POST returned no results for extra record of event %s",
+                    dedup_event_id(event),
+                )
+                return True, ""
+            item = results[0]
+            if item.get("error"):
+                log.error(
+                    "POST error for extra record of event %s: %s",
+                    dedup_event_id(event),
+                    item["error"],
+                )
+                return True, ""
+            return False, item.get("id") or ""
+        except Exception:
+            log.exception(
+                "POST failed for extra record of event %s", dedup_event_id(event)
+            )
+            return True, ""
+
+    def _resync_put_records(
+        self,
+        event: dict[str, Any],
+        recs: list[dict],
+        existing_ids: list[str],
+        wallet_client: WalletClient,
+    ) -> tuple[bool, list[str]]:
+        """PUT existing sub-records; POST any extras beyond the stored IDs.
+
+        Returns:
+            ``(failed, new_ids)`` — *failed* is ``True`` if any call raised.
+        """
+        new_ids: list[str] = []
+        for i, record in enumerate(recs):
+            wid = existing_ids[i] if i < len(existing_ids) else None
+            failed, new_id = (
+                self._resync_put_single(wid, record, event, wallet_client)
+                if wid
+                else self._resync_post_extra(record, event, wallet_client)
+            )
+            if failed:
+                return True, []
+            if new_id:
+                new_ids.append(new_id)
+        return False, new_ids
+
+    def _resync_post_records(
+        self,
+        event: dict[str, Any],
+        recs: list[dict],
+        wallet_client: WalletClient,
+    ) -> tuple[bool, str | None]:
+        """POST all records for an event that has no prior wallet ID.
+
+        Returns:
+            ``(failed, wallet_record_id)`` — *failed* is ``True`` on error.
+        """
+        try:
+            results = wallet_client.post_records(recs)
+            results_by_index = {
+                r.get("inputIndex", i): r for i, r in enumerate(results)
+            }
+            missing = [i for i in range(len(recs)) if i not in results_by_index]
+            if missing:
+                log.error(
+                    "POST returned no result for record index(es) %s of event %s",
+                    missing,
+                    dedup_event_id(event),
+                )
+                return True, None
+            failures = [
+                results_by_index[i]
+                for i in range(len(recs))
+                if results_by_index[i].get("error")
+            ]
+            if failures:
+                eid = dedup_event_id(event)
+                for f in failures:
+                    log.error(
+                        "POST error for event %s record %d: %s",
+                        eid,
+                        f.get("inputIndex"),
+                        f.get("error"),
+                    )
+                return True, None
+            wallet_ids = [
+                results_by_index[i]["id"]
+                for i in range(len(recs))
+                if results_by_index[i].get("id")
+            ]
+            return False, ",".join(wallet_ids) if wallet_ids else None
+        except Exception:
+            log.exception("POST failed for event %s", dedup_event_id(event))
+            return True, None
+
+    def _resync_single_event(
+        self,
+        event: dict[str, Any],
+        repo: EventRepository,
+        wallet_client: WalletClient,
+    ) -> tuple[int, int, int]:
+        """Process one event during a resync.
+
+        Returns:
+            ``(synced, excluded, failed)`` increment tuple.
+        """
+        self._warn_unknown_event_type(event)
+
+        recs = build_records_for_event(
+            event,
+            cash_account_id=self._cfg.wallet_cash_account_id,
+            portfolio_account_id=self._cfg.wallet_portfolio_account_id,
+            label_ids=self._cfg.label_ids,
+        )
+        if not recs:
+            repo.mark_processed_force(event, wallet_record_id=None)
+            log.info("Resync: excluded zero-amount event %s", dedup_event_id(event))
+            return 0, 1, 0
+
+        existing_ids = self._parse_existing_ids(repo.get_wallet_record_id(event))
+        if existing_ids:
+            failed, new_ids = self._resync_put_records(
+                event, recs, existing_ids, wallet_client
+            )
+            wallet_record_id: str | None = ",".join(new_ids) if new_ids else None
+        else:
+            failed, wallet_record_id = self._resync_post_records(
+                event, recs, wallet_client
+            )
+
+        if failed:
+            return 0, 0, 1
+        repo.mark_processed_force(event, wallet_record_id=wallet_record_id)
+        return 1, 0, 0
+
+    def resync_day(
+        self,
+        date_str: str,
+        repo: EventRepository,
+        wallet_client: WalletClient,
+    ) -> _SyncCounts:
+        """Re-sync all TR events for a specific day, bypassing dedup.
+
+        For events already in the database with a ``wallet_record_id``, each
+        sub-record is updated via ``PUT``.  For new or previously-excluded events
+        (no wallet ID), the records are inserted via ``POST``.
+
+        All events are force-marked processed (upsert) so subsequent regular
+        syncs continue to skip them correctly.
+
+        Args:
+            date_str: ISO date string ``YYYY-MM-DD`` for the day to resync.
+            repo:     Open ``EventRepository`` for dedup lookups and persistence.
+            wallet_client: Authenticated ``WalletClient`` instance.
+
+        Returns:
+            A ``_SyncCounts`` with synced / excluded / failed tallies.
+        """
+        d = date.fromisoformat(date_str)
+        since = datetime(d.year, d.month, d.day, tzinfo=UTC)
+        day_events = filter_by_lookback(
+            self.fetch_events(since), since, until=since + timedelta(days=1)
+        )
+        log.info(
+            "Resync %s: %d events fetched (dedup bypassed)", date_str, len(day_events)
+        )
+
+        synced = excluded = failed = 0
+        for event in day_events:
+            s, e, f = self._resync_single_event(event, repo, wallet_client)
+            synced += s
+            excluded += e
+            failed += f
+
+        repo.commit()
+        return _SyncCounts(synced=synced, excluded=excluded, failed=failed)
+
 
 # ---------------------------------------------------------------------------
 # Orchestrator entry points
@@ -351,6 +573,55 @@ def run_login() -> int:
 def _connect(cfg: Config, notifier: Notifier) -> TRClient:
     """Thin wrapper used by run_login(); delegates to SyncRunner.connect()."""
     return SyncRunner(cfg, notifier).connect()
+
+
+def run_resync(date_str: str) -> int:
+    """Force a re-sync of all TR events for a specific day, bypassing dedup.
+
+    Already-synced events are updated via PUT; never-synced events are inserted
+    via POST.  All events are force-marked processed (upsert) afterwards.
+
+    Args:
+        date_str: ISO date string ``YYYY-MM-DD`` for the day to re-sync.
+
+    Returns:
+        0 on success, 1 on invalid date or unrecoverable error.
+    """
+    try:
+        date.fromisoformat(date_str)
+    except ValueError:
+        log.error("Invalid date for resync: %r (expected YYYY-MM-DD)", date_str)
+        return 1
+
+    cfg = Config.from_env()
+    notifier = _prepare(cfg)
+    log.info("Starting force resync for date=%s owner=%s", date_str, cfg.owner_name)
+
+    try:
+        with EventRepository(cfg.data_dir / "sync.db") as repo:
+            runner = SyncRunner(cfg, notifier)
+            wallet_client = WalletClient(api_key=cfg.wallet_api_key)
+            counts = runner.resync_day(date_str, repo, wallet_client)
+
+        log.info(
+            "Resync complete. date=%s synced=%d excluded=%d failed=%d",
+            date_str,
+            counts.synced,
+            counts.excluded,
+            counts.failed,
+        )
+        notifier.sync_complete(
+            synced=counts.synced,
+            failed=counts.failed,
+            skipped=0,
+            excluded=counts.excluded,
+        )
+    except Exception as exc:
+        log.exception("Error during resync for date=%s", date_str)
+        notifier.error(exc)
+        return 1
+
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

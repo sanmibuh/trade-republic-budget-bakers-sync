@@ -52,6 +52,7 @@ import threading
 import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
+from typing import Any
 
 import requests
 import urllib3
@@ -67,6 +68,7 @@ _YEAR_BUTTON_COUNT = 3  # number of recent years offered in the yearly backup ke
 _MONTH_BUTTON_COUNT = (
     4  # number of recent months offered in the monthly backup keyboard
 )
+_RESYNC_DAY_COUNT = 7  # number of recent days offered in the resync date picker
 
 # Separator used inside callback_data to encode command + param + instance.
 # Must not appear in instance names or period params (YYYY-MM / YYYY contain only digits and hyphens).
@@ -271,6 +273,10 @@ class TelegramBot:
                 "description": "Force Trade Republic sync (choose instance)",
             },
             {
+                "command": "resync",
+                "description": "Force re-sync of a specific day, bypassing dedup",
+            },
+            {
                 "command": "login",
                 "description": "Renew Trade Republic 2FA session (choose instance)",
             },
@@ -282,7 +288,7 @@ class TelegramBot:
             {"command": "help", "description": "Show available commands"},
         ]
         if self._cfg.backup_container:
-            commands[1:1] = [
+            commands[2:2] = [
                 {
                     "command": "backup",
                     "description": "Force a Wallet backup (monthly or yearly)",
@@ -364,6 +370,7 @@ class TelegramBot:
             "help": self._cmd_help,
             "status": self._cmd_status,
             "sync": self._cmd_sync,
+            "resync": self._cmd_resync,
             "login": self._cmd_login,
             "logs": self._cmd_logs,
             "code": self._cmd_code,
@@ -403,30 +410,70 @@ class TelegramBot:
             log.warning("Malformed callback_data: %r", data)
             return
 
+        self._dispatch_callback(parts, data)
+
+    def _dispatch_callback(self, parts: list[str], data: str) -> None:
+        """Route a parsed callback to the appropriate sub-handler."""
         cmd = parts[0]
+        named: dict[str, Any] = {
+            "backup_type": self._on_cb_backup_type,
+            "backup_yearly": self._on_cb_backup_yearly,
+            "backup_monthly": self._on_cb_backup_monthly,
+            "resync_pick_date": self._on_cb_resync_pick_date,
+            "resync": self._on_cb_resync,
+        }
+        handler = named.get(cmd)
+        if handler is not None:
+            handler(parts, data)
+        else:
+            self._on_cb_instance_cmd(cmd, parts)
 
-        if cmd == "backup_type":
-            subtype = parts[1]
-            if subtype == "monthly":
-                self._send_message(
-                    "📅 *Monthly backup* — Choose month:",
-                    keyboard=self._month_buttons(),
-                )
-            elif subtype == "yearly":
-                self._send_message(
-                    "📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons()
-                )
+    # Callback sub-handlers ---------------------------------------------------
+
+    def _on_cb_backup_type(self, parts: list[str], _data: str) -> None:
+        subtype = parts[1]
+        if subtype == "monthly":
+            self._send_message(
+                "📅 *Monthly backup* — Choose month:",
+                keyboard=self._month_buttons(),
+            )
+        elif subtype == "yearly":
+            self._send_message(
+                "📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons()
+            )
+
+    def _on_cb_backup_yearly(self, parts: list[str], _data: str) -> None:
+        self._launch_backup("yearly", parts[1])
+
+    def _on_cb_backup_monthly(self, parts: list[str], _data: str) -> None:
+        self._launch_backup("monthly", parts[1])
+
+    def _on_cb_resync_pick_date(self, parts: list[str], _data: str) -> None:
+        instance_key = parts[1].lower()
+        inst = self._cfg.instances.get(instance_key)
+        if inst is None:
+            self._send_message(f"❓ Unknown instance: `{_esc(instance_key)}`")
             return
+        self._send_message(
+            f"🔁 *Resync* — Choose date for *{_esc(inst.name)}*:",
+            keyboard=self._resync_date_buttons(instance_key),
+        )
 
-        if cmd == "backup_yearly":
-            self._launch_backup("yearly", parts[1])
+    def _on_cb_resync(self, parts: list[str], data: str) -> None:
+        # Format: resync:<date>:<instance>
+        if len(parts) < 3:
+            log.warning("Malformed resync callback_data: %r", data)
             return
-
-        if cmd == "backup_monthly":
-            self._launch_backup("monthly", parts[1])
+        date_str = parts[1]
+        instance_key = parts[2].lower()
+        inst = self._cfg.instances.get(instance_key)
+        if inst is None:
+            self._send_message(f"❓ Unknown instance: `{_esc(instance_key)}`")
             return
+        self._launch_resync(inst, date_str)
 
-        # All remaining cmds (sync) use instance routing.
+    def _on_cb_instance_cmd(self, cmd: str, parts: list[str]) -> None:
+        """Handle instance-routed callbacks: sync, login, logs."""
         instance_key = parts[-1].lower()
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
@@ -454,6 +501,7 @@ class TelegramBot:
         lines = [
             "🤖 *Available commands*\n",
             "/sync — Force Trade Republic sync \\(choose instance\\)",
+            "/resync `[YYYY\\-MM\\-DD]` — Force re\\-sync of a specific day, bypassing dedup",
             "/login — Renew Trade Republic 2FA session \\(choose instance\\)",
             "/logs — Show today's logs for an instance",
             "/code `<instance> <code>` — Submit an authenticator code",
@@ -516,6 +564,33 @@ class TelegramBot:
 
     def _cmd_sync(self, _args: list[str]) -> None:
         self._pick_instance("sync", "🔄 *Sync* — Choose instance:")
+
+    def _cmd_resync(self, args: list[str]) -> None:
+        """Handle /resync [YYYY-MM-DD].
+
+        With no date: show instance picker; after instance is chosen a date
+        picker will appear (``resync_pick_date:<instance>`` callback).
+        With a date arg: validate the date, then show an instance picker that
+        encodes the date directly (``resync:<date>:<instance>`` callback).
+        """
+        if not args:
+            self._pick_instance("resync_pick_date", "🔁 *Resync* — Choose instance:")
+            return
+
+        date_str = args[0]
+        try:
+            datetime.date.fromisoformat(date_str)
+        except ValueError:
+            self._send_message(
+                f"⚠️ Invalid date: `{_esc(date_str)}`\\. "
+                "Expected format: `YYYY\\-MM\\-DD`\\."
+            )
+            return
+
+        self._send_message(
+            f"🔁 *Resync {_esc(date_str)}* — Choose instance:",
+            keyboard=self._instance_buttons_for_resync(date_str),
+        )
 
     def _cmd_login(self, _args: list[str]) -> None:
         self._pick_instance(
@@ -620,6 +695,16 @@ class TelegramBot:
         self._send_message(f"▶️ Executing *sync* for *{_esc(inst.name)}*\\.\\.\\.")
         self._exec_in_thread(inst.container_name, ["sync"], on_error=self._send_message)
 
+    def _launch_resync(self, inst: InstanceConfig, date_str: str) -> None:
+        self._send_message(
+            f"🔁 Executing *resync {_esc(date_str)}* for *{_esc(inst.name)}*\\.\\.\\."
+        )
+        self._exec_in_thread(
+            inst.container_name,
+            ["resync", date_str],
+            on_error=self._send_message,
+        )
+
     def _launch_login(self, inst: InstanceConfig) -> None:
         self._send_message(f"🔐 Re\\-authenticating *{_esc(inst.name)}*\\.\\.\\.")
         self._pending_login[inst.name.lower()] = inst
@@ -703,6 +788,33 @@ class TelegramBot:
         buttons = [
             {"text": inst.name, "callback_data": f"{cmd}{_CB_SEP}{inst.name.lower()}"}
             for inst in self._cfg.instances.values()
+        ]
+        return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+
+    def _instance_buttons_for_resync(self, date_str: str) -> list[list[dict]]:
+        """Build an instance-picker keyboard that encodes *date_str* in the callback."""
+        buttons = [
+            {
+                "text": inst.name,
+                "callback_data": f"resync{_CB_SEP}{date_str}{_CB_SEP}{inst.name.lower()}",
+            }
+            for inst in self._cfg.instances.values()
+        ]
+        return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+
+    def _resync_date_buttons(self, instance_key: str) -> list[list[dict]]:
+        """Build a date-picker keyboard with the most recent days (yesterday first)."""
+        today = datetime.datetime.now(tz=datetime.UTC).date()
+        days = [
+            str(today - datetime.timedelta(days=i))
+            for i in range(1, _RESYNC_DAY_COUNT + 1)
+        ]
+        buttons = [
+            {
+                "text": d,
+                "callback_data": f"resync{_CB_SEP}{d}{_CB_SEP}{instance_key}",
+            }
+            for d in days
         ]
         return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
 

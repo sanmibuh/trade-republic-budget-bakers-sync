@@ -57,6 +57,29 @@ EventRepository.mark_processed()   # INSERT OR IGNORE into processed_events
 Notifier.sync_complete()           # Telegram summary (optional)
 ```
 
+## Data flow — Force Resync (single day)
+
+```
+python -m app resync YYYY-MM-DD
+        ↓
+SyncRunner.resync_day(date_str, repo, wallet_client)
+        ↓
+TRClient.fetch_timeline_events(since=date 00:00)
+        ↓
+filter_by_lookback(events, since, until=date+1 00:00)  # narrow to exact day
+        ↓
+build_records_for_event()    # same mapper as regular sync
+        ↓
+For each event:
+  ├── wallet_record_id in DB?
+  │     YES → WalletClient.put_record(id, record)   # PUT /v1/api/records/{id}
+  │     NO  → WalletClient.post_records([record])   # POST /v1/api/records
+        ↓
+EventRepository.mark_processed_force()   # INSERT OR REPLACE (upsert)
+        ↓
+Notifier.sync_complete()                 # Telegram summary (optional)
+```
+
 ## Data flow — Backup
 
 ```
@@ -134,6 +157,8 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
   zero-amount excluded events. Enables insert-vs-update decisions when reprocessing a date range.
 - Schema migrations are applied automatically on each `EventRepository` open via `PRAGMA table_info` +
   `ALTER TABLE` — safe to run repeatedly, no migration state needed.
+- `EventRepository.mark_processed_force` — `INSERT OR REPLACE` upsert variant; used by the resync path to
+  update `wallet_record_id` for already-processed events.
 - Old records without `details` are not retroactively updated (correct by design).
 
 ---
@@ -178,6 +203,7 @@ missing, detected with `PRAGMA table_info`.
   - `python -m app login` — runs `main.run_login()`, an on-demand 2FA session renewal
   - `python -m app submit-code <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting
     login/sync process to pick up
+  - `python -m app resync YYYY-MM-DD` — runs `main.run_resync(date_str)`, force re-syncing a specific day
   - `python -m app check-session` — exits 0 if `credentials.json` exists in `DATA_DIR`, 1 otherwise; used by the
     bot's `/status` command to report per-instance auth state without network calls
 - All imports inside command functions are deferred — startup is fast and dependencies are only loaded when needed.
@@ -212,6 +238,10 @@ missing, detected with `PRAGMA table_info`.
   running `python -m app check-session` in each container via `_docker_check_session`.
 - `/login` renews an expired 2FA session on demand (instance picker); `/code <instance> <code>` forwards an
   authenticator code to the target container via `submit-code` (see *2FA via Telegram*).
+- `/resync [YYYY-MM-DD]` force re-syncs a specific day: instance picker → date picker (last 7 days) → executes
+  `python -m app resync <date>` in the container. With a date arg, jumps straight to the instance picker.
+  Existing records are updated via PUT; new ones are inserted via POST. Callback data format:
+  `resync_pick_date:<instance>` (date picker step) and `resync:<date>:<instance>` (execute step).
 - The Docker socket (`/var/run/docker.sock`) is mounted into the bot container; the Docker SDK communicates with
   it directly (no docker CLI binary required).
 - `_docker_exec_silent` accepts optional `on_error` / `on_success` callbacks — the bot passes `self._send_message`
@@ -261,6 +291,11 @@ missing, detected with `PRAGMA table_info`.
 - `POST /v1/api/records` — max 20 records per request.
 - `paymentType` is required on every record.
 - `labelIds` is a list (even for a single label).
+
+### BudgetBakers API — PUT (resync)
+- `PUT /v1/api/records/{id}` — update a single existing record.
+- Used by the forced resync path when an event already has a stored `wallet_record_id`.
+- Returns the updated record dict; errors propagate via `raise_for_status`.
 
 ### Known limitations
 - TR CSV export has raw terminal descriptors (e.g. `"ETAM LINGERIE BUENOS A"`) but the pytr WebSocket API only
@@ -364,14 +399,14 @@ See `deploy/DEPLOY.md` for setup instructions.
 |---|---|
 | `app/__main__.py` | click CLI: `sync`, `backup`, `bot`, `login`, `submit-code`, `check-session`; single entry point |
 | `app/http_client.py` | SSL circuit-breaker shared by notifier and wallet_client; `http_post`, `build_session` |
-| `app/main.py` | `SyncRunner` class (`connect`, `fetch_events`, `build_batch`, `process_results`) + `run()` / `run_login()` thin wrappers; `_prepare` bootstrap helper |
+| `app/main.py` | `SyncRunner` class (`connect`, `fetch_events`, `build_batch`, `process_results`, `resync_day`) + `run()` / `run_login()` / `run_resync()` thin wrappers; `_prepare` bootstrap helper |
 | `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |
 | `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions; `connect` uses a `code_provider` |
 | `app/twofa.py` | `TerminalCodeProvider`, `TelegramCodeProvider`, `select_code_provider`; `CODE_FILENAME` |
 | `app/tr_mapper.py` | `_build_note`, `_note_extras`, `_HANDLERS`, `KNOWN_EVENT_TYPES`, `_make_record` |
 | `app/persistence.py` | `EventRepository`, `dedup_event_id`; `INSERT OR IGNORE`; `get_wallet_record_id` |
 | `app/config.py` | `Config`, `BackupConfig`, `BotEnv` dataclasses; `read_data_dir()`; `_read_label_ids()` |
-| `app/wallet_client.py` | `post_records` (sync) + `_get_all`/`_collect_page` + `get_*` (backup) |
+| `app/wallet_client.py` | `post_records` (sync) + `put_record` (resync) + `_get_all`/`_collect_page` + `get_*` (backup) |
 | `app/logging_setup.py` | `setup_logging(data_dir)` for daemon; `configure_logging()` for CLI entry points |
 | `docker/app/entrypoint.sh` | `MODE=sync\|backup\|bot`; cron or one-shot depending on schedule vars |
 | `VERSION` | Single source of truth for the release version; bumping on `main` triggers the full release pipeline |

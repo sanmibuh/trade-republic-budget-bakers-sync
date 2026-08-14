@@ -276,3 +276,57 @@ def test_get_all_dict_with_next_offset_paginates():
     # Second call must include offset=42
     second_call_params = client.session.get.call_args_list[1].kwargs["params"]
     assert second_call_params["offset"] == 42
+
+
+# ---------------------------------------------------------------------------
+# WalletClient.put_record
+# ---------------------------------------------------------------------------
+
+
+def test_put_record_sends_put_to_correct_url():
+    """put_record must PUT to /v1/api/records/{id}."""
+    client = _make_client()
+    resp = _mock_response(200, {"id": "rec-1", "success": True})
+    client.session.put = MagicMock(return_value=resp)
+
+    client.put_record("rec-1", {"accountId": "x", "amount": -10})
+
+    url = client.session.put.call_args[0][0]
+    assert url == "https://example.com/wallet/v1/api/records/rec-1"
+
+
+def test_put_record_sends_record_as_json():
+    """put_record must send the record dict as JSON body."""
+    client = _make_client()
+    resp = _mock_response(200, {"id": "rec-1", "success": True})
+    client.session.put = MagicMock(return_value=resp)
+
+    record = {"accountId": "cash-1", "amount": -50}
+    client.put_record("rec-1", record)
+
+    _, kwargs = client.session.put.call_args
+    assert kwargs["json"] == record
+
+
+def test_put_record_returns_response_body():
+    """put_record must return the parsed JSON response."""
+    client = _make_client()
+    body = {"id": "rec-1", "success": True}
+    resp = _mock_response(200, body)
+    client.session.put = MagicMock(return_value=resp)
+
+    result = client.put_record("rec-1", {})
+
+    assert result == body
+
+
+def test_put_record_raises_on_http_error():
+    """put_record must propagate HTTP errors."""
+    client = _make_client()
+    resp = MagicMock()
+    resp.status_code = 404
+    resp.raise_for_status.side_effect = Exception("Not Found")
+    client.session.put = MagicMock(return_value=resp)
+
+    with pytest.raises(Exception, match="Not Found"):
+        client.put_record("missing-id", {})
