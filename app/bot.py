@@ -52,6 +52,7 @@ import threading
 import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
+from typing import Any
 
 import requests
 import urllib3
@@ -409,56 +410,70 @@ class TelegramBot:
             log.warning("Malformed callback_data: %r", data)
             return
 
+        self._dispatch_callback(parts, data)
+
+    def _dispatch_callback(self, parts: list[str], data: str) -> None:
+        """Route a parsed callback to the appropriate sub-handler."""
         cmd = parts[0]
+        named: dict[str, Any] = {
+            "backup_type": self._on_cb_backup_type,
+            "backup_yearly": self._on_cb_backup_yearly,
+            "backup_monthly": self._on_cb_backup_monthly,
+            "resync_pick_date": self._on_cb_resync_pick_date,
+            "resync": self._on_cb_resync,
+        }
+        handler = named.get(cmd)
+        if handler is not None:
+            handler(parts, data)
+        else:
+            self._on_cb_instance_cmd(cmd, parts)
 
-        if cmd == "backup_type":
-            subtype = parts[1]
-            if subtype == "monthly":
-                self._send_message(
-                    "📅 *Monthly backup* — Choose month:",
-                    keyboard=self._month_buttons(),
-                )
-            elif subtype == "yearly":
-                self._send_message(
-                    "📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons()
-                )
-            return
+    # Callback sub-handlers ---------------------------------------------------
 
-        if cmd == "backup_yearly":
-            self._launch_backup("yearly", parts[1])
-            return
-
-        if cmd == "backup_monthly":
-            self._launch_backup("monthly", parts[1])
-            return
-
-        if cmd == "resync_pick_date":
-            instance_key = parts[1].lower()
-            inst = self._cfg.instances.get(instance_key)
-            if inst is None:
-                self._send_message(f"❓ Unknown instance: `{_esc(instance_key)}`")
-                return
+    def _on_cb_backup_type(self, parts: list[str], _data: str) -> None:
+        subtype = parts[1]
+        if subtype == "monthly":
             self._send_message(
-                f"🔁 *Resync* — Choose date for *{_esc(inst.name)}*:",
-                keyboard=self._resync_date_buttons(instance_key),
+                "📅 *Monthly backup* — Choose month:",
+                keyboard=self._month_buttons(),
             )
-            return
+        elif subtype == "yearly":
+            self._send_message(
+                "📆 *Yearly backup* — Choose year:", keyboard=self._year_buttons()
+            )
 
-        if cmd == "resync":
-            # Format: resync:<date>:<instance>
-            if len(parts) < 3:
-                log.warning("Malformed resync callback_data: %r", data)
-                return
-            date_str = parts[1]
-            instance_key = parts[2].lower()
-            inst = self._cfg.instances.get(instance_key)
-            if inst is None:
-                self._send_message(f"❓ Unknown instance: `{_esc(instance_key)}`")
-                return
-            self._launch_resync(inst, date_str)
-            return
+    def _on_cb_backup_yearly(self, parts: list[str], _data: str) -> None:
+        self._launch_backup("yearly", parts[1])
 
-        # All remaining cmds (sync) use instance routing.
+    def _on_cb_backup_monthly(self, parts: list[str], _data: str) -> None:
+        self._launch_backup("monthly", parts[1])
+
+    def _on_cb_resync_pick_date(self, parts: list[str], _data: str) -> None:
+        instance_key = parts[1].lower()
+        inst = self._cfg.instances.get(instance_key)
+        if inst is None:
+            self._send_message(f"❓ Unknown instance: `{_esc(instance_key)}`")
+            return
+        self._send_message(
+            f"🔁 *Resync* — Choose date for *{_esc(inst.name)}*:",
+            keyboard=self._resync_date_buttons(instance_key),
+        )
+
+    def _on_cb_resync(self, parts: list[str], data: str) -> None:
+        # Format: resync:<date>:<instance>
+        if len(parts) < 3:
+            log.warning("Malformed resync callback_data: %r", data)
+            return
+        date_str = parts[1]
+        instance_key = parts[2].lower()
+        inst = self._cfg.instances.get(instance_key)
+        if inst is None:
+            self._send_message(f"❓ Unknown instance: `{_esc(instance_key)}`")
+            return
+        self._launch_resync(inst, date_str)
+
+    def _on_cb_instance_cmd(self, cmd: str, parts: list[str]) -> None:
+        """Handle instance-routed callbacks: sync, login, logs."""
         instance_key = parts[-1].lower()
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
