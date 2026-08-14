@@ -1,0 +1,14 @@
+app/main.py
+  h_97a91c9e567f87 40-41,118,510,631
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "f4a90f38222a6fe668da4c7fef4b851cfffd48ab",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
