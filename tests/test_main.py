@@ -1618,7 +1618,7 @@ def test_resync_day_inserts_new_events_via_post(tmp_path):
         assert repo.get_wallet_record_id(event) == "fresh-wid"
 
 
-def test_resync_day_multi_record_event_put_uses_first_id(tmp_path):
+def test_resync_day_multi_record_event_put_called_for_each_id(tmp_path):
     """For events with multiple comma-separated wallet IDs, PUT is called for each."""
     from unittest.mock import patch
 
@@ -1873,6 +1873,132 @@ def test_resync_day_post_failure_for_new_event_increments_failed(tmp_path):
             patch(
                 "app.main.build_records_for_event",
                 return_value=[{"accountId": "cash-id"}],
+            ),
+        ):
+            counts = runner.resync_day("2026-07-15", repo, wallet_client)
+
+        assert counts.failed == 1
+        assert counts.synced == 0
+
+
+def test_resync_day_post_item_error_field_increments_failed(tmp_path):
+    """A per-item error field in POST response for a new event counts as failed."""
+    from unittest.mock import patch
+
+    runner, _cfg, _notifier = _make_runner_with_mocks()
+
+    event = {"id": "ev-post-item-err", "timestamp": "2026-07-15T10:00:00Z"}
+    with EventRepository(tmp_path / "db") as repo:
+        wallet_client = MagicMock()
+        wallet_client.post_records.return_value = [
+            {"inputIndex": 0, "error": "invalid account"}
+        ]
+
+        with (
+            patch.object(runner, "fetch_events", return_value=[event]),
+            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch(
+                "app.main.build_records_for_event",
+                return_value=[{"accountId": "cash-id"}],
+            ),
+        ):
+            counts = runner.resync_day("2026-07-15", repo, wallet_client)
+
+        assert counts.failed == 1
+        assert counts.synced == 0
+        assert repo.get_wallet_record_id(event) is None
+
+
+def test_resync_day_post_missing_result_increments_failed(tmp_path):
+    """Missing result for a record index in POST response counts as failed."""
+    from unittest.mock import patch
+
+    runner, _cfg, _notifier = _make_runner_with_mocks()
+
+    event = {"id": "ev-post-missing", "timestamp": "2026-07-15T10:00:00Z"}
+    with EventRepository(tmp_path / "db") as repo:
+        wallet_client = MagicMock()
+        # Response has only 1 result but 2 records were submitted
+        wallet_client.post_records.return_value = [
+            {"inputIndex": 0, "id": "wid-a"},
+        ]
+
+        with (
+            patch.object(runner, "fetch_events", return_value=[event]),
+            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch(
+                "app.main.build_records_for_event",
+                return_value=[
+                    {"accountId": "cash-id"},
+                    {"accountId": "portfolio-id"},
+                ],
+            ),
+        ):
+            counts = runner.resync_day("2026-07-15", repo, wallet_client)
+
+        assert counts.failed == 1
+        assert counts.synced == 0
+        assert repo.get_wallet_record_id(event) is None
+
+
+def test_resync_day_extra_subrecord_post_item_error_increments_failed(tmp_path):
+    """A per-item error field in extra-record POST response counts as failed."""
+    from unittest.mock import patch
+
+    runner, _cfg, _notifier = _make_runner_with_mocks()
+
+    event = {"id": "ev-extra-item-err", "timestamp": "2026-07-15T10:00:00Z"}
+    with EventRepository(tmp_path / "db") as repo:
+        repo.mark_processed(event, wallet_record_id="wid-1")
+        repo.commit()
+
+        wallet_client = MagicMock()
+        wallet_client.put_record.return_value = {"id": "wid-1", "success": True}
+        wallet_client.post_records.return_value = [
+            {"inputIndex": 0, "error": "bad payload"}
+        ]
+
+        with (
+            patch.object(runner, "fetch_events", return_value=[event]),
+            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch(
+                "app.main.build_records_for_event",
+                return_value=[
+                    {"accountId": "cash-id"},
+                    {"accountId": "portfolio-id"},
+                ],
+            ),
+        ):
+            counts = runner.resync_day("2026-07-15", repo, wallet_client)
+
+        assert counts.failed == 1
+        assert counts.synced == 0
+
+
+def test_resync_day_extra_subrecord_empty_post_response_increments_failed(tmp_path):
+    """An empty POST response for an extra sub-record counts as failed."""
+    from unittest.mock import patch
+
+    runner, _cfg, _notifier = _make_runner_with_mocks()
+
+    event = {"id": "ev-extra-empty", "timestamp": "2026-07-15T10:00:00Z"}
+    with EventRepository(tmp_path / "db") as repo:
+        repo.mark_processed(event, wallet_record_id="wid-1")
+        repo.commit()
+
+        wallet_client = MagicMock()
+        wallet_client.put_record.return_value = {"id": "wid-1", "success": True}
+        wallet_client.post_records.return_value = []
+
+        with (
+            patch.object(runner, "fetch_events", return_value=[event]),
+            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch(
+                "app.main.build_records_for_event",
+                return_value=[
+                    {"accountId": "cash-id"},
+                    {"accountId": "portfolio-id"},
+                ],
             ),
         ):
             counts = runner.resync_day("2026-07-15", repo, wallet_client)

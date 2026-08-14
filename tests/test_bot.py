@@ -2041,6 +2041,16 @@ def test_cmd_resync_invalid_date_sends_error():
     assert "invalid" in msg.lower() or "YYYY" in msg
 
 
+def test_cmd_resync_datetime_string_sends_error():
+    """/resync with a full datetime string must send an error — only YYYY-MM-DD is valid."""
+    bot = _bot()
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_resync(["2026-07-15T12:00:00"])
+    mock_send.assert_called_once()
+    msg = mock_send.call_args.args[0]
+    assert "invalid" in msg.lower() or "YYYY" in msg
+
+
 # ---------------------------------------------------------------------------
 # TelegramBot._resync_date_buttons — recent-days keyboard
 # ---------------------------------------------------------------------------

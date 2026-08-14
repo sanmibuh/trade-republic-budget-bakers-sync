@@ -286,8 +286,21 @@ class SyncRunner:
         """POST a single extra record; return ``(failed, new_id)``."""
         try:
             results = wallet_client.post_records([record])
-            new_id = results[0]["id"] if (results and results[0].get("id")) else ""
-            return False, new_id
+            if not results:
+                log.error(
+                    "POST returned no results for extra record of event %s",
+                    dedup_event_id(event),
+                )
+                return True, ""
+            item = results[0]
+            if item.get("error"):
+                log.error(
+                    "POST error for extra record of event %s: %s",
+                    dedup_event_id(event),
+                    item["error"],
+                )
+                return True, ""
+            return False, item.get("id") or ""
         except Exception:
             log.exception(
                 "POST failed for extra record of event %s", dedup_event_id(event)
@@ -336,10 +349,33 @@ class SyncRunner:
             results_by_index = {
                 r.get("inputIndex", i): r for i, r in enumerate(results)
             }
+            missing = [i for i in range(len(recs)) if i not in results_by_index]
+            if missing:
+                log.error(
+                    "POST returned no result for record index(es) %s of event %s",
+                    missing,
+                    dedup_event_id(event),
+                )
+                return True, None
+            failures = [
+                results_by_index[i]
+                for i in range(len(recs))
+                if results_by_index[i].get("error")
+            ]
+            if failures:
+                eid = dedup_event_id(event)
+                for f in failures:
+                    log.error(
+                        "POST error for event %s record %d: %s",
+                        eid,
+                        f.get("inputIndex"),
+                        f.get("error"),
+                    )
+                return True, None
             wallet_ids = [
                 results_by_index[i]["id"]
                 for i in range(len(recs))
-                if i in results_by_index and results_by_index[i].get("id")
+                if results_by_index[i].get("id")
             ]
             return False, ",".join(wallet_ids) if wallet_ids else None
         except Exception:

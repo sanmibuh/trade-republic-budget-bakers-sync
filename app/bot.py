@@ -579,7 +579,7 @@ class TelegramBot:
 
         date_str = args[0]
         try:
-            datetime.datetime.fromisoformat(date_str)
+            datetime.date.fromisoformat(date_str)
         except ValueError:
             self._send_message(
                 f"⚠️ Invalid date: `{_esc(date_str)}`\\. "
