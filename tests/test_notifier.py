@@ -466,3 +466,48 @@ def test_notifier_sync_complete_includes_excluded_line_when_nonzero():
     msg = mock_send.call_args.kwargs["message"]
     assert "3" in msg
     assert "zero amount" in msg.lower() or "excluded" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# Notifier.login_code_timeout
+# ---------------------------------------------------------------------------
+
+
+def test_notifier_login_code_timeout_sends_message():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        result = _make_notifier().login_code_timeout("david")
+    assert result is True
+    mock_send.assert_called_once()
+
+
+def test_notifier_login_code_timeout_mentions_instance():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().login_code_timeout("david")
+    msg = mock_send.call_args.kwargs["message"]
+    assert "david" in msg
+
+
+def test_notifier_login_code_timeout_mentions_owner():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().login_code_timeout("david")
+    msg = mock_send.call_args.kwargs["message"]
+    assert "David" in msg
+
+
+def test_notifier_login_code_timeout_contains_timeout_indicator():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().login_code_timeout("david")
+    msg = mock_send.call_args.kwargs["message"]
+    assert "imeout" in msg or "expired" in msg.lower() or "⏱" in msg
+
+
+def test_notifier_login_code_timeout_suggests_login_command():
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().login_code_timeout("david")
+    msg = mock_send.call_args.kwargs["message"]
+    assert "/login" in msg
+
+
+def test_notifier_login_code_timeout_returns_false_when_no_credentials():
+    notifier = Notifier(bot_token=None, chat_id=None, owner_name="David")
+    assert notifier.login_code_timeout("david") is False

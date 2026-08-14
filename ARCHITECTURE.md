@@ -132,7 +132,9 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `app/twofa.py` provides the authenticator-code strategies and `select_code_provider`.
 - `TelegramCodeProvider` sends a Telegram prompt (`notifier.login_code_request(instance)`) asking the user to reply
   with `/code <instance> <code>`, then polls `data_dir/.tr_2fa_code` (default 300s timeout, 3s poll) until the code
-  file appears; it clears the file before prompting and after reading, raising `TimeoutError` on expiry.
+  file appears; it clears the file before prompting and after reading. On expiry, it calls `on_timeout` (if set) —
+  wired by `select_code_provider` to `notifier.login_code_timeout(instance)`, which sends a cancellation message in
+  Telegram — then raises `TimeoutError`.
 - Cross-container hand-off: the bot and the sync/login containers do **not** share the data volume. The `/code` bot
   command runs `python -m app submit-code <code>` inside the target container via the Docker SDK `exec_run`;
   `submit-code` writes the code to `data_dir/.tr_2fa_code`, which the waiting `TelegramCodeProvider` reads.

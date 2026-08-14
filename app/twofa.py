@@ -52,6 +52,7 @@ class TelegramCodeProvider:
         poll_interval: float = _DEFAULT_POLL_INTERVAL,
         sleep: Callable[[float], Any] = time.sleep,
         now: Callable[[], float] = time.monotonic,
+        on_timeout: Callable[[], Any] | None = None,
     ) -> None:
         self._code_file = Path(code_file)
         self._prompt = prompt
@@ -59,6 +60,7 @@ class TelegramCodeProvider:
         self._poll_interval = poll_interval
         self._sleep = sleep
         self._now = now
+        self._on_timeout = on_timeout
 
     def get_code(self) -> str:
         """Prompt the user and block until a code arrives or the timeout elapses."""
@@ -75,6 +77,8 @@ class TelegramCodeProvider:
                 return code
             self._sleep(self._poll_interval)
 
+        if self._on_timeout is not None:
+            self._on_timeout()
         raise TimeoutError("Timed out waiting for the 2FA authenticator code")
 
     def _read(self) -> str:
@@ -104,5 +108,6 @@ def select_code_provider(
         return TelegramCodeProvider(
             code_file,
             lambda: notifier.login_code_request(instance),
+            on_timeout=lambda: notifier.login_code_timeout(instance),
         )
     return None
