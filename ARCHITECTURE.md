@@ -204,7 +204,7 @@ missing, detected with `PRAGMA table_info`.
   - `python -m app submit-code <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting
     login/sync process to pick up
   - `python -m app resync YYYY-MM-DD` — runs `main.run_resync(date_str)`, force re-syncing a specific day
-- `python -m app check-session` — exits 0 if `credentials.json` exists in `DATA_DIR`, 1 otherwise; used by the
+  - `python -m app check-session` — exits 0 if `credentials.json` exists in `DATA_DIR`, 1 otherwise; used by the
     bot's `/status` command to report per-instance auth state without network calls
 - All imports inside command functions are deferred — startup is fast and dependencies are only loaded when needed.
 - `click.Choice(["auto", "monthly", "yearly"])` provides free input validation and help text.

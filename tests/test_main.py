@@ -1877,8 +1877,49 @@ def test_resync_day_post_failure_for_new_event_increments_failed(tmp_path):
         ):
             counts = runner.resync_day("2026-07-15", repo, wallet_client)
 
-    assert counts.failed == 1
-    assert counts.synced == 0
+        assert counts.failed == 1
+        assert counts.synced == 0
+
+
+def test_run_resync_rejects_datetime_string():
+    """run_resync must reject full datetime strings — only YYYY-MM-DD is valid."""
+    from app.main import run_resync
+
+    result = run_resync("2026-07-15T12:00:00")
+
+    assert result == 1
+
+
+def test_resync_day_post_preserves_inputindex_order(tmp_path):
+    """POST results returned out of API order must be re-ordered by inputIndex."""
+    from unittest.mock import patch
+
+    runner, _cfg, _notifier = _make_runner_with_mocks()
+
+    event = {"id": "ev-order", "timestamp": "2026-07-15T10:00:00Z"}
+    with EventRepository(tmp_path / "db") as repo:
+        wallet_client = MagicMock()
+        # API returns the two sub-records in reverse inputIndex order.
+        wallet_client.post_records.return_value = [
+            {"inputIndex": 1, "id": "wid-b"},
+            {"inputIndex": 0, "id": "wid-a"},
+        ]
+
+        with (
+            patch.object(runner, "fetch_events", return_value=[event]),
+            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch(
+                "app.main.build_records_for_event",
+                return_value=[
+                    {"accountId": "cash-id"},
+                    {"accountId": "portfolio-id"},
+                ],
+            ),
+        ):
+            runner.resync_day("2026-07-15", repo, wallet_client)
+
+        # Wallet IDs must be stored in record order (inputIndex 0 first).
+        assert repo.get_wallet_record_id(event) == "wid-a,wid-b"
 
 
 def test_resync_day_extra_subrecord_falls_back_to_post(tmp_path):

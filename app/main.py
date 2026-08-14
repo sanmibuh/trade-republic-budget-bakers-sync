@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from requests import HTTPError
@@ -333,7 +333,14 @@ class SyncRunner:
         """
         try:
             results = wallet_client.post_records(recs)
-            wallet_ids = [r["id"] for r in results if r.get("id")]
+            results_by_index = {
+                r.get("inputIndex", i): r for i, r in enumerate(results)
+            }
+            wallet_ids = [
+                results_by_index[i]["id"]
+                for i in range(len(recs))
+                if i in results_by_index and results_by_index[i].get("id")
+            ]
             return False, ",".join(wallet_ids) if wallet_ids else None
         except Exception:
             log.exception("POST failed for event %s", dedup_event_id(event))
@@ -402,7 +409,8 @@ class SyncRunner:
         Returns:
             A ``_SyncCounts`` with synced / excluded / failed tallies.
         """
-        since = datetime.fromisoformat(date_str).replace(tzinfo=UTC)
+        d = date.fromisoformat(date_str)
+        since = datetime(d.year, d.month, d.day, tzinfo=UTC)
         day_events = filter_by_lookback(
             self.fetch_events(since), since, until=since + timedelta(days=1)
         )
@@ -544,7 +552,7 @@ def run_resync(date_str: str) -> int:
         0 on success, 1 on invalid date or unrecoverable error.
     """
     try:
-        datetime.fromisoformat(date_str)
+        date.fromisoformat(date_str)
     except ValueError:
         log.error("Invalid date for resync: %r (expected YYYY-MM-DD)", date_str)
         return 1
