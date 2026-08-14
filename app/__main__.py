@@ -147,6 +147,24 @@ def backup(mode: str, param: str | None) -> None:
 
 
 @cli.command()
+@click.argument("date")
+def resync(date: str) -> None:
+    """Force a re-sync of all TR events for DATE (YYYY-MM-DD), bypassing dedup.
+
+    Already-synced events are updated in BudgetBakers via PUT; new or previously
+    excluded events are inserted via POST.  Use this to correct a specific day
+    without touching the rest of the history.
+
+    \b
+    Example:
+      python -m app resync 2026-07-15
+    """
+    from app.main import run_resync
+
+    sys.exit(run_resync(date))
+
+
+@cli.command()
 def bot() -> None:
     """Start the Telegram bot for remote command execution.
 

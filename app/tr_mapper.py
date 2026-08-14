@@ -29,7 +29,10 @@ def normalize_event_time(event: dict[str, Any]) -> str:
 
 
 def filter_by_lookback(
-    events: list[dict[str, Any]], since: datetime
+    events: list[dict[str, Any]],
+    since: datetime,
+    *,
+    until: datetime | None = None,
 ) -> list[dict[str, Any]]:
     filtered = []
     for event in events:
@@ -41,7 +44,9 @@ def filter_by_lookback(
             parsed = None
         if parsed is not None and parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=UTC)
-        if parsed is None or parsed >= since:
+        if (parsed is None or parsed >= since) and (
+            until is None or parsed is None or parsed < until
+        ):
             filtered.append(event)
     return filtered
 

@@ -153,6 +153,41 @@ class EventRepository:
             ),
         )
 
+    def mark_processed_force(
+        self, event: dict[str, Any], *, wallet_record_id: str | None = None
+    ) -> None:
+        """Upsert a processed event, replacing any existing row.
+
+        Unlike :meth:`mark_processed` (which uses ``INSERT OR IGNORE`` and never
+        updates an existing row), this method uses ``INSERT OR REPLACE`` so that
+        ``wallet_record_id`` is always updated. Used by the resync path to
+        record updated Wallet IDs after a forced re-upload.
+        """
+        eid = dedup_event_id(event)
+        event_type = extract_event_type(event)
+        event_timestamp = normalize_event_time(event)
+        amount = str(event.get("amount") or event.get("value") or "")
+        try:
+            raw = json.dumps(event, ensure_ascii=False, default=str)
+        except TypeError:
+            raw = str(event)
+        synced_at = datetime.now(UTC).isoformat()
+
+        self._conn.execute(
+            "INSERT OR REPLACE INTO processed_events "
+            "(event_id, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                eid,
+                event_type,
+                event_timestamp,
+                amount,
+                raw,
+                synced_at,
+                wallet_record_id,
+            ),
+        )
+
     def get_wallet_record_id(self, event: dict[str, Any]) -> str | None:
         eid = dedup_event_id(event)
         row = self._conn.execute(

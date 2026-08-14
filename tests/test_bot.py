@@ -1998,3 +1998,234 @@ def test_run_entry_point_creates_bot_and_calls_run():
 
     mock_cls.assert_called_once_with(mock_cfg)
     mock_bot.run.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._cmd_resync — /resync command
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_resync_no_args_sends_instance_picker():
+    """/resync with no args must show an instance picker."""
+    bot = _bot()
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_resync([])
+    mock_send.assert_called_once()
+    keyboard = mock_send.call_args.kwargs.get("keyboard")
+    assert keyboard is not None
+    all_buttons = [btn for row in keyboard for btn in row]
+    cb_data = [b["callback_data"] for b in all_buttons]
+    assert any(d.startswith("resync_pick_date:") for d in cb_data)
+
+
+def test_cmd_resync_with_date_sends_instance_picker_for_date():
+    """/resync 2026-07-15 must show an instance picker with the date encoded."""
+    bot = _bot()
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_resync(["2026-07-15"])
+    mock_send.assert_called_once()
+    keyboard = mock_send.call_args.kwargs.get("keyboard")
+    assert keyboard is not None
+    all_buttons = [btn for row in keyboard for btn in row]
+    cb_data = [b["callback_data"] for b in all_buttons]
+    assert any("2026-07-15" in d for d in cb_data)
+
+
+def test_cmd_resync_invalid_date_sends_error():
+    """/resync with a non-date arg must send an error message."""
+    bot = _bot()
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_resync(["not-a-date"])
+    mock_send.assert_called_once()
+    msg = mock_send.call_args.args[0]
+    assert "invalid" in msg.lower() or "YYYY" in msg
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._resync_date_buttons — recent-days keyboard
+# ---------------------------------------------------------------------------
+
+
+def test_resync_date_buttons_returns_recent_days():
+    """_resync_date_buttons must return buttons for the last N days."""
+    import datetime
+
+    bot = _bot()
+    fixed = datetime.datetime(2026, 7, 15, 12, 0, tzinfo=datetime.UTC)
+    with patch("app.bot.datetime.datetime") as mock_dt:
+        mock_dt.now.return_value = fixed
+        buttons = bot._resync_date_buttons("david")
+    all_buttons = [b for row in buttons for b in row]
+    texts = [b["text"] for b in all_buttons]
+    assert "2026-07-14" in texts
+    assert (
+        "2026-07-15" not in texts
+    )  # today is excluded (resync of future doesn't make sense)
+
+
+def test_resync_date_buttons_encode_instance():
+    """Each date button must encode the instance name in callback_data."""
+    import datetime
+
+    bot = _bot()
+    fixed = datetime.datetime(2026, 7, 15, 12, 0, tzinfo=datetime.UTC)
+    with patch("app.bot.datetime.datetime") as mock_dt:
+        mock_dt.now.return_value = fixed
+        buttons = bot._resync_date_buttons("david")
+    all_buttons = [b for row in buttons for b in row]
+    for btn in all_buttons:
+        assert "david" in btn["callback_data"]
+        assert btn["callback_data"].startswith("resync:")
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._handle_callback_query — resync callbacks
+# ---------------------------------------------------------------------------
+
+
+def test_callback_resync_pick_date_sends_date_keyboard():
+    """resync_pick_date:<instance> callback must show a date-picker keyboard."""
+    bot = _bot()
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_resync_date_buttons", return_value=[[]]) as mock_dates,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "resync_pick_date:david",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_dates.assert_called_once_with("david")
+    mock_send.assert_called_once()
+
+
+def test_callback_resync_dispatches_launch_resync():
+    """resync:<date>:<instance> callback must call _launch_resync."""
+    bot = _bot()
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_launch_resync") as mock_launch,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "resync:2026-07-15:david",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_launch.assert_called_once()
+    inst, date_str = mock_launch.call_args.args
+    assert date_str == "2026-07-15"
+    assert inst.name == "David"
+
+
+def test_callback_resync_unknown_instance_replies():
+    """resync:<date>:<unknown> callback must reply with error."""
+    bot = _bot()
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "resync:2026-07-15:nobody",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_send.assert_called_once()
+    assert "Unknown" in mock_send.call_args.args[0]
+
+
+def test_callback_resync_pick_date_unknown_instance_replies():
+    """resync_pick_date:<unknown> callback must reply with error."""
+    bot = _bot()
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "resync_pick_date:nobody",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_send.assert_called_once()
+    assert "Unknown" in mock_send.call_args.args[0]
+
+
+def test_callback_resync_malformed_too_few_parts_does_not_raise():
+    """resync callback with fewer than 3 parts must log warning and not raise."""
+    bot = _bot()
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "resync:2026-07-15",  # missing instance part
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    # No message sent — silently swallowed with a log warning
+    mock_send.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+
+
+def test_launch_resync_sends_ack_and_starts_thread():
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+    ):
+        bot._launch_resync(inst, "2026-07-15")
+    mock_send.assert_called_once()
+    mock_exec.assert_called_once()
+
+
+def test_launch_resync_passes_correct_args():
+    bot = _bot()
+    inst = bot._cfg.instances["david"]
+    with (
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+    ):
+        bot._launch_resync(inst, "2026-07-15")
+    _, app_args = mock_exec.call_args.args
+    assert app_args == ["resync", "2026-07-15"]
+
+
+# ---------------------------------------------------------------------------
+# _register_commands — resync is registered
+# ---------------------------------------------------------------------------
+
+
+def test_register_commands_includes_resync():
+    bot = _bot()
+    with patch("app.bot.requests.post") as mock_post:
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock())
+        bot._register_commands()
+    payload = mock_post.call_args.kwargs["json"]
+    commands = [c["command"] for c in payload["commands"]]
+    assert "resync" in commands
+
+
+# ---------------------------------------------------------------------------
+# _cmd_help — resync mentioned
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_help_mentions_resync():
+    bot = _bot()
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_help([])
+    msg = mock_send.call_args.args[0]
+    assert "resync" in msg.lower()

@@ -136,6 +136,22 @@ class WalletClient:
     def get_labels(self) -> list[dict]:
         return self._get_all("labels")
 
+    def put_record(self, record_id: str, record: dict[str, Any]) -> dict[str, Any]:
+        """PUT /v1/api/records/{record_id} — update an existing record in BudgetBakers.
+
+        Returns the parsed response body from the API.
+        Raises on any HTTP error.
+        """
+        log.debug("PUT /v1/api/records/%s", record_id)
+        response = self.session.put(
+            f"{self._get_base}/records/{record_id}",
+            json=record,
+            timeout=30,
+        )
+        log.debug("PUT /v1/api/records/%s → %s", record_id, response.status_code)
+        response.raise_for_status()
+        return response.json()
+
     def get_records(self, date_from: str, date_to: str) -> list[dict]:
         """Fetch all records within [date_from, date_to] (inclusive, YYYY-MM-DD).
 
