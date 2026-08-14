@@ -37,6 +37,8 @@ except Exception:  # pragma: no cover
 
 log = logging.getLogger(__name__)
 
+_SYNC_DB = "sync.db"
+
 
 # ---------------------------------------------------------------------------
 # Result value objects
@@ -113,7 +115,7 @@ class SyncRunner:
         observability and must never interrupt the main sync flow.
         """
         try:
-            with EventRepository(self._cfg.data_dir / "sync.db") as repo:
+            with EventRepository(self._cfg.data_dir / _SYNC_DB) as repo:
                 repo.set_auth_state(self._cfg.instance, status)
         except Exception:
             log.warning(
@@ -505,7 +507,7 @@ def run() -> int:
 
     since = datetime.now(UTC) - timedelta(days=cfg.lookback_days)
 
-    with EventRepository(cfg.data_dir / "sync.db") as repo:
+    with EventRepository(cfg.data_dir / _SYNC_DB) as repo:
         repo.purge_old_records()
         runner = SyncRunner(cfg, notifier)
         events = runner.fetch_events(since)
@@ -626,7 +628,7 @@ def run_resync(date_str: str) -> int:
     log.info("Starting force resync for date=%s owner=%s", date_str, cfg.owner_name)
 
     try:
-        with EventRepository(cfg.data_dir / "sync.db") as repo:
+        with EventRepository(cfg.data_dir / _SYNC_DB) as repo:
             runner = SyncRunner(cfg, notifier)
             wallet_client = WalletClient(api_key=cfg.wallet_api_key)
             counts = runner.resync_day(date_str, repo, wallet_client)
