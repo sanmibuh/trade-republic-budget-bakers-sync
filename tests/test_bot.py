@@ -1088,9 +1088,9 @@ def test_handle_message_digit_string_not_deleted_when_multiple_pending():
     mock_delete.assert_not_called()
 
 
-def test_handle_message_digit_string_ignored_when_no_pending_login():
+def test_handle_message_digit_string_prompts_disambiguation_when_no_pending_login_multi_instance():
     """Plain digit messages with no pending login and multiple instances send a
-    disambiguation prompt (not silently ignored)."""
+    disambiguation prompt asking the user to specify the instance."""
     bot = _bot()
     with (
         patch.object(bot, "_exec_in_thread") as mock_exec,
@@ -1166,7 +1166,7 @@ def test_maybe_submit_pending_code_single_instance_no_pending_submits_directly()
 
 def test_handle_message_digit_cron_single_instance_submits_code():
     """Replying with a digit-only code while _pending_login is empty should work
-    for single-instance setups (cron-triggered 2FA)."""
+    for single-instance setups (cron-triggered 2FA) and delete the sensitive message."""
     single_instance = {
         "david": InstanceConfig(name="David", container_name="proj-sync-david-1")
     }
@@ -1174,12 +1174,13 @@ def test_handle_message_digit_cron_single_instance_submits_code():
     with (
         patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message"),
-        patch.object(bot, "_delete_message"),
+        patch.object(bot, "_delete_message") as mock_delete,
     ):
-        bot._handle_message({"chat": {"id": 42}, "text": "123456"})
+        bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
     mock_exec.assert_called_once_with(
         "proj-sync-david-1", ["submit-code", "123456"], on_error=ANY
     )
+    mock_delete.assert_called_once_with(77)
 
 
 def test_maybe_submit_pending_code_multi_instance_no_pending_sends_disambiguation():

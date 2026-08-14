@@ -752,7 +752,7 @@ class TelegramBot:
                     on_error=self._send_message,
                 )
                 return True
-            names = ", ".join(f"`{_esc(k)}`" for k in sorted(instances))
+            names = ", ".join(f"*{_esc(k)}*" for k in sorted(instances))
             self._send_message(
                 f"⚠️ Multiple instances configured: {names}\\. "
                 "Use `/code <instance> <code>` to specify which one\\."
@@ -764,7 +764,7 @@ class TelegramBot:
                 inst.container_name, ["submit-code", code], on_error=self._send_message
             )
             return True
-        names = ", ".join(f"`{_esc(k)}`" for k in sorted(pending))
+        names = ", ".join(f"*{_esc(k)}*" for k in sorted(pending))
         self._send_message(
             f"⚠️ Multiple logins pending: {names}\\. "
             "Use `/code <instance> <code>` to specify which one\\."
