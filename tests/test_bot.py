@@ -1057,8 +1057,9 @@ def test_handle_message_digit_string_submitted_to_pending_instance():
     mock_delete.assert_called_once_with(77)
 
 
-def test_handle_message_digit_string_not_deleted_when_no_pending_login():
-    """Digit messages are not deleted and not submitted when no login is pending."""
+def test_handle_message_digit_string_not_deleted_when_no_pending_login_multi_instance():
+    """Digit messages with no pending login and multiple instances send a disambiguation
+    prompt, but do not submit code or delete the message."""
     bot = _bot()
     with (
         patch.object(bot, "_exec_in_thread") as mock_exec,
@@ -1067,7 +1068,8 @@ def test_handle_message_digit_string_not_deleted_when_no_pending_login():
     ):
         bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
     mock_exec.assert_not_called()
-    mock_send.assert_not_called()
+    mock_send.assert_called_once()
+    assert "/code" in mock_send.call_args.args[0]
     mock_delete.assert_not_called()
 
 
@@ -1087,7 +1089,8 @@ def test_handle_message_digit_string_not_deleted_when_multiple_pending():
 
 
 def test_handle_message_digit_string_ignored_when_no_pending_login():
-    """Plain digit messages are silently ignored when no login is pending."""
+    """Plain digit messages with no pending login and multiple instances send a
+    disambiguation prompt (not silently ignored)."""
     bot = _bot()
     with (
         patch.object(bot, "_exec_in_thread") as mock_exec,
@@ -1095,7 +1098,8 @@ def test_handle_message_digit_string_ignored_when_no_pending_login():
     ):
         bot._handle_message({"chat": {"id": 42}, "text": "123456"})
     mock_exec.assert_not_called()
-    mock_send.assert_not_called()
+    mock_send.assert_called_once()
+    assert "/code" in mock_send.call_args.args[0]
 
 
 def test_handle_message_digit_string_sends_prompt_when_multiple_pending():
@@ -1140,6 +1144,72 @@ def test_maybe_submit_pending_code_snapshots_dict_to_avoid_race():
         bot._handle_message({"chat": {"id": 42}, "text": "hello there"})
     mock_send.assert_called_once()
     assert "command" in mock_send.call_args.args[0].lower()
+
+
+def test_maybe_submit_pending_code_single_instance_no_pending_submits_directly():
+    """When _pending_login is empty and there is exactly one configured instance,
+    a plain-digit message should be submitted to that instance (cron 2FA fallback)."""
+    single_instance = {
+        "david": InstanceConfig(name="David", container_name="proj-sync-david-1")
+    }
+    bot = _bot(instances=single_instance)
+    with (
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message"),
+    ):
+        result = bot._maybe_submit_pending_code("123456")
+    assert result is True
+    mock_exec.assert_called_once_with(
+        "proj-sync-david-1", ["submit-code", "123456"], on_error=ANY
+    )
+
+
+def test_handle_message_digit_cron_single_instance_submits_code():
+    """Replying with a digit-only code while _pending_login is empty should work
+    for single-instance setups (cron-triggered 2FA)."""
+    single_instance = {
+        "david": InstanceConfig(name="David", container_name="proj-sync-david-1")
+    }
+    bot = _bot(instances=single_instance)
+    with (
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_delete_message"),
+    ):
+        bot._handle_message({"chat": {"id": 42}, "text": "123456"})
+    mock_exec.assert_called_once_with(
+        "proj-sync-david-1", ["submit-code", "123456"], on_error=ANY
+    )
+
+
+def test_maybe_submit_pending_code_multi_instance_no_pending_sends_disambiguation():
+    """When _pending_login is empty and there are multiple instances,
+    a plain-digit message should prompt the user to use /code <instance> <code>."""
+    bot = _bot()  # default has david + eli
+    with (
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        result = bot._maybe_submit_pending_code("123456")
+    assert result is False
+    mock_exec.assert_not_called()
+    mock_send.assert_called_once()
+    sent = mock_send.call_args.args[0]
+    assert "/code" in sent
+
+
+def test_handle_message_digit_cron_multi_instance_sends_disambiguation():
+    """Replying with a digit-only code while _pending_login is empty with multiple
+    instances should ask the user to disambiguate."""
+    bot = _bot()  # david + eli
+    with (
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_message({"chat": {"id": 42}, "text": "123456"})
+    mock_exec.assert_not_called()
+    mock_send.assert_called_once()
+    assert "/code" in mock_send.call_args.args[0]
 
 
 def test_handle_message_unknown_plain_text_ignored_from_other_chat():

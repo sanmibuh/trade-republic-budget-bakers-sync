@@ -732,11 +732,31 @@ class TelegramBot:
         Snapshots ``_pending_login`` at the start to avoid RuntimeError if a
         worker thread mutates the dict concurrently.
 
+        When ``_pending_login`` is empty (e.g. login was triggered by a cron sync
+        rather than by the user via ``/login``), falls back to the configured
+        instances:
+        - Single instance → submits directly (seamless happy path).
+        - Multiple instances → asks the user to use ``/code <instance> <code>``.
+
         Returns True if the code was submitted (message should be deleted by caller),
         False if nothing was submitted (no pending login, or ambiguous — prompt sent).
         """
         pending = dict(self._pending_login)  # snapshot before any iteration
         if not pending:
+            instances = self._cfg.instances
+            if len(instances) == 1:
+                inst = next(iter(instances.values()))
+                self._exec_in_thread(
+                    inst.container_name,
+                    ["submit-code", code],
+                    on_error=self._send_message,
+                )
+                return True
+            names = ", ".join(f"`{_esc(k)}`" for k in sorted(instances))
+            self._send_message(
+                f"⚠️ Multiple instances configured: {names}\\. "
+                "Use `/code <instance> <code>` to specify which one\\."
+            )
             return False
         if len(pending) == 1:
             inst = next(iter(pending.values()))
