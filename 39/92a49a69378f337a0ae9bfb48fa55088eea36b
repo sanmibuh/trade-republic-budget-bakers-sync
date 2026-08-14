@@ -1,0 +1,19 @@
+app/main.py
+  s_610e5ae2d9469a::t_45e9f225fdebe8 6,336-343,412-413,555
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "3992a49a69378f337a0ae9bfb48fa55088eea36b",
+  "prompts": {},
+  "sessions": {
+    "s_610e5ae2d9469a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_002a2fac2ffek3aXVnefZcpd0z",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
