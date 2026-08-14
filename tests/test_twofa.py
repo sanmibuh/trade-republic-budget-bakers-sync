@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.twofa import (
+    PENDING_FILENAME,
     TelegramCodeProvider,
     TerminalCodeProvider,
     select_code_provider,
@@ -282,3 +283,72 @@ def test_select_telegram_wires_on_timeout_to_notifier(tmp_path):
     assert isinstance(provider, TelegramCodeProvider)
     provider._on_timeout()
     notifier.login_code_timeout.assert_called_once_with("david")
+
+
+# ---------------------------------------------------------------------------
+# TelegramCodeProvider — pending marker
+# ---------------------------------------------------------------------------
+
+
+def test_telegram_provider_creates_pending_marker_while_polling(tmp_path):
+    """The pending marker must exist while polling for the code."""
+    code_file = tmp_path / ".tr_2fa_code"
+    pending_file = tmp_path / PENDING_FILENAME
+    marker_seen: list[bool] = []
+
+    def _sleep(_seconds: float) -> None:
+        marker_seen.append(pending_file.exists())
+        code_file.write_text("111111")
+
+    provider = TelegramCodeProvider(
+        code_file,
+        MagicMock(),
+        timeout=100.0,
+        poll_interval=1.0,
+        sleep=_sleep,
+        now=_fake_clock(),
+    )
+
+    provider.get_code()
+    assert any(marker_seen), "Pending marker was never observed during polling"
+
+
+def test_telegram_provider_clears_pending_marker_on_success(tmp_path):
+    """The pending marker must be removed when the code is received."""
+    code_file = tmp_path / ".tr_2fa_code"
+    pending_file = tmp_path / PENDING_FILENAME
+
+    def _sleep(_seconds: float) -> None:
+        code_file.write_text("222222")
+
+    provider = TelegramCodeProvider(
+        code_file,
+        MagicMock(),
+        timeout=100.0,
+        poll_interval=1.0,
+        sleep=_sleep,
+        now=_fake_clock(),
+    )
+
+    provider.get_code()
+    assert not pending_file.exists()
+
+
+def test_telegram_provider_clears_pending_marker_on_timeout(tmp_path):
+    """The pending marker must be removed when the timeout elapses."""
+    code_file = tmp_path / ".tr_2fa_code"
+    pending_file = tmp_path / PENDING_FILENAME
+
+    provider = TelegramCodeProvider(
+        code_file,
+        MagicMock(),
+        timeout=3.0,
+        poll_interval=1.0,
+        sleep=lambda _s: None,
+        now=_fake_clock(),
+    )
+
+    with pytest.raises(TimeoutError):
+        provider.get_code()
+
+    assert not pending_file.exists()

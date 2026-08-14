@@ -164,7 +164,7 @@ class Notifier:
         )
 
     def login_code_timeout(self, instance: str) -> bool:
-        safe_instance = _escape_markdown(instance)
+        safe_instance = _escape_code(instance)
         return self._send(
             self._header("⏱", "2FA Timeout")
             + f"The code request for `{safe_instance}` has expired\\.\n"

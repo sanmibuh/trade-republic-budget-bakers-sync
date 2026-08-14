@@ -511,3 +511,13 @@ def test_notifier_login_code_timeout_suggests_login_command():
 def test_notifier_login_code_timeout_returns_false_when_no_credentials():
     notifier = Notifier(bot_token=None, chat_id=None, owner_name="David")
     assert notifier.login_code_timeout("david") is False
+
+
+def test_notifier_login_code_timeout_instance_rendered_as_code_span():
+    """Instance must be inside a MarkdownV2 inline-code span without over-escaping."""
+    with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
+        _make_notifier().login_code_timeout("foo.bar-baz")
+    msg = mock_send.call_args.kwargs["message"]
+    # Inside a code span only backtick and backslash are special;
+    # dots and hyphens must appear literally (not escaped).
+    assert "`foo.bar-baz`" in msg

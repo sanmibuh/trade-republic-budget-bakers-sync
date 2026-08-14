@@ -52,12 +52,19 @@ def submit_code(code: str) -> None:
 
     Used by the Telegram bot (the /code command) to deliver the 2FA code into
     the sync container, where the blocked login process is polling for it.
+
+    Exits with an error if no login is currently waiting (the pending marker
+    file is absent), so stale /code submissions are rejected cleanly.
     """
     from app.config import Config
-    from app.twofa import CODE_FILENAME
+    from app.twofa import CODE_FILENAME, PENDING_FILENAME
 
     cfg = Config.from_env()
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    pending_file = cfg.data_dir / PENDING_FILENAME
+    if not pending_file.exists():
+        click.echo("No active login request for this instance.")
+        sys.exit(1)
     (cfg.data_dir / CODE_FILENAME).write_text(code.strip())
 
 

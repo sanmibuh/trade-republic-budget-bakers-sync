@@ -132,9 +132,13 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `app/twofa.py` provides the authenticator-code strategies and `select_code_provider`.
 - `TelegramCodeProvider` sends a Telegram prompt (`notifier.login_code_request(instance)`) asking the user to reply
   with `/code <instance> <code>`, then polls `data_dir/.tr_2fa_code` (default 300s timeout, 3s poll) until the code
-  file appears; it clears the file before prompting and after reading. On expiry, it calls `on_timeout` (if set) —
-  wired by `select_code_provider` to `notifier.login_code_timeout(instance)`, which sends a cancellation message in
-  Telegram — then raises `TimeoutError`.
+  file appears; it clears the file before prompting and after reading. While actively waiting it creates a
+  `data_dir/.tr_2fa_pending` marker; that marker is removed on success or timeout. On expiry, it calls `on_timeout`
+  (if set) — wired by `select_code_provider` to `notifier.login_code_timeout(instance)`, which sends a cancellation
+  message in Telegram — then raises `TimeoutError`.
+- `submit-code` (`python -m app submit-code <code>`) checks for `.tr_2fa_pending` before writing the code file; if
+  the marker is absent (no login in progress), it exits 1 with "No active login request for this instance" so stale
+  `/code` submissions are rejected cleanly.
 - Cross-container hand-off: the bot and the sync/login containers do **not** share the data volume. The `/code` bot
   command runs `python -m app submit-code <code>` inside the target container via the Docker SDK `exec_run`;
   `submit-code` writes the code to `data_dir/.tr_2fa_code`, which the waiting `TelegramCodeProvider` reads.
@@ -349,6 +353,7 @@ image publish workflows.
 - `sync.db` — SQLite database with `processed_events` table (purged after 60 days)
 - `sync.log` — rotating log file
 - pytr session/cookie files (login state)
+- `.tr_2fa_pending` — transient marker created by `TelegramCodeProvider` while waiting for a code; removed on success or timeout. `submit-code` checks for this file to reject stale code submissions.
 - `.tr_2fa_code` — transient file where `submit-code` drops the authenticator code for a waiting login/sync
   process (created and removed within the login flow)
 - `backups/monthly/` — monthly JSON snapshots (permanent)
