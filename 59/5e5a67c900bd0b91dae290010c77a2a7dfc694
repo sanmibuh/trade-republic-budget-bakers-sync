@@ -1,0 +1,26 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 135-141,356
+app/__main__.py
+  h_97a91c9e567f87 55-57,60,64-67
+app/notifier.py
+  h_97a91c9e567f87 167
+app/twofa.py
+  h_97a91c9e567f87 32-36,63,76,83,88,103-109
+tests/test_cli.py
+  h_97a91c9e567f87 223,225,233-251
+tests/test_notifier.py
+  h_97a91c9e567f87 514-523
+tests/test_twofa.py
+  h_97a91c9e567f87 8,286-354
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "595e5a67c900bd0b91dae290010c77a2a7dfc694",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
