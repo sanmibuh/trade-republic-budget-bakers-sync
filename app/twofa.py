@@ -29,6 +29,11 @@ log = logging.getLogger(__name__)
 # authenticator code so the waiting login process can pick it up.
 CODE_FILENAME = ".tr_2fa_code"
 
+# Marker file created while TelegramCodeProvider is actively waiting for a code.
+# Its presence signals that a login is in progress; submit-code checks for it
+# before writing the code file, so stale /code submissions are rejected cleanly.
+PENDING_FILENAME = ".tr_2fa_pending"
+
 _DEFAULT_TIMEOUT = 300.0
 _DEFAULT_POLL_INTERVAL = 3.0
 
@@ -52,29 +57,37 @@ class TelegramCodeProvider:
         poll_interval: float = _DEFAULT_POLL_INTERVAL,
         sleep: Callable[[float], Any] = time.sleep,
         now: Callable[[], float] = time.monotonic,
+        on_timeout: Callable[[], Any] | None = None,
     ) -> None:
         self._code_file = Path(code_file)
+        self._pending_file = self._code_file.parent / PENDING_FILENAME
         self._prompt = prompt
         self._timeout = timeout
         self._poll_interval = poll_interval
         self._sleep = sleep
         self._now = now
+        self._on_timeout = on_timeout
 
     def get_code(self) -> str:
         """Prompt the user and block until a code arrives or the timeout elapses."""
         self._clear()
         log.info("Requesting 2FA authenticator code via Telegram")
         self._prompt()
+        self._set_pending()
 
         deadline = self._now() + self._timeout
         while self._now() < deadline:
             code = self._read()
             if code:
                 self._clear()
+                self._clear_pending()
                 log.info("Received 2FA authenticator code")
                 return code
             self._sleep(self._poll_interval)
 
+        self._clear_pending()
+        if self._on_timeout is not None:
+            self._on_timeout()
         raise TimeoutError("Timed out waiting for the 2FA authenticator code")
 
     def _read(self) -> str:
@@ -86,6 +99,13 @@ class TelegramCodeProvider:
     def _clear(self) -> None:
         with contextlib.suppress(FileNotFoundError):
             self._code_file.unlink()
+
+    def _set_pending(self) -> None:
+        self._pending_file.touch()
+
+    def _clear_pending(self) -> None:
+        with contextlib.suppress(FileNotFoundError):
+            self._pending_file.unlink()
 
 
 def select_code_provider(
@@ -104,5 +124,6 @@ def select_code_provider(
         return TelegramCodeProvider(
             code_file,
             lambda: notifier.login_code_request(instance),
+            on_timeout=lambda: notifier.login_code_timeout(instance),
         )
     return None

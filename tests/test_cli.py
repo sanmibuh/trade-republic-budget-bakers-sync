@@ -220,13 +220,33 @@ def test_login_exits_with_return_code():
 
 
 def test_submit_code_writes_code_file(tmp_path):
-    from app.twofa import CODE_FILENAME
+    from app.twofa import CODE_FILENAME, PENDING_FILENAME
 
+    (tmp_path / PENDING_FILENAME).write_text("")
     with patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)):
         result = _runner().invoke(cli, ["submit-code", "123456"])
 
     assert result.exit_code == 0
     assert (tmp_path / CODE_FILENAME).read_text() == "123456"
+
+
+def test_submit_code_rejects_when_no_pending_marker(tmp_path):
+    """submit-code must fail with a clear error when no login is waiting."""
+    with patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)):
+        result = _runner().invoke(cli, ["submit-code", "123456"])
+
+    assert result.exit_code != 0
+    assert "No active login request" in result.output
+
+
+def test_submit_code_pending_marker_absent_does_not_write_code_file(tmp_path):
+    """When no pending marker exists the code file must NOT be written."""
+    from app.twofa import CODE_FILENAME
+
+    with patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)):
+        _runner().invoke(cli, ["submit-code", "999999"])
+
+    assert not (tmp_path / CODE_FILENAME).exists()
 
 
 # ---------------------------------------------------------------------------

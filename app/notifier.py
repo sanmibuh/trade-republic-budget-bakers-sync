@@ -163,6 +163,14 @@ class Notifier:
             },
         )
 
+    def login_code_timeout(self, instance: str) -> bool:
+        safe_instance = _escape_code(instance)
+        return self._send(
+            self._header("⏱", "2FA Timeout")
+            + f"The code request for `{safe_instance}` has expired\\.\n"
+            "Run /login to start a new session\\."
+        )
+
     def login_success(self) -> bool:
         return self._send(
             self._header("✅", "Login Successful")
