@@ -340,3 +340,106 @@ def test_fetch_raises_runtime_error_on_timeline_exception(tmp_path):
     with _patch_timeline(side_effect=Exception("websocket failed")):  # noqa: SIM117 — nested with required by S5778
         with pytest.raises(RuntimeError, match="Timeline fetch failed"):
             client.fetch_timeline_events()
+
+
+# ---------------------------------------------------------------------------
+# TRClient._create_api_client
+# ---------------------------------------------------------------------------
+
+
+def test_create_api_client_uses_correct_credentials(tmp_path):
+    pytr = _make_pytr_client(resume=True)
+    with patch("pytr.api.TradeRepublicApi", return_value=pytr) as mock_api:
+        client = _make_tr_client(tmp_path)
+        result = client._create_api_client()
+
+    assert result is pytr
+    kw = mock_api.call_args.kwargs
+    assert kw["phone_no"] == "+34000000000"
+    assert kw["pin"] == "1234"
+    assert kw["save_cookies"] is True
+    assert kw["credentials_file"] == str(tmp_path / "credentials.json")
+    assert kw["cookies_file"] == str(tmp_path / "cookies.txt")
+    assert kw["use_v2_login"] is True
+
+
+# ---------------------------------------------------------------------------
+# TRClient._do_authenticator_login
+# ---------------------------------------------------------------------------
+
+
+def test_do_authenticator_login_raises_session_expired_when_no_provider(tmp_path):
+    pytr = _make_pytr_client()
+    client = _make_tr_client(tmp_path)
+    with pytest.raises(SessionExpiredError):
+        client._do_authenticator_login(pytr, code_provider=None)
+    pytr.complete_weblogin.assert_not_called()
+    pytr.save_websession.assert_not_called()
+
+
+def test_do_authenticator_login_completes_with_provider(tmp_path):
+    pytr = _make_pytr_client()
+    code_provider = MagicMock()
+    code_provider.get_code.return_value = "654321"
+    client = _make_tr_client(tmp_path)
+    client._do_authenticator_login(pytr, code_provider=code_provider)
+    pytr.complete_weblogin.assert_called_once_with(verify_code="654321")
+    pytr._await_weblogin_confirmation.assert_called_once()
+    pytr.save_websession.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TRClient._do_push_notification_login
+# ---------------------------------------------------------------------------
+
+
+def test_do_push_notification_login_completes(tmp_path):
+    pytr = _make_pytr_client()
+    client = _make_tr_client(tmp_path)
+    client._do_push_notification_login(pytr)
+    pytr.complete_weblogin.assert_called_once_with()
+    pytr.save_websession.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TRClient._perform_weblogin
+# ---------------------------------------------------------------------------
+
+
+def test_perform_weblogin_uses_authenticator_when_needed(tmp_path):
+    pytr = _make_pytr_client(needs_authenticator=True)
+    code_provider = MagicMock()
+    code_provider.get_code.return_value = "111111"
+    client = _make_tr_client(tmp_path)
+    client._perform_weblogin(pytr, code_provider=code_provider)
+    pytr.complete_weblogin.assert_called_once_with(verify_code="111111")
+
+
+def test_perform_weblogin_uses_push_when_no_authenticator(tmp_path):
+    pytr = _make_pytr_client(needs_authenticator=False)
+    client = _make_tr_client(tmp_path)
+    client._perform_weblogin(pytr, code_provider=None)
+    pytr.complete_weblogin.assert_called_once_with()
+
+
+def test_perform_weblogin_wraps_generic_exception_as_login_failed(tmp_path):
+    pytr = _make_pytr_client(needs_authenticator=False)
+    pytr.complete_weblogin.side_effect = Exception("network error")
+    client = _make_tr_client(tmp_path)
+    with pytest.raises(LoginFailedError, match="2FA login failed"):
+        client._perform_weblogin(pytr, code_provider=None)
+
+
+def test_perform_weblogin_propagates_session_expired_unwrapped(tmp_path):
+    pytr = _make_pytr_client(needs_authenticator=True)
+    client = _make_tr_client(tmp_path)
+    with pytest.raises(SessionExpiredError):
+        client._perform_weblogin(pytr, code_provider=None)
+
+
+def test_perform_weblogin_propagates_login_failed_unwrapped(tmp_path):
+    pytr = _make_pytr_client(needs_authenticator=False)
+    pytr.initiate_weblogin.side_effect = LoginFailedError("already failed")
+    client = _make_tr_client(tmp_path)
+    with pytest.raises(LoginFailedError, match="already failed"):
+        client._perform_weblogin(pytr, code_provider=None)
