@@ -370,3 +370,88 @@ def test_resync_exits_with_run_resync_return_code():
 def test_resync_requires_date_argument():
     result = _runner().invoke(cli, ["resync"])
     assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# check-session — auth_state from DB overrides cookie check
+# ---------------------------------------------------------------------------
+
+
+def _write_valid_cookie(tmp_path) -> None:
+    """Write a valid (non-expired) cookies.txt so the cookie check passes."""
+    _FAR_FUTURE = 9_999_999_999
+    (tmp_path / "cookies.txt").write_text(
+        "# Netscape HTTP Cookie File\n"
+        f".api.traderepublic.com\tTRUE\t/\tTRUE\t{_FAR_FUTURE}\ttr_session\tabc\n"
+    )
+
+
+def test_check_session_exits_one_when_auth_state_failed(tmp_path, monkeypatch):
+    """Exit 1 when cookies are valid but auth_state='failed' is persisted in DB."""
+    from app.persistence import EventRepository
+
+    _write_valid_cookie(tmp_path)
+    monkeypatch.setenv("INSTANCE", "david")
+    db_path = tmp_path / "sync.db"
+    with EventRepository(db_path) as repo:
+        repo.set_auth_state("david", "failed")
+
+    with patch("app.config.read_data_dir", return_value=tmp_path):
+        result = _runner().invoke(cli, ["check-session"])
+    assert result.exit_code == 1
+
+
+def test_check_session_exits_one_when_auth_state_expired(tmp_path, monkeypatch):
+    """Exit 1 when cookies are valid but auth_state='expired' is persisted in DB."""
+    from app.persistence import EventRepository
+
+    _write_valid_cookie(tmp_path)
+    monkeypatch.setenv("INSTANCE", "david")
+    db_path = tmp_path / "sync.db"
+    with EventRepository(db_path) as repo:
+        repo.set_auth_state("david", "expired")
+
+    with patch("app.config.read_data_dir", return_value=tmp_path):
+        result = _runner().invoke(cli, ["check-session"])
+    assert result.exit_code == 1
+
+
+def test_check_session_exits_zero_when_auth_state_ok(tmp_path, monkeypatch):
+    """Exit 0 when cookies valid and auth_state='ok'."""
+    from app.persistence import EventRepository
+
+    _write_valid_cookie(tmp_path)
+    monkeypatch.setenv("INSTANCE", "david")
+    db_path = tmp_path / "sync.db"
+    with EventRepository(db_path) as repo:
+        repo.set_auth_state("david", "ok")
+
+    with patch("app.config.read_data_dir", return_value=tmp_path):
+        result = _runner().invoke(cli, ["check-session"])
+    assert result.exit_code == 0
+
+
+def test_check_session_exits_zero_when_no_auth_state_record(tmp_path, monkeypatch):
+    """Exit 0 when cookies valid and no auth_state row exists (backwards compatible)."""
+    _write_valid_cookie(tmp_path)
+    monkeypatch.setenv("INSTANCE", "david")
+
+    with patch("app.config.read_data_dir", return_value=tmp_path):
+        result = _runner().invoke(cli, ["check-session"])
+    assert result.exit_code == 0
+
+
+def test_check_session_exits_two_when_db_is_unreadable(tmp_path, monkeypatch):
+    """Exit 2 when cookies are valid but sync.db cannot be read (corrupted/locked).
+
+    The bot interprets exit 2 as an unknown state (None) rather than
+    a hard auth failure, preventing false-positive ⚠️ alerts.
+    """
+    _write_valid_cookie(tmp_path)
+    monkeypatch.setenv("INSTANCE", "david")
+    # Write a non-SQLite file so sqlite3.connect raises DatabaseError
+    (tmp_path / "sync.db").write_text("not a sqlite database")
+
+    with patch("app.config.read_data_dir", return_value=tmp_path):
+        result = _runner().invoke(cli, ["check-session"])
+    assert result.exit_code == 2

@@ -2119,3 +2119,180 @@ def test_resync_day_extra_subrecord_post_failure_increments_failed(tmp_path):
 
         assert counts.failed == 1
         assert counts.synced == 0
+
+
+# ---------------------------------------------------------------------------
+# EventRepository — auth_state table
+# ---------------------------------------------------------------------------
+
+
+def test_auth_state_table_created(tmp_path):
+    """auth_state table must exist after EventRepository init."""
+    db_path = tmp_path / "test.db"
+    with EventRepository(db_path):
+        pass
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='auth_state'"
+    ).fetchall()
+    conn.close()
+    assert rows, "auth_state table was not created"
+
+
+def test_set_and_get_auth_state_ok(tmp_path):
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.set_auth_state("david", "ok")
+        assert repo.get_auth_state("david") == "ok"
+
+
+def test_set_and_get_auth_state_failed(tmp_path):
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.set_auth_state("david", "failed")
+        assert repo.get_auth_state("david") == "failed"
+
+
+def test_set_and_get_auth_state_expired(tmp_path):
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.set_auth_state("david", "expired")
+        assert repo.get_auth_state("david") == "expired"
+
+
+def test_get_auth_state_returns_none_when_absent(tmp_path):
+    with EventRepository(tmp_path / "test.db") as repo:
+        assert repo.get_auth_state("nonexistent") is None
+
+
+def test_set_auth_state_overwrites_existing(tmp_path):
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.set_auth_state("david", "ok")
+        repo.set_auth_state("david", "failed")
+        assert repo.get_auth_state("david") == "failed"
+
+
+def test_auth_state_migration_adds_table_to_existing_db(tmp_path):
+    """Opening an existing DB without auth_state table must create it automatically."""
+    db_path = tmp_path / "test.db"
+    # Create an old-style DB without auth_state table
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE processed_events (
+            event_id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL DEFAULT '',
+            event_timestamp TEXT NOT NULL DEFAULT '',
+            amount TEXT NOT NULL DEFAULT '',
+            raw TEXT NOT NULL DEFAULT '',
+            synced_at TEXT NOT NULL,
+            wallet_record_id TEXT
+        )"""
+    )
+    conn.commit()
+    conn.close()
+
+    # Opening with EventRepository must create auth_state table automatically
+    with EventRepository(db_path) as repo:
+        repo.set_auth_state("eli", "ok")
+        assert repo.get_auth_state("eli") == "ok"
+
+
+def test_set_auth_state_persists_updated_at(tmp_path):
+    """set_auth_state must store a non-empty updated_at timestamp."""
+    db_path = tmp_path / "test.db"
+    with EventRepository(db_path) as repo:
+        repo.set_auth_state("david", "ok")
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT updated_at FROM auth_state WHERE instance = 'david'"
+    ).fetchone()
+    conn.close()
+    assert row is not None
+    assert row[0]  # non-empty
+
+
+# ---------------------------------------------------------------------------
+# SyncRunner.connect — persists auth_state to DB
+# ---------------------------------------------------------------------------
+
+
+def test_connect_writes_ok_auth_state_on_success(tmp_path):
+    """connect() must write status='ok' to auth_state when login succeeds."""
+    from unittest.mock import patch
+
+    from app.main import SyncRunner
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    with patch("app.main.TRClient"):
+        runner.connect()
+
+    with EventRepository(tmp_path / "sync.db") as repo:
+        assert repo.get_auth_state("david") == "ok"
+
+
+def test_connect_writes_failed_auth_state_on_login_failed(tmp_path):
+    """connect() must write status='failed' when LoginFailedError is raised."""
+    from unittest.mock import patch
+
+    from app.main import SyncRunner
+    from app.tr_client import LoginFailedError
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.connect.side_effect = LoginFailedError("bad pin")
+        with pytest.raises(LoginFailedError):
+            runner.connect()
+
+    with EventRepository(tmp_path / "sync.db") as repo:
+        assert repo.get_auth_state("david") == "failed"
+
+
+def test_connect_writes_expired_auth_state_on_session_expired(tmp_path):
+    """connect() must write status='expired' when SessionExpiredError is raised."""
+    from unittest.mock import patch
+
+    from app.main import SyncRunner
+    from app.tr_client import SessionExpiredError
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.connect.side_effect = SessionExpiredError("expired")
+        with pytest.raises(SessionExpiredError):
+            runner.connect()
+
+    with EventRepository(tmp_path / "sync.db") as repo:
+        assert repo.get_auth_state("david") == "expired"
+
+
+def test_connect_writes_failed_auth_state_on_authentication_error(tmp_path):
+    """connect() must write status='failed' when AuthenticationError is raised."""
+    from unittest.mock import patch
+
+    from app.main import AuthenticationError, SyncRunner
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.connect.side_effect = AuthenticationError("auth error")
+        with pytest.raises(AuthenticationError):
+            runner.connect()
+
+    with EventRepository(tmp_path / "sync.db") as repo:
+        assert repo.get_auth_state("david") == "failed"

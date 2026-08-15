@@ -37,6 +37,8 @@ except Exception:  # pragma: no cover
 
 log = logging.getLogger(__name__)
 
+_SYNC_DB = "sync.db"
+
 
 # ---------------------------------------------------------------------------
 # Result value objects
@@ -104,14 +106,42 @@ class SyncRunner:
         self._cfg = cfg
         self._notifier = notifier
 
+    def _write_auth_state(self, status: str) -> None:
+        """Persist auth *status* to ``sync.db`` for ``/status`` reporting.
+
+        Opens a short-lived connection so it works both inside and outside the
+        main ``EventRepository`` context used by :func:`run`.  Failures are
+        logged as warnings and swallowed — auth_state is best-effort
+        observability and must never interrupt the main sync flow.
+        """
+        try:
+            with EventRepository(self._cfg.data_dir / _SYNC_DB) as repo:
+                repo.set_auth_state(self._cfg.instance, status)
+        except Exception:
+            log.warning(
+                "Failed to persist auth_state=%r for instance %r",
+                status,
+                self._cfg.instance,
+                exc_info=True,
+            )
+
     def connect(self) -> TRClient:
         """Create a ``TRClient`` and establish a session (resume or full 2FA login)."""
         tr_client = TRClient(self._cfg.phone_number, self._cfg.pin, self._cfg.data_dir)
-        tr_client.connect(
-            on_login_required=self._notifier.login_required,
-            on_login_success=self._notifier.login_success,
-            code_provider=_build_code_provider(self._cfg, self._notifier),
-        )
+        try:
+            tr_client.connect(
+                on_login_required=self._notifier.login_required,
+                on_login_success=self._notifier.login_success,
+                code_provider=_build_code_provider(self._cfg, self._notifier),
+            )
+        except SessionExpiredError:
+            self._write_auth_state("expired")
+            raise
+        except (LoginFailedError, AuthenticationError):
+            self._write_auth_state("failed")
+            raise
+        else:
+            self._write_auth_state("ok")
         return tr_client
 
     def fetch_events(self, since: datetime) -> list[dict[str, Any]]:
@@ -477,7 +507,7 @@ def run() -> int:
 
     since = datetime.now(UTC) - timedelta(days=cfg.lookback_days)
 
-    with EventRepository(cfg.data_dir / "sync.db") as repo:
+    with EventRepository(cfg.data_dir / _SYNC_DB) as repo:
         repo.purge_old_records()
         runner = SyncRunner(cfg, notifier)
         events = runner.fetch_events(since)
@@ -598,7 +628,7 @@ def run_resync(date_str: str) -> int:
     log.info("Starting force resync for date=%s owner=%s", date_str, cfg.owner_name)
 
     try:
-        with EventRepository(cfg.data_dir / "sync.db") as repo:
+        with EventRepository(cfg.data_dir / _SYNC_DB) as repo:
             runner = SyncRunner(cfg, notifier)
             wallet_client = WalletClient(api_key=cfg.wallet_api_key)
             counts = runner.resync_day(date_str, repo, wallet_client)

@@ -185,12 +185,19 @@ CREATE TABLE processed_events (
 );
 
 CREATE INDEX idx_synced_at ON processed_events (synced_at);
+
+CREATE TABLE auth_state (
+    instance    TEXT PRIMARY KEY,   -- logical instance name (e.g. "david")
+    status      TEXT NOT NULL,      -- 'ok' | 'failed' | 'expired'
+    updated_at  TEXT NOT NULL       -- UTC ISO timestamp of last status change
+);
 ```
 
-**TTL**: records older than 60 days are purged on each sync run (`purge_old_records`).
+**TTL**: `processed_events` records older than 60 days are purged on each sync run (`purge_old_records`).
+`auth_state` rows are upserted on every connect — one row per instance, no TTL.
 
 **Migrations**: applied automatically on `EventRepository` open — new columns are added via `ALTER TABLE` if
-missing, detected with `PRAGMA table_info`.
+missing, detected with `PRAGMA table_info`; new tables are created via `CREATE TABLE IF NOT EXISTS`.
 
 ### Labels
 - `LABEL_<EVENT_TYPE>` env vars (e.g. `LABEL_BANK_TRANSACTION_INCOMING`) are read by `_read_label_ids()` →
@@ -210,8 +217,9 @@ missing, detected with `PRAGMA table_info`.
   - `python -m app submit-code <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting
     login/sync process to pick up
   - `python -m app resync YYYY-MM-DD` — runs `main.run_resync(date_str)`, force re-syncing a specific day
-  - `python -m app check-session` — exits 0 if `credentials.json` exists in `DATA_DIR`, 1 otherwise; used by the
-    bot's `/status` command to report per-instance auth state without network calls
+  - `python -m app check-session` — exits 0 if a valid session exists (non-expired cookie) **and** `auth_state`
+    for this instance in `sync.db` is not `failed`/`expired`; exits 1 otherwise. Used by the bot's `/status`
+    command to report per-instance auth state without network calls.
 - All imports inside command functions are deferred — startup is fast and dependencies are only loaded when needed.
 - `click.Choice(["auto", "monthly", "yearly"])` provides free input validation and help text.
 - `entrypoint.sh` and `tr-sync.sh` both use `python -m app <subcommand>` — single consistent interface.
@@ -241,7 +249,9 @@ missing, detected with `PRAGMA table_info`.
   (Monthly / Yearly), then choose the period. Direct args (`/backup monthly 2026-07`) skip the keyboards.
 - Sync/login/logs commands (`/sync`, `/login`, `/logs`) show an inline instance picker.
 - `/status` reports auth state per instance — ✅ session saved, ⚠️ needs login, ❓ container unreachable — by
-  running `python -m app check-session` in each container via `_docker_check_session`.
+  running `python -m app check-session` in each container via `_docker_check_session`. `check-session`
+  combines cookie expiry **and** the persisted `auth_state` in `sync.db` so that a failed login is
+  reported correctly even when the old session file is still present.
 - `/login` renews an expired 2FA session on demand (instance picker); `/code <instance> <code>` forwards an
   authenticator code to the target container via `submit-code` (see *2FA via Telegram*).
 - `/resync [YYYY-MM-DD]` force re-syncs a specific day: instance picker → date picker (last 7 days) → executes
@@ -269,6 +279,8 @@ missing, detected with `PRAGMA table_info`.
   `INSTANCES`, `CONTAINER_PREFIX`, `BACKUP_SERVICE`.
 - `read_data_dir()` — standalone helper that returns the `DATA_DIR` path (default `/app/data`); used by
   `check-session` which only needs the data directory, not full credentials.
+- `read_instance()` — standalone helper that returns the logical instance name (`INSTANCE` env var, falling
+  back to `OWNER_NAME` lowercased); used by `check-session` to look up `auth_state` in `sync.db`.
 - All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
 ### OWNER_NAME
@@ -350,7 +362,7 @@ image publish workflows.
 ## Data volume
 
 `/app/data` (mounted from host) contains:
-- `sync.db` — SQLite database with `processed_events` table (purged after 60 days)
+- `sync.db` — SQLite database with `processed_events` table (purged after 60 days) and `auth_state` table (persisted auth status per instance)
 - `sync.log` — rotating log file
 - pytr session/cookie files (login state)
 - `.tr_2fa_pending` — transient marker created by `TelegramCodeProvider` while waiting for a code; removed on success or timeout. `submit-code` checks for this file to reject stale code submissions.
