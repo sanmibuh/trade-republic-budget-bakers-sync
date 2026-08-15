@@ -125,6 +125,28 @@ class SyncRunner:
                 exc_info=True,
             )
 
+    def _write_failed_sync_run(self) -> None:
+        """Persist a failed sync run to ``sync.db`` for ``/status`` reporting.
+
+        Best-effort: failures are logged as warnings and never interrupt the
+        main sync flow.
+        """
+        try:
+            with EventRepository(self._cfg.data_dir / _SYNC_DB) as repo:
+                repo.set_sync_run(
+                    self._cfg.instance,
+                    status="failed",
+                    saved=0,
+                    failed=0,
+                    excluded=0,
+                )
+        except Exception:
+            log.warning(
+                "Failed to persist failed sync_run for instance %r",
+                self._cfg.instance,
+                exc_info=True,
+            )
+
     def connect(self) -> TRClient:
         """Create a ``TRClient`` and establish a session (resume or full 2FA login)."""
         tr_client = TRClient(self._cfg.phone_number, self._cfg.pin, self._cfg.data_dir)
@@ -157,16 +179,19 @@ class SyncRunner:
         except LoginFailedError:
             log.exception("Login failed")
             self._notifier.login_failed()
+            self._write_failed_sync_run()
             raise SystemExit(1) from None
         except SessionExpiredError:
             log.warning(
                 "Session expired and no interactive terminal available — bootstrap required"
             )
             self._notifier.authentication_required()
+            self._write_failed_sync_run()
             raise SystemExit(1) from None
         except AuthenticationError:
             log.exception("Authentication error")
             self._notifier.authentication_required()
+            self._write_failed_sync_run()
             raise SystemExit(1) from None
         except HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else None
@@ -271,7 +296,20 @@ class SyncRunner:
                     )
 
         repo.commit()
-        return _SyncCounts(synced=synced, excluded=excluded_count, failed=failed)
+        counts = _SyncCounts(synced=synced, excluded=excluded_count, failed=failed)
+        status = (
+            "success"
+            if counts.failed == 0
+            else ("failed" if counts.synced == 0 else "partial")
+        )
+        repo.set_sync_run(
+            self._cfg.instance,
+            status=status,
+            saved=counts.synced,
+            failed=counts.failed,
+            excluded=counts.excluded,
+        )
+        return counts
 
     # ------------------------------------------------------------------
     # resync_day helpers

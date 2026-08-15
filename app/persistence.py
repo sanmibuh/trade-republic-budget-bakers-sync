@@ -82,6 +82,17 @@ _CREATE_AUTH_STATE_TABLE = """
     )
 """
 
+_CREATE_SYNC_RUNS_TABLE = """
+    CREATE TABLE IF NOT EXISTS sync_runs (
+        instance  TEXT PRIMARY KEY,
+        status    TEXT NOT NULL,
+        ran_at    TEXT NOT NULL,
+        saved     INTEGER NOT NULL DEFAULT 0,
+        failed    INTEGER NOT NULL DEFAULT 0,
+        excluded  INTEGER NOT NULL DEFAULT 0
+    )
+"""
+
 
 class EventRepository:
     """Manages the SQLite dedup database.
@@ -104,6 +115,7 @@ class EventRepository:
         self._conn.execute(_CREATE_TABLE)
         self._conn.execute(_CREATE_INDEX)
         self._conn.execute(_CREATE_AUTH_STATE_TABLE)
+        self._conn.execute(_CREATE_SYNC_RUNS_TABLE)
         self._migrate()
         self._conn.commit()
 
@@ -266,6 +278,50 @@ class EventRepository:
             "SELECT status FROM auth_state WHERE instance = ?", (instance,)
         ).fetchone()
         return row[0] if row else None
+
+    def set_sync_run(
+        self,
+        instance: str,
+        *,
+        status: str,
+        saved: int,
+        failed: int,
+        excluded: int,
+    ) -> None:
+        """Persist the result of a sync run for *instance*.
+
+        Args:
+            instance: Logical instance name (e.g. ``"david"``).
+            status:   One of ``"success"``, ``"partial"``, or ``"failed"``.
+            saved:    Number of events successfully saved to Wallet.
+            failed:   Number of events that failed to save.
+            excluded: Number of zero-amount events excluded from sync.
+        """
+        ran_at = datetime.now(UTC).isoformat()
+        self._conn.execute(
+            "INSERT OR REPLACE INTO sync_runs "
+            "(instance, status, ran_at, saved, failed, excluded) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (instance, status, ran_at, saved, failed, excluded),
+        )
+        self._conn.commit()
+
+    def get_sync_run(self, instance: str) -> dict | None:
+        """Return the last sync run result for *instance*, or ``None`` if absent."""
+        row = self._conn.execute(
+            "SELECT status, ran_at, saved, failed, excluded "
+            "FROM sync_runs WHERE instance = ?",
+            (instance,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "status": row[0],
+            "ran_at": row[1],
+            "saved": row[2],
+            "failed": row[3],
+            "excluded": row[4],
+        }
 
     def commit(self) -> None:
         self._conn.commit()

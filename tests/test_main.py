@@ -726,6 +726,8 @@ def test_process_results_marks_successful_events(tmp_path):
     from app.notifier import Notifier
 
     cfg = MagicMock()
+    cfg.instance = "david"
+    cfg.data_dir = tmp_path
     notifier = MagicMock(spec=Notifier)
     runner = SyncRunner(cfg, notifier)
 
@@ -747,6 +749,8 @@ def test_process_results_counts_failures(tmp_path):
     from app.notifier import Notifier
 
     cfg = MagicMock()
+    cfg.instance = "david"
+    cfg.data_dir = tmp_path
     notifier = MagicMock(spec=Notifier)
     runner = SyncRunner(cfg, notifier)
 
@@ -768,6 +772,8 @@ def test_process_results_skips_events_with_no_records(tmp_path):
     from app.notifier import Notifier
 
     cfg = MagicMock()
+    cfg.instance = "david"
+    cfg.data_dir = tmp_path
     notifier = MagicMock(spec=Notifier)
     runner = SyncRunner(cfg, notifier)
 
@@ -792,6 +798,8 @@ def test_process_results_preserves_excluded_count(tmp_path):
     from app.notifier import Notifier
 
     cfg = MagicMock()
+    cfg.instance = "david"
+    cfg.data_dir = tmp_path
     notifier = MagicMock(spec=Notifier)
     runner = SyncRunner(cfg, notifier)
 
@@ -1140,6 +1148,8 @@ def test_process_results_passes_wallet_record_id(tmp_path):
     from app.notifier import Notifier
 
     cfg = MagicMock()
+    cfg.instance = "david"
+    cfg.data_dir = tmp_path
     notifier = MagicMock(spec=Notifier)
     runner = SyncRunner(cfg, notifier)
 
@@ -1160,6 +1170,8 @@ def test_process_results_stores_joined_ids_for_multi_record_event(tmp_path):
     from app.notifier import Notifier
 
     cfg = MagicMock()
+    cfg.instance = "david"
+    cfg.data_dir = tmp_path
     notifier = MagicMock(spec=Notifier)
     runner = SyncRunner(cfg, notifier)
 
@@ -1183,6 +1195,8 @@ def test_process_results_no_wallet_id_when_result_has_no_id(tmp_path):
     from app.notifier import Notifier
 
     cfg = MagicMock()
+    cfg.instance = "david"
+    cfg.data_dir = tmp_path
     notifier = MagicMock(spec=Notifier)
     runner = SyncRunner(cfg, notifier)
 
@@ -1203,6 +1217,8 @@ def test_process_results_missing_index_counts_as_failure(tmp_path):
     from app.notifier import Notifier
 
     cfg = MagicMock()
+    cfg.instance = "david"
+    cfg.data_dir = tmp_path
     notifier = MagicMock(spec=Notifier)
     runner = SyncRunner(cfg, notifier)
 
@@ -1224,6 +1240,8 @@ def test_process_results_missing_index_notifies(tmp_path):
     from app.notifier import Notifier
 
     cfg = MagicMock()
+    cfg.instance = "david"
+    cfg.data_dir = tmp_path
     notifier = MagicMock(spec=Notifier)
     runner = SyncRunner(cfg, notifier)
 
@@ -2358,3 +2376,243 @@ def test_connect_writes_failed_auth_state_on_authentication_error(tmp_path):
 
     with EventRepository(tmp_path / "sync.db") as repo:
         assert repo.get_auth_state("david") == "failed"
+
+
+# ---------------------------------------------------------------------------
+# EventRepository — sync_runs table
+# ---------------------------------------------------------------------------
+
+
+def test_sync_runs_table_created(tmp_path):
+    """sync_runs table must exist after EventRepository init."""
+    db_path = tmp_path / "test.db"
+    with EventRepository(db_path):
+        pass
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sync_runs'"
+    ).fetchall()
+    conn.close()
+    assert rows, "sync_runs table was not created"
+
+
+def test_set_and_get_sync_run_success(tmp_path):
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.set_sync_run("david", status="success", saved=3, failed=0, excluded=1)
+        run = repo.get_sync_run("david")
+    assert run is not None
+    assert run["status"] == "success"
+    assert run["saved"] == 3
+    assert run["failed"] == 0
+    assert run["excluded"] == 1
+    assert run["ran_at"]
+
+
+def test_set_and_get_sync_run_failed(tmp_path):
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.set_sync_run("david", status="failed", saved=0, failed=2, excluded=0)
+        run = repo.get_sync_run("david")
+    assert run is not None
+    assert run["status"] == "failed"
+    assert run["saved"] == 0
+    assert run["failed"] == 2
+
+
+def test_get_sync_run_returns_none_when_absent(tmp_path):
+    with EventRepository(tmp_path / "test.db") as repo:
+        assert repo.get_sync_run("nonexistent") is None
+
+
+def test_set_sync_run_overwrites_existing(tmp_path):
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.set_sync_run("david", status="success", saved=1, failed=0, excluded=0)
+        repo.set_sync_run("david", status="failed", saved=0, failed=1, excluded=0)
+        run = repo.get_sync_run("david")
+    assert run["status"] == "failed"
+
+
+def test_sync_runs_migration_adds_table_to_existing_db(tmp_path):
+    """Opening an existing DB without sync_runs table must create it automatically."""
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE processed_events (
+            event_id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL DEFAULT '',
+            event_timestamp TEXT NOT NULL DEFAULT '',
+            amount TEXT NOT NULL DEFAULT '',
+            raw TEXT NOT NULL DEFAULT '',
+            synced_at TEXT NOT NULL,
+            wallet_record_id TEXT
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE auth_state (
+            instance TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    conn.commit()
+    conn.close()
+
+    with EventRepository(db_path) as repo:
+        repo.set_sync_run("eli", status="success", saved=5, failed=0, excluded=2)
+        run = repo.get_sync_run("eli")
+    assert run["status"] == "success"
+    assert run["saved"] == 5
+
+
+def test_set_sync_run_stores_ran_at_timestamp(tmp_path):
+    """set_sync_run must store a non-empty UTC ran_at timestamp."""
+    db_path = tmp_path / "test.db"
+    with EventRepository(db_path) as repo:
+        repo.set_sync_run("david", status="success", saved=1, failed=0, excluded=0)
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT ran_at FROM sync_runs WHERE instance = 'david'"
+    ).fetchone()
+    conn.close()
+    assert row is not None
+    assert row[0]
+
+
+# ---------------------------------------------------------------------------
+# SyncRunner — persists sync_run after process_results
+# ---------------------------------------------------------------------------
+
+
+def test_process_results_persists_sync_run_success(tmp_path):
+    """process_results must write a success sync_run row when all events succeed."""
+    from app.main import SyncRunner
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    event = {"id": "e1", "amount": 100}
+    results = [{"inputIndex": 0, "id": "w1"}]
+
+    with EventRepository(tmp_path / "sync.db") as repo:
+        runner.process_results(
+            results,
+            [event],
+            [[0]],
+            repo,
+            excluded_count=1,
+        )
+        run = repo.get_sync_run("david")
+
+    assert run is not None
+    assert run["status"] == "success"
+    assert run["saved"] == 1
+    assert run["failed"] == 0
+    assert run["excluded"] == 1
+
+
+def test_process_results_persists_sync_run_partial(tmp_path):
+    """process_results must write a partial sync_run when some events fail."""
+    from app.main import SyncRunner
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    event_ok = {"id": "e1", "amount": 100}
+    event_fail = {"id": "e2", "amount": 50}
+    results = [
+        {"inputIndex": 0, "id": "w1"},
+        {"inputIndex": 1, "error": "bad"},
+    ]
+
+    with EventRepository(tmp_path / "sync.db") as repo:
+        runner.process_results(
+            results,
+            [event_ok, event_fail],
+            [[0], [1]],
+            repo,
+        )
+        run = repo.get_sync_run("david")
+
+    assert run["status"] == "partial"
+    assert run["saved"] == 1
+    assert run["failed"] == 1
+
+
+def test_process_results_persists_sync_run_failed(tmp_path):
+    """process_results must write a failed sync_run when all events fail."""
+    from app.main import SyncRunner
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    event = {"id": "e1", "amount": 100}
+    results = [{"inputIndex": 0, "error": "oops"}]
+
+    with EventRepository(tmp_path / "sync.db") as repo:
+        runner.process_results(
+            results,
+            [event],
+            [[0]],
+            repo,
+        )
+        run = repo.get_sync_run("david")
+
+    assert run["status"] == "failed"
+    assert run["saved"] == 0
+    assert run["failed"] == 1
+
+
+def test_fetch_events_persists_failed_sync_run_on_login_error(tmp_path):
+    """fetch_events must write a failed sync_run when LoginFailedError is raised."""
+    from unittest.mock import patch
+
+    from app.main import SyncRunner
+    from app.tr_client import LoginFailedError
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.connect.side_effect = LoginFailedError("fail")
+        with pytest.raises(SystemExit):
+            runner.fetch_events(datetime(2024, 1, 1, tzinfo=UTC))
+
+    with EventRepository(tmp_path / "sync.db") as repo:
+        run = repo.get_sync_run("david")
+    assert run is not None
+    assert run["status"] == "failed"
+
+
+def test_fetch_events_persists_failed_sync_run_on_auth_error(tmp_path):
+    """fetch_events must write a failed sync_run when AuthenticationError is raised."""
+    from unittest.mock import patch
+
+    from app.main import AuthenticationError, SyncRunner
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.connect.side_effect = AuthenticationError("auth")
+        with pytest.raises(SystemExit):
+            runner.fetch_events(datetime(2024, 1, 1, tzinfo=UTC))
+
+    with EventRepository(tmp_path / "sync.db") as repo:
+        run = repo.get_sync_run("david")
+    assert run is not None
+    assert run["status"] == "failed"

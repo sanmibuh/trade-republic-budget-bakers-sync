@@ -75,9 +75,6 @@ _RESYNC_DAY_COUNT = 7  # number of recent days offered in the resync date picker
 _CB_SEP = ":"
 
 _MAX_LOG_CHARS = 3800  # safe limit below Telegram's 4096-char message cap
-_STATUS_LOG_TAIL_LINES = (
-    500  # inspect enough recent lines to find the latest sync summary in noisy logs
-)
 
 # Icons used in backup ACK messages — must stay in sync with _backup_type_buttons().
 _BACKUP_ICONS: dict[str, str] = {
@@ -88,65 +85,29 @@ _BACKUP_ICONS: dict[str, str] = {
 _LAST_SYNC_SUMMARY_SCRIPT = """
 import json
 import os
-import re
 import sqlite3
-from collections import deque
 from pathlib import Path
 
-result = {
-    "status": None,
-    "timestamp": None,
-    "synced": None,
-    "failed": None,
-    "excluded": None,
-    "synced_at": None,
-}
 data_dir = Path(os.environ.get("DATA_DIR", "/app/data"))
-log_path = data_dir / "sync.log"
-
-if log_path.exists():
-    try:
-        with log_path.open(encoding="utf-8", errors="replace") as fh:
-            for raw_line in reversed(deque(fh, maxlen=__MAXLEN__)):
-                line = raw_line.strip()
-                timestamp_match = re.match(r"^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}", line)
-                timestamp = timestamp_match.group(0) if timestamp_match else None
-                match = re.search(r"synced=(\\d+)\\s+excluded=(\\d+)\\s+failed=(\\d+)", line)
-                if "Sync complete." in line and match:
-                    synced = int(match.group(1))
-                    excluded = int(match.group(2))
-                    failed = int(match.group(3))
-                    result["status"] = "success"
-                    if failed:
-                        result["status"] = "failed" if synced == 0 else "partial"
-                    result["timestamp"] = timestamp
-                    result["synced"] = synced
-                    result["failed"] = failed
-                    result["excluded"] = excluded
-                    break
-                if any(
-                    marker in line
-                    for marker in (
-                        "Error syncing events to wallet",
-                        "Authentication error",
-                        "Unexpected error during TR connection/fetch",
-                        "Login failed",
-                    )
-                ):
-                    result["status"] = "failed"
-                    result["timestamp"] = timestamp
-                    break
-    except Exception:
-        pass
-
 db_path = data_dir / "sync.db"
-if db_path.exists():
+instance = os.environ.get("INSTANCE", "")
+result = None
+if db_path.exists() and instance:
     conn = None
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        row = conn.execute("SELECT MAX(synced_at) FROM processed_events").fetchone()
-        if row and row[0]:
-            result["synced_at"] = row[0]
+        row = conn.execute(
+            "SELECT status, ran_at, saved, failed, excluded FROM sync_runs WHERE instance = ?",
+            (instance,),
+        ).fetchone()
+        if row:
+            result = {
+                "status": row[0],
+                "ran_at": row[1],
+                "saved": row[2],
+                "failed": row[3],
+                "excluded": row[4],
+            }
     except Exception:
         pass
     finally:
@@ -155,9 +116,8 @@ if db_path.exists():
                 conn.close()
         except Exception:
             pass
-
 print(json.dumps(result))
-""".replace("__MAXLEN__", str(_STATUS_LOG_TAIL_LINES))
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -1012,7 +972,7 @@ def _format_sync_timestamp(raw: str) -> str:
 def _docker_last_sync_summary(
     container_name: str, client: docker.DockerClient | None = None
 ) -> str | None:
-    """Return a human-readable summary of the most recent sync activity."""
+    """Return a human-readable summary of the most recent sync run from the DB."""
     try:
         client = client or docker.from_env()
         container = client.containers.get(container_name)
@@ -1026,27 +986,26 @@ def _docker_last_sync_summary(
         log.debug("last sync lookup failed for %s: %s", container_name, exc)
         return None
 
+    if payload is None:
+        return None
+
     status = payload.get("status")
-    timestamp = payload.get("timestamp")
+    ran_at = payload.get("ran_at")
     if status in {"success", "partial", "failed"}:
         icon = {"success": "✅", "partial": "⚠️", "failed": "❌"}[status]
         parts = [f"{icon} {status}"]
-        if timestamp:
-            parts[0] = f"{parts[0]} at {_format_sync_timestamp(timestamp)}"
-        synced = payload.get("synced")
+        if ran_at:
+            parts[0] = f"{parts[0]} at {_format_sync_timestamp(ran_at)}"
+        saved = payload.get("saved")
         failed = payload.get("failed")
         excluded = payload.get("excluded")
-        if synced is not None:
-            parts.append(f"saved {synced}")
+        if saved is not None:
+            parts.append(f"saved {saved}")
         if failed is not None:
             parts.append(f"failed {failed}")
         if excluded is not None:
             parts.append(f"excluded {excluded}")
         return " · ".join(parts)
-
-    synced_at = payload.get("synced_at")
-    if synced_at:
-        return f"✅ last saved event at {_format_sync_timestamp(synced_at)}"
     return None
 
 
