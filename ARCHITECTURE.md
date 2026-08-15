@@ -14,6 +14,7 @@ and deployment context.
 ```
 app/
   __main__.py       # CLI entry point — click group with `sync`, `backup`, and `bot` subcommands
+  categorizer.py    # CategoryCache (24h TTL) + HistoryCategorizer (history-based category lookup)
   config.py         # Config and BackupConfig dataclasses — reads all env vars in one place
   http_client.py    # Shared HTTP helpers: ssl circuit-breaker, http_post, build_session
   persistence.py    # EventRepository (SQLite dedup)
@@ -47,6 +48,10 @@ build_records_for_event()    # TR event dict → list[BudgetBakers record dict]
    └── _build_note()          # single source of truth for the note/description
    └── _HANDLERS[event_type]  # per-type handler builds record structure (accounts, payment type, counter-party)
    └── label applied generically post-handler if LABEL_<EVENT_TYPE> is set
+   └── category_id applied generically post-handler when CATEGORY_STRATEGY=history
+         ↓
+HistoryCategorizer.get_category_id(note)   # majority-vote lookup from recent Wallet records
+   └── CategoryCache.category_ids()         # 24h TTL wrapper around WalletClient.get_categories()
         ↓
 EventRepository.dedup_event_id()   # filters already-synced events (SQLite)
         ↓
@@ -276,6 +281,9 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   Read from `DEDUP_TTL_DAYS` (default `60`). Passed to `EventRepository.purge_old_records(ttl_days=...)`
   at the start of each normal sync run (`run()`). The resync entry point (`run_resync`) does not purge,
   as it is a targeted single-day operation.
+- `Config.category_strategy` — controls automatic pre-categorization of Wallet records. Read from
+  `CATEGORY_STRATEGY` (default `none`). Accepted values: `none`, `history`. See *Auto-categorization*
+  section for details.
 - `Config.instance` — logical instance name used for the Telegram 2FA prompt/`/code` routing. Read from
   `INSTANCE`, defaulting to `OWNER_NAME` lowercased (e.g. `david`, `eli`), which already matches the container
   instance name, so it need not be set explicitly in compose.
@@ -322,6 +330,33 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 ### Known limitations
 - TR CSV export has raw terminal descriptors (e.g. `"ETAM LINGERIE BUENOS A"`) but the pytr WebSocket API only
   exposes normalized merchant names (e.g. `"Etam"`). No fix possible without combining CSV + API sources.
+
+### Auto-categorization (`CATEGORY_STRATEGY`)
+
+Records sent via the BudgetBakers API land without a category (Wallet's AI categorization only activates for
+bank-connected syncs).  The `CATEGORY_STRATEGY` env var enables automatic pre-assignment:
+
+| `CATEGORY_STRATEGY` | Behaviour |
+|---|---|
+| `none` (default) | No automatic categorization — fully backwards-compatible |
+| `history` | Enables history-based lookup via `HistoryCategorizer` |
+| `llm` | Reserved for a future iteration (LLM as fallback) |
+
+**`history` strategy flow** (implemented in `app/categorizer.py`):
+1. On the first record of a sync run, `HistoryCategorizer` fetches all Wallet records for the last
+   `history_days` (default 90) days and builds an in-memory `note → [categoryId, ...]` index.
+2. Only `categoryId` values present in the current `CategoryCache` (valid, non-deleted categories)
+   are indexed.
+3. For each new record, the most frequent `categoryId` among the last `top_n` (default 5) matches
+   is assigned.  Falls back to no category if there are no matches.
+4. `CategoryCache` wraps `WalletClient.get_categories()` with a 24 h TTL to avoid repeated API calls.
+   Call `invalidate()` to force a reload on the next access.
+
+The `categoryId` is applied post-handler in `build_records_for_event` (same pattern as `labelIds`)
+and the `HistoryCategorizer` is constructed once per `SyncRunner.build_batch` call and reused across
+all events in that batch.
+
+`CATEGORY_STRATEGY` is validated in `config.py`; unknown values raise `ValueError` at startup.
 
 ---
 
@@ -421,6 +456,7 @@ See `deploy/DEPLOY.md` for setup instructions.
 | File | Role |
 |---|---|
 | `app/__main__.py` | click CLI: `sync`, `backup`, `bot`, `login`, `submit-code`, `check-session`; single entry point |
+| `app/categorizer.py` | `CategoryCache` (24 h TTL) + `HistoryCategorizer` (history-based majority-vote category assignment) |
 | `app/http_client.py` | SSL circuit-breaker shared by notifier and wallet_client; `http_post`, `build_session` |
 | `app/main.py` | `SyncRunner` class (`connect`, `fetch_events`, `build_batch`, `process_results`, `resync_day`) + `run()` / `run_login()` / `run_resync()` thin wrappers; `_prepare` bootstrap helper |
 | `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |

@@ -303,6 +303,7 @@ def _make_record(
     payment_type: str | None = None,
     counter_party: str | None = None,
     unpaired_transfer: bool = False,
+    category_id: str | None = None,
 ) -> dict[str, Any]:
     r: dict[str, Any] = {
         "accountId": account_id,
@@ -318,6 +319,8 @@ def _make_record(
         r["transfer"] = {"pairingMode": "unpaired"}
     if counter_party:
         r["counterParty"] = counter_party[:255]
+    if category_id:
+        r["categoryId"] = category_id
     return r
 
 
@@ -449,6 +452,7 @@ def build_records_for_event(
     cash_account_id: str,
     portfolio_account_id: str,
     label_ids: dict[str, str] | None = None,
+    category_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Convert a TR event into one or more BudgetBakers record dicts.
 
@@ -487,5 +491,9 @@ def build_records_for_event(
     if label_id:
         for record in records:
             record["labelIds"] = [label_id]
+
+    if category_id:
+        for record in records:
+            record["categoryId"] = category_id
 
     return records

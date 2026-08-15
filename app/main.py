@@ -9,6 +9,7 @@ from typing import Any
 from requests import HTTPError
 
 from app import http_client
+from app.categorizer import HistoryCategorizer
 from app.config import Config
 from app.logging_setup import setup_logging
 from app.notifier import Notifier
@@ -222,11 +223,22 @@ class SyncRunner:
         self,
         new_events: list[dict[str, Any]],
         repo: EventRepository,
+        *,
+        wallet_client: WalletClient | None = None,
     ) -> _Batch:
-        """Convert new events into API records, marking zero-amount ones as excluded."""
+        """Convert new events into API records, marking zero-amount ones as excluded.
+
+        When ``cfg.category_strategy == "history"`` and a *wallet_client* is
+        provided, a :class:`~app.categorizer.HistoryCategorizer` is used to
+        look up a category for each record based on its ``note``.
+        """
         all_records: list[dict] = []
         event_record_indices: list[list[int]] = [[] for _ in new_events]
         excluded_count = 0
+
+        categorizer: HistoryCategorizer | None = None
+        if self._cfg.category_strategy == "history" and wallet_client is not None:
+            categorizer = HistoryCategorizer(wallet_client)
 
         for event_idx, event in enumerate(new_events):
             event_type = extract_event_type(event)
@@ -248,6 +260,14 @@ class SyncRunner:
                 excluded_count += 1
                 log.info("Excluded zero-amount event %s", dedup_event_id(event))
                 continue
+
+            if categorizer is not None:
+                note = recs[0].get("note", "")
+                category_id = categorizer.get_category_id(note)
+                if category_id:
+                    for r in recs:
+                        r["categoryId"] = category_id
+
             for r in recs:
                 event_record_indices[event_idx].append(len(all_records))
                 all_records.append(r)
@@ -601,13 +621,12 @@ def run() -> int:
 
         counts = _SyncCounts()
         try:
-            batch = runner.build_batch(new_events, repo)
+            wallet_client = WalletClient(api_key=cfg.wallet_api_key)
+            batch = runner.build_batch(new_events, repo, wallet_client=wallet_client)
             counts.excluded = batch.excluded_count
 
             if batch.records:
-                results = WalletClient(api_key=cfg.wallet_api_key).post_records(
-                    batch.records
-                )
+                results = wallet_client.post_records(batch.records)
                 log.debug("API results: %s", results)
                 counts = runner.process_results(
                     results,
