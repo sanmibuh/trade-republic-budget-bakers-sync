@@ -782,6 +782,31 @@ def test_process_results_skips_events_with_no_records(tmp_path):
     assert counts.failed == 0
 
 
+def test_process_results_preserves_excluded_count(tmp_path):
+    """process_results must propagate excluded_count into the returned _SyncCounts.
+
+    Regression: previously the caller had to re-assign counts.excluded after
+    calling process_results, which was fragile and easy to delete silently.
+    """
+    from app.main import SyncRunner
+    from app.notifier import Notifier
+
+    cfg = MagicMock()
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    event = {"id": "ev1", "timestamp": "2024-01-01T00:00:00Z"}
+    results = [{"inputIndex": 0}]
+    event_record_indices = [[0]]
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        counts = runner.process_results(
+            results, [event], event_record_indices, repo, excluded_count=3
+        )
+
+    assert counts.excluded == 3
+
+
 # ---------------------------------------------------------------------------
 # run() — zero-amount events are committed even when no records are posted
 # ---------------------------------------------------------------------------
