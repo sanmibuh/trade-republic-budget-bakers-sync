@@ -262,17 +262,26 @@ class SyncRunner:
                 continue
 
             if categorizer is not None:
-                note = recs[0].get("note", "")
-                category_id = categorizer.get_category_id(note)
-                if category_id:
-                    for r in recs:
-                        r["categoryId"] = category_id
+                self._apply_category(recs, categorizer)
 
             for r in recs:
                 event_record_indices[event_idx].append(len(all_records))
                 all_records.append(r)
 
         return _Batch(all_records, event_record_indices, excluded_count)
+
+    @staticmethod
+    def _apply_category(recs: list[dict], categorizer: HistoryCategorizer) -> None:
+        """Look up a category for *recs* via *categorizer* and stamp it on each record.
+
+        Uses the ``note`` of the first record as the lookup key — all sub-records
+        of a single event share the same note.  No-ops when no category is found.
+        """
+        note = recs[0].get("note", "")
+        category_id = categorizer.get_category_id(note)
+        if category_id:
+            for r in recs:
+                r["categoryId"] = category_id
 
     def _process_event_result(
         self,
