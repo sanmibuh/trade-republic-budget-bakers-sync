@@ -1,0 +1,16 @@
+app/tr_client.py
+  h_97a91c9e567f87 60,72-95,99,101,108-132
+tests/test_tr_client.py
+  h_97a91c9e567f87 343-445
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "fb089585658b9d3d02bcc2bcea100f52b3beae59",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
