@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [6.5.0] - 2026-08-15
+
+### What's Changed
+* ✂️ Nightly: refactor 39 long functions (2026-08-14) — [#117](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/117)
+* Persist auth/login failure state to DB so /status reports it correctly — [#116](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/116)
+* Dismiss pending 2FA code prompt when the timeout expires — [#114](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/114)
+* Bug: plain-digit 2FA reply is silently ignored when login was triggered by cron sync — [#113](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/113)
+* Force re-sync of a specific day (bypass dedup, upsert) — [#106](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/106)
+* Extract SyncRunner class from main.py to avoid testing private functions directly — [#104](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/104)
+* Encapsulate SSL circuit-breaker state in a class instead of module-level globals — [#103](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/103)
+* Add read API to EventRepository to avoid ._conn access in tests — [#102](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/102)
+* Test config helpers through public Config API instead of importing private functions — [#101](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/101)
+* Remove dead label_ids parameter from _make_record in tr_mapper.py — [#100](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/100)
+**Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v6.4.0...v6.5.0
+
+
 ## [6.4.0] - 2026-08-13
 
 ### What's Changed
