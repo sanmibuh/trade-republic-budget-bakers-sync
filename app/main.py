@@ -225,6 +225,7 @@ class SyncRunner:
         new_events: list[dict[str, Any]],
         event_record_indices: list[list[int]],
         repo: EventRepository,
+        excluded_count: int = 0,
     ) -> _SyncCounts:
         """Interpret API results, mark successful events as processed, log failures."""
         results_by_index = {r.get("inputIndex", i): r for i, r in enumerate(results)}
@@ -270,7 +271,7 @@ class SyncRunner:
                     )
 
         repo.commit()
-        return _SyncCounts(synced=synced, failed=failed)
+        return _SyncCounts(synced=synced, excluded=excluded_count, failed=failed)
 
     # ------------------------------------------------------------------
     # resync_day helpers
@@ -536,9 +537,12 @@ def run() -> int:
                 )
                 log.debug("API results: %s", results)
                 counts = runner.process_results(
-                    results, new_events, batch.event_record_indices, repo
+                    results,
+                    new_events,
+                    batch.event_record_indices,
+                    repo,
+                    excluded_count=batch.excluded_count,
                 )
-                counts.excluded = batch.excluded_count
             else:
                 repo.commit()
 
