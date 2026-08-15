@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [6.6.0] - 2026-08-15
+
+### What's Changed
+* Auto-categorize wallet records before sync using history-based matching — [#123](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/123)
+* CI Results comment: delete and recreate instead of edit so it stays at the bottom — [#122](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/122)
+* Persist last sync result to DB instead of iterating logs — [#121](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/121)
+* Refactor excluded count handoff in the orchestrator — [#120](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/120)
+**Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v6.5.0...v6.6.0
+
+
 ## [6.5.0] - 2026-08-15
 
 ### What's Changed
