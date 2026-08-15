@@ -9,6 +9,7 @@ from typing import Any
 from requests import HTTPError
 
 from app import http_client
+from app.categorizer import HistoryCategorizer
 from app.config import Config
 from app.logging_setup import setup_logging
 from app.notifier import Notifier
@@ -57,6 +58,7 @@ class _Batch:
     records: list[dict]
     event_record_indices: list[list[int]]
     excluded_count: int
+    categorizer: HistoryCategorizer | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -222,11 +224,22 @@ class SyncRunner:
         self,
         new_events: list[dict[str, Any]],
         repo: EventRepository,
+        *,
+        wallet_client: WalletClient | None = None,
     ) -> _Batch:
-        """Convert new events into API records, marking zero-amount ones as excluded."""
+        """Convert new events into API records, marking zero-amount ones as excluded.
+
+        When ``cfg.category_strategy == "history"`` and a *wallet_client* is
+        provided, a :class:`~app.categorizer.HistoryCategorizer` is used to
+        look up a category for each record based on its ``note``.
+        """
         all_records: list[dict] = []
         event_record_indices: list[list[int]] = [[] for _ in new_events]
         excluded_count = 0
+
+        categorizer: HistoryCategorizer | None = None
+        if self._cfg.category_strategy == "history" and wallet_client is not None:
+            categorizer = HistoryCategorizer(wallet_client)
 
         for event_idx, event in enumerate(new_events):
             event_type = extract_event_type(event)
@@ -248,11 +261,89 @@ class SyncRunner:
                 excluded_count += 1
                 log.info("Excluded zero-amount event %s", dedup_event_id(event))
                 continue
+
+            if categorizer is not None:
+                self._apply_category(recs, categorizer)
+
             for r in recs:
                 event_record_indices[event_idx].append(len(all_records))
                 all_records.append(r)
 
-        return _Batch(all_records, event_record_indices, excluded_count)
+        return _Batch(all_records, event_record_indices, excluded_count, categorizer)
+
+    @staticmethod
+    def _apply_category(recs: list[dict], categorizer: HistoryCategorizer) -> None:
+        """Look up a category for *recs* via *categorizer* and stamp it on each record.
+
+        Uses the ``note`` of the first record as the lookup key — all sub-records
+        of a single event share the same note.  No-ops when no category is found.
+        """
+        note = recs[0].get("note", "")
+        category_id = categorizer.get_category_id(note)
+        if category_id:
+            for r in recs:
+                r["categoryId"] = category_id
+
+    def _retry_category_failures(
+        self,
+        records: list[dict],
+        results: list[dict[str, Any]],
+        wallet_client: WalletClient,
+        *,
+        categorizer: HistoryCategorizer | None,
+    ) -> list[dict[str, Any]]:
+        """Retry records that failed due to an invalid ``categoryId``, once.
+
+        When a categorized record returns an API error, the category cache is
+        invalidated (the category may have been deleted since the cache loaded)
+        and the record is retried without ``categoryId``.  Records without a
+        ``categoryId`` or with no failure are returned unchanged.
+
+        Args:
+            records:     The original flat records list submitted to the API.
+            results:     Per-item results returned by :meth:`WalletClient.post_records`.
+            wallet_client: Client used for the retry POST.
+            categorizer: Active :class:`~app.categorizer.HistoryCategorizer`
+                         whose cache should be invalidated on failure, or ``None``
+                         to skip the retry entirely.
+
+        Returns:
+            The results list with retry outcomes merged in (same order / indices).
+        """
+        if categorizer is None:
+            return results
+
+        results_by_index: dict[int, dict[str, Any]] = {
+            r.get("inputIndex", i): r for i, r in enumerate(results)
+        }
+
+        retry_indices = [
+            idx
+            for idx, record in enumerate(records)
+            if results_by_index.get(idx, {}).get("error") and record.get("categoryId")
+        ]
+        if not retry_indices:
+            return results
+
+        categorizer.invalidate_cache()
+        log.warning(
+            "Retrying %d record(s) without categoryId after API error (cache invalidated)",
+            len(retry_indices),
+        )
+
+        retry_records = [
+            {k: v for k, v in records[idx].items() if k != "categoryId"}
+            for idx in retry_indices
+        ]
+        retry_results = wallet_client.post_records(retry_records)
+
+        for pos, orig_idx in enumerate(retry_indices):
+            if pos < len(retry_results):
+                merged: dict[str, Any] = dict(retry_results[pos])
+                merged["inputIndex"] = orig_idx
+                results_by_index[orig_idx] = merged
+
+        return list(results_by_index.values())
 
     def _process_event_result(
         self,
@@ -601,12 +692,17 @@ def run() -> int:
 
         counts = _SyncCounts()
         try:
-            batch = runner.build_batch(new_events, repo)
+            wallet_client = WalletClient(api_key=cfg.wallet_api_key)
+            batch = runner.build_batch(new_events, repo, wallet_client=wallet_client)
             counts.excluded = batch.excluded_count
 
             if batch.records:
-                results = WalletClient(api_key=cfg.wallet_api_key).post_records(
-                    batch.records
+                results = wallet_client.post_records(batch.records)
+                results = runner._retry_category_failures(
+                    batch.records,
+                    results,
+                    wallet_client,
+                    categorizer=batch.categorizer,
                 )
                 log.debug("API results: %s", results)
                 counts = runner.process_results(

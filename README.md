@@ -70,6 +70,7 @@ Or start all services at once:
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for notifications |
 | `TELEGRAM_CHAT_ID` | — | Telegram chat ID for notifications |
 | `LABEL_<EVENT_TYPE>` | — | BudgetBakers label UUID to attach to records of that event type (see below) |
+| `CATEGORY_STRATEGY` | `none` | Auto-categorize new records before sync. Options: `none` (disabled), `history` (majority-vote from past records with the same note) |
 
 ### Labels per event type
 

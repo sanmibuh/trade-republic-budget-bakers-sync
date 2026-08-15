@@ -921,7 +921,7 @@ def test_run_excluded_events_not_reprocessed_on_next_run(tmp_path):
 
         # Simulate build_batch marking the event as processed in a real repo
         # and returning an empty batch (all excluded)
-        def fake_build_batch(new_events, repo):
+        def fake_build_batch(new_events, repo, *, wallet_client=None):
             from app.main import _Batch
 
             for ev in new_events:

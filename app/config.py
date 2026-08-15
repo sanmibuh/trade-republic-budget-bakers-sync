@@ -54,6 +54,18 @@ def _read_label_ids() -> dict[str, str]:
     }
 
 
+_VALID_CATEGORY_STRATEGIES: frozenset[str] = frozenset({"none", "history"})
+
+
+def _category_strategy_env() -> str:
+    raw = os.getenv("CATEGORY_STRATEGY", "none").strip().lower()
+    if raw not in _VALID_CATEGORY_STRATEGIES:
+        raise ValueError(
+            f"CATEGORY_STRATEGY must be one of {sorted(_VALID_CATEGORY_STRATEGIES)}, got: {raw!r}"
+        )
+    return raw
+
+
 def _bool_env(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -137,6 +149,7 @@ class Config:
     instance: str = ""
     allow_insecure_ssl: bool = False
     label_ids: dict[str, str] = field(default_factory=dict)
+    category_strategy: str = "none"
 
     @classmethod
     def from_env(cls) -> Config:
@@ -155,6 +168,7 @@ class Config:
             dedup_ttl_days=_positive_int_env("DEDUP_TTL_DAYS", default=60),
             instance=instance,
             label_ids=_read_label_ids(),
+            category_strategy=_category_strategy_env(),
         )
 
 
