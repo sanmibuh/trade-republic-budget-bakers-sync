@@ -1,0 +1,20 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 343-345,357-363
+app/categorizer.py
+  h_97a91c9e567f87 48-49,114-121
+app/main.py
+  h_97a91c9e567f87 61,272,287-347,701-706
+tests/test_main_category_integration.py
+  h_97a91c9e567f87 9,222-389
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "1461721bd9622baafc6c6cd61d83381ac6a4cb2e",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
