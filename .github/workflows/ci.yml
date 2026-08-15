@@ -227,24 +227,14 @@ jobs:
           </details>
           <!-- ci-results-comment -->"
 
-          # Upsert: update existing comment if present, otherwise create.
-          # Also clean up any accidental duplicates (keep first, delete rest).
-          COMMENT_IDS=$(gh api \
-            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments?per_page=100" \
+          # Delete all existing CI results comments, then create a new one at the bottom.
+          COMMENT_IDS=$(gh api --paginate \
+            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             --jq '[.[] | select(.body | contains("<!-- ci-results-comment -->")) | .id][]')
 
-          FIRST_ID=$(echo "$COMMENT_IDS" | head -1)
+          for id in $COMMENT_IDS; do
+            gh api --method DELETE \
+              "repos/${{ github.repository }}/issues/comments/${id}"
+          done
 
-          if [ -n "$FIRST_ID" ]; then
-            # Update the first comment in-place (no delete → no duplicate window)
-            gh api --method PATCH \
-              "repos/${{ github.repository }}/issues/comments/${FIRST_ID}" \
-              -f body="$BODY" > /dev/null
-            # Delete any extra duplicates beyond the first
-            echo "$COMMENT_IDS" | tail -n +2 | while read -r dup_id; do
-              gh api --method DELETE \
-                "repos/${{ github.repository }}/issues/comments/${dup_id}"
-            done
-          else
-            gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY"
-          fi
+          gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY"
