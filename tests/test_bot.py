@@ -1690,7 +1690,7 @@ def test_docker_container_status_returns_none_on_exception():
         assert _docker_container_status("my-container") is None
 
 
-def test_docker_last_sync_summary_parses_success_from_log():
+def test_docker_last_sync_summary_parses_success_from_db():
     client = _make_docker_client(
         output=b'{"status":"success","ran_at":"2026-08-11T10:00:00+00:00","saved":3,"failed":0,"excluded":1}'
     )

@@ -329,13 +329,21 @@ class SyncRunner:
             status = "failed"
         else:
             status = "partial"
-        repo.set_sync_run(
-            self._cfg.instance,
-            status=status,
-            saved=counts.synced,
-            failed=counts.failed,
-            excluded=counts.excluded,
-        )
+        try:
+            repo.set_sync_run(
+                self._cfg.instance,
+                status=status,
+                saved=counts.synced,
+                failed=counts.failed,
+                excluded=counts.excluded,
+            )
+        except Exception:
+            log.warning(
+                "Failed to persist sync_run=%r for instance %r",
+                status,
+                self._cfg.instance,
+                exc_info=True,
+            )
         return counts
 
     # ------------------------------------------------------------------
