@@ -1,0 +1,27 @@
+app/categorizer.py
+  s_3758274b735ed2::t_2600059df650cb 1-130
+tests/test_category_cache.py
+  s_3758274b735ed2::t_0e27e5aa80f803 1-128
+tests/test_history_categorizer.py
+  s_3758274b735ed2::t_ee8deaf3c072fd 1-200
+tests/test_main_category_integration.py
+  s_3758274b735ed2::t_ee59836ea79874 1-220
+tests/test_tr_mapper_category.py
+  s_3758274b735ed2::t_0dc602924902b7 1-103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "7e43aa29e09bc5e857c57fef102128f96e0d0f5b",
+  "prompts": {},
+  "sessions": {
+    "s_3758274b735ed2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ff925c958ffe1zJpVrf8fneWVr",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
