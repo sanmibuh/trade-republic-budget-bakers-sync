@@ -57,16 +57,7 @@ class TRClient:
         is raised instead of blocking — this is the case for a scheduled sync
         with no terminal and no Telegram fallback configured.
         """
-        from pytr.api import TradeRepublicApi
-
-        client = TradeRepublicApi(
-            phone_no=self._phone_number,
-            pin=self._pin,
-            save_cookies=True,
-            credentials_file=str(self._data_dir / "credentials.json"),
-            cookies_file=str(self._data_dir / "cookies.txt"),
-            use_v2_login=True,
-        )
+        client = self._create_api_client()
 
         if client.resume_websession():
             log.info("Resumed existing Trade Republic session")
@@ -78,45 +69,67 @@ class TRClient:
         if on_login_required:
             on_login_required()
 
+        self._perform_weblogin(client, code_provider)
+
+        log.info("Login completed, session saved")
+
+        if on_login_success:
+            on_login_success()
+
+        self._api = client
+
+    def _create_api_client(self) -> Any:
+        """Instantiate and return a configured TradeRepublicApi client."""
+        from pytr.api import TradeRepublicApi
+
+        return TradeRepublicApi(
+            phone_no=self._phone_number,
+            pin=self._pin,
+            save_cookies=True,
+            credentials_file=str(self._data_dir / "credentials.json"),
+            cookies_file=str(self._data_dir / "cookies.txt"),
+            use_v2_login=True,
+        )
+
+    def _perform_weblogin(self, client: Any, code_provider: Any) -> None:
+        """Initiate weblogin and delegate to the appropriate 2FA flow."""
         try:
             client.initiate_weblogin()
-
             if client.weblogin_needs_authenticator:
-                if code_provider is None:
-                    log.warning(
-                        "Authenticator 2FA code required but no code provider is "
-                        "available — run the bootstrap command to renew the session"
-                    )
-                    raise SessionExpiredError(
-                        "Authenticator code required but no code provider available"
-                    )
-                log.info("Obtaining authenticator code")
-                code = code_provider.get_code()
-                log.debug("Submitting authenticator code")
-                client.complete_weblogin(verify_code=code)
-                log.debug("Polling login process for CONFIRMED status")
-                # NOTE: _await_weblogin_confirmation is a private pytr method.
-                # If pytr renames it in a future version this will raise AttributeError at runtime.
-                client._await_weblogin_confirmation()
-                client.save_websession()
+                self._do_authenticator_login(client, code_provider)
             else:
-                log.info(
-                    "Waiting for push notification approval in Trade Republic app..."
-                )
-                client.complete_weblogin()
-                client.save_websession()
-
-            log.info("Login completed, session saved")
+                self._do_push_notification_login(client)
         except (LoginFailedError, SessionExpiredError):
             raise
         except Exception as exc:
             log.exception("Login failed with exception")
             raise LoginFailedError(f"2FA login failed: {exc}") from exc
 
-        if on_login_success:
-            on_login_success()
+    def _do_authenticator_login(self, client: Any, code_provider: Any) -> None:
+        """Complete login using a TOTP authenticator code."""
+        if code_provider is None:
+            log.warning(
+                "Authenticator 2FA code required but no code provider is "
+                "available — run the bootstrap command to renew the session"
+            )
+            raise SessionExpiredError(
+                "Authenticator code required but no code provider available"
+            )
+        log.info("Obtaining authenticator code")
+        code = code_provider.get_code()
+        log.debug("Submitting authenticator code")
+        client.complete_weblogin(verify_code=code)
+        log.debug("Polling login process for CONFIRMED status")
+        # NOTE: _await_weblogin_confirmation is a private pytr method.
+        # If pytr renames it in a future version this will raise AttributeError at runtime.
+        client._await_weblogin_confirmation()
+        client.save_websession()
 
-        self._api = client
+    def _do_push_notification_login(self, client: Any) -> None:
+        """Complete login by waiting for in-app push notification approval."""
+        log.info("Waiting for push notification approval in Trade Republic app...")
+        client.complete_weblogin()
+        client.save_websession()
 
     def fetch_timeline_events(
         self, since: datetime | None = None
