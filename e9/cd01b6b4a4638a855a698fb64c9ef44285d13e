@@ -1,0 +1,22 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 282-283
+app/__main__.py
+  h_97a91c9e567f87 87-93,102-106
+app/config.py
+  h_97a91c9e567f87 85-96
+tests/test_cli.py
+  h_97a91c9e567f87 442-457
+tests/test_main.py
+  h_97a91c9e567f87 2278-2298
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "e9cd01b6b4a4638a855a698fb64c9ef44285d13e",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
