@@ -698,6 +698,71 @@ def test_fetch_events_unexpected_exception_reraises():
     notifier.error.assert_called_once_with(boom)
 
 
+def test_handle_http_error_401_raises_system_exit(tmp_path):
+    """_handle_http_error must raise SystemExit(1) and notify for 401 responses."""
+    from requests import HTTPError
+
+    from app.main import SyncRunner
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    err = HTTPError()
+    err.response = MagicMock()
+    err.response.status_code = 401
+
+    with pytest.raises(SystemExit) as exc_info:
+        runner._handle_http_error(err)
+
+    assert exc_info.value.code == 1
+    notifier.authentication_required.assert_called_once()
+
+
+def test_handle_http_error_non_401_notifies_error(tmp_path):
+    """_handle_http_error must call notifier.error and return for non-401 responses."""
+    from requests import HTTPError
+
+    from app.main import SyncRunner
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    err = HTTPError()
+    err.response = MagicMock()
+    err.response.status_code = 500
+
+    runner._handle_http_error(err)
+
+    notifier.error.assert_called_once_with(err)
+    notifier.authentication_required.assert_not_called()
+
+
+def test_handle_http_error_none_response_notifies_error(tmp_path):
+    """_handle_http_error must handle exc.response being None without crashing."""
+    from requests import HTTPError
+
+    from app.main import SyncRunner
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    err = HTTPError()
+    err.response = None
+
+    runner._handle_http_error(err)
+
+    notifier.error.assert_called_once_with(err)
+
+
 def test_fetch_events_success_returns_events():
     from unittest.mock import patch
 
@@ -2583,11 +2648,12 @@ def test_fetch_events_persists_failed_sync_run_on_login_error(tmp_path):
     cfg.instance = "david"
     notifier = MagicMock()
     runner = SyncRunner(cfg, notifier)
+    since = datetime(2024, 1, 1, tzinfo=UTC)
 
     with patch("app.main.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = LoginFailedError("fail")
         with pytest.raises(SystemExit):
-            runner.fetch_events(datetime(2024, 1, 1, tzinfo=UTC))
+            runner.fetch_events(since)
 
     with EventRepository(tmp_path / "sync.db") as repo:
         run = repo.get_sync_run("david")
@@ -2606,11 +2672,12 @@ def test_fetch_events_persists_failed_sync_run_on_auth_error(tmp_path):
     cfg.instance = "david"
     notifier = MagicMock()
     runner = SyncRunner(cfg, notifier)
+    since = datetime(2024, 1, 1, tzinfo=UTC)
 
     with patch("app.main.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = AuthenticationError("auth")
         with pytest.raises(SystemExit):
-            runner.fetch_events(datetime(2024, 1, 1, tzinfo=UTC))
+            runner.fetch_events(since)
 
     with EventRepository(tmp_path / "sync.db") as repo:
         run = repo.get_sync_run("david")

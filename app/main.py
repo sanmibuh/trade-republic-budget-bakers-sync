@@ -166,6 +166,21 @@ class SyncRunner:
             self._write_auth_state("ok")
         return tr_client
 
+    def _handle_http_error(self, exc: HTTPError) -> None:
+        """Log and dispatch an HTTP error from a TR API call.
+
+        Raises ``SystemExit(1)`` for 401 responses (auth failure); otherwise
+        notifies via the error channel so the caller can re-raise the original
+        exception.
+        """
+        status = exc.response.status_code if exc.response is not None else None
+        log.exception("HTTP error (status=%s)", status)
+        if status == 401:
+            self._notifier.authentication_required()
+            self._write_failed_sync_run()
+            raise SystemExit(1) from exc
+        self._notifier.error(exc)
+
     def fetch_events(self, since: datetime) -> list[dict[str, Any]]:
         """Connect to Trade Republic and return filtered timeline events.
 
@@ -194,12 +209,7 @@ class SyncRunner:
             self._write_failed_sync_run()
             raise SystemExit(1) from None
         except HTTPError as exc:
-            status = exc.response.status_code if exc.response is not None else None
-            log.exception("HTTP error (status=%s)", status)
-            if status == 401:
-                self._notifier.authentication_required()
-                raise SystemExit(1) from exc
-            self._notifier.error(exc)
+            self._handle_http_error(exc)
             raise
         except Exception as exc:
             log.exception("Unexpected error during TR connection/fetch")
@@ -244,6 +254,53 @@ class SyncRunner:
 
         return _Batch(all_records, event_record_indices, excluded_count)
 
+    def _process_event_result(
+        self,
+        event: dict[str, Any],
+        record_indices: list[int],
+        results_by_index: dict[int, dict],
+        repo: EventRepository,
+    ) -> tuple[int, int]:
+        """Process the API result for one event.
+
+        Returns:
+            ``(synced_delta, failed_delta)`` — exactly one of the two is 1;
+            both are 0 when *record_indices* is empty (excluded event).
+        """
+        if not record_indices:
+            return 0, 0
+        missing = [i for i in record_indices if i not in results_by_index]
+        if missing:
+            eid = dedup_event_id(event)
+            log.error(
+                "Event %s has no API result for record index(es): %s", eid, missing
+            )
+            self._notifier.missing_api_result(eid, missing)
+            return 0, 1
+        failures = [
+            results_by_index[i]
+            for i in record_indices
+            if results_by_index[i].get("error")
+        ]
+        if failures:
+            eid = dedup_event_id(event)
+            for f in failures:
+                log.error(
+                    "Event %s record %d failed: %s",
+                    eid,
+                    f.get("inputIndex"),
+                    f.get("error"),
+                )
+            return 0, 1
+        wallet_ids = [
+            results_by_index[i]["id"]
+            for i in record_indices
+            if results_by_index[i].get("id")
+        ]
+        wallet_record_id = ",".join(wallet_ids) if wallet_ids else None
+        repo.mark_processed(event, wallet_record_id=wallet_record_id)
+        return 1, 0
+
     def process_results(
         self,
         results: list[dict[str, Any]],
@@ -258,50 +315,20 @@ class SyncRunner:
         synced = 0
         failed = 0
         for event_idx, event in enumerate(new_events):
-            record_indices = event_record_indices[event_idx]
-            if not record_indices:
-                continue
-            missing = [i for i in record_indices if i not in results_by_index]
-            if missing:
-                eid = dedup_event_id(event)
-                log.error(
-                    "Event %s has no API result for record index(es): %s", eid, missing
-                )
-                self._notifier.missing_api_result(eid, missing)
-                failed += 1
-                continue
-            failures = [
-                results_by_index[i]
-                for i in record_indices
-                if results_by_index[i].get("error")
-            ]
-            if not failures:
-                wallet_ids = [
-                    results_by_index[i]["id"]
-                    for i in record_indices
-                    if results_by_index[i].get("id")
-                ]
-                wallet_record_id = ",".join(wallet_ids) if wallet_ids else None
-                repo.mark_processed(event, wallet_record_id=wallet_record_id)
-                synced += 1
-            else:
-                failed += 1
-                eid = dedup_event_id(event)
-                for f in failures:
-                    log.error(
-                        "Event %s record %d failed: %s",
-                        eid,
-                        f.get("inputIndex"),
-                        f.get("error"),
-                    )
+            s, f = self._process_event_result(
+                event, event_record_indices[event_idx], results_by_index, repo
+            )
+            synced += s
+            failed += f
 
         repo.commit()
         counts = _SyncCounts(synced=synced, excluded=excluded_count, failed=failed)
-        status = (
-            "success"
-            if counts.failed == 0
-            else ("failed" if counts.synced == 0 else "partial")
-        )
+        if counts.failed == 0:
+            status = "success"
+        elif counts.synced == 0:
+            status = "failed"
+        else:
+            status = "partial"
         repo.set_sync_run(
             self._cfg.instance,
             status=status,
