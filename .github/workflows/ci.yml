@@ -228,8 +228,8 @@ jobs:
           <!-- ci-results-comment -->"
 
           # Delete all existing CI results comments, then create a new one at the bottom.
-          COMMENT_IDS=$(gh api \
-            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments?per_page=100" \
+          COMMENT_IDS=$(gh api --paginate \
+            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             --jq '[.[] | select(.body | contains("<!-- ci-results-comment -->")) | .id][]')
 
           for id in $COMMENT_IDS; do
