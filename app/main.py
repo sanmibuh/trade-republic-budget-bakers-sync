@@ -58,6 +58,7 @@ class _Batch:
     records: list[dict]
     event_record_indices: list[list[int]]
     excluded_count: int
+    categorizer: HistoryCategorizer | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +269,7 @@ class SyncRunner:
                 event_record_indices[event_idx].append(len(all_records))
                 all_records.append(r)
 
-        return _Batch(all_records, event_record_indices, excluded_count)
+        return _Batch(all_records, event_record_indices, excluded_count, categorizer)
 
     @staticmethod
     def _apply_category(recs: list[dict], categorizer: HistoryCategorizer) -> None:
@@ -282,6 +283,67 @@ class SyncRunner:
         if category_id:
             for r in recs:
                 r["categoryId"] = category_id
+
+    def _retry_category_failures(
+        self,
+        records: list[dict],
+        results: list[dict[str, Any]],
+        wallet_client: WalletClient,
+        *,
+        categorizer: HistoryCategorizer | None,
+    ) -> list[dict[str, Any]]:
+        """Retry records that failed due to an invalid ``categoryId``, once.
+
+        When a categorized record returns an API error, the category cache is
+        invalidated (the category may have been deleted since the cache loaded)
+        and the record is retried without ``categoryId``.  Records without a
+        ``categoryId`` or with no failure are returned unchanged.
+
+        Args:
+            records:     The original flat records list submitted to the API.
+            results:     Per-item results returned by :meth:`WalletClient.post_records`.
+            wallet_client: Client used for the retry POST.
+            categorizer: Active :class:`~app.categorizer.HistoryCategorizer`
+                         whose cache should be invalidated on failure, or ``None``
+                         to skip the retry entirely.
+
+        Returns:
+            The results list with retry outcomes merged in (same order / indices).
+        """
+        if categorizer is None:
+            return results
+
+        results_by_index: dict[int, dict[str, Any]] = {
+            r.get("inputIndex", i): r for i, r in enumerate(results)
+        }
+
+        retry_indices = [
+            idx
+            for idx, record in enumerate(records)
+            if results_by_index.get(idx, {}).get("error") and record.get("categoryId")
+        ]
+        if not retry_indices:
+            return results
+
+        categorizer.invalidate_cache()
+        log.warning(
+            "Retrying %d record(s) without categoryId after API error (cache invalidated)",
+            len(retry_indices),
+        )
+
+        retry_records = [
+            {k: v for k, v in records[idx].items() if k != "categoryId"}
+            for idx in retry_indices
+        ]
+        retry_results = wallet_client.post_records(retry_records)
+
+        for pos, orig_idx in enumerate(retry_indices):
+            if pos < len(retry_results):
+                merged: dict[str, Any] = dict(retry_results[pos])
+                merged["inputIndex"] = orig_idx
+                results_by_index[orig_idx] = merged
+
+        return list(results_by_index.values())
 
     def _process_event_result(
         self,
@@ -636,6 +698,12 @@ def run() -> int:
 
             if batch.records:
                 results = wallet_client.post_records(batch.records)
+                results = runner._retry_category_failures(
+                    batch.records,
+                    results,
+                    wallet_client,
+                    categorizer=batch.categorizer,
+                )
                 log.debug("API results: %s", results)
                 counts = runner.process_results(
                     results,

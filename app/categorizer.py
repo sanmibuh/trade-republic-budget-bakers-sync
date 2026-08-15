@@ -45,7 +45,8 @@ class CategoryCache:
         """Return the categories list, loading from the API when necessary."""
         if self._categories is None or self._is_stale():
             self._reload()
-        return self._categories  # type: ignore[return-value]
+        assert self._categories is not None
+        return self._categories
 
     def invalidate(self) -> None:
         """Discard the cached categories so the next :meth:`get` fetches fresh data."""
@@ -109,6 +110,14 @@ class HistoryCategorizer:
             return None
         counts = Counter(cat_ids[-self._top_n :])
         return counts.most_common(1)[0][0]
+
+    def invalidate_cache(self) -> None:
+        """Invalidate the category cache so the next lookup fetches fresh data.
+
+        Call this when the Wallet API rejects a ``categoryId`` — the category
+        may have been deleted after the cache was last loaded.
+        """
+        self._cache.invalidate()
 
     # ------------------------------------------------------------------
     # Private helpers

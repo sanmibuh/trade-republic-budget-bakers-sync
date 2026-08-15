@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.categorizer import HistoryCategorizer
 from app.config import Config
 from app.main import SyncRunner
 from app.notifier import Notifier
@@ -218,3 +219,171 @@ def test_config_category_strategy_invalid_raises(monkeypatch):
 
     with pytest.raises(ValueError, match="CATEGORY_STRATEGY"):
         Config.from_env()
+
+
+# ---------------------------------------------------------------------------
+# SyncRunner._retry_category_failures
+# ---------------------------------------------------------------------------
+
+
+def _make_runner_for_retry() -> SyncRunner:
+    return SyncRunner(_make_cfg(category_strategy="history"), _make_notifier())
+
+
+def _make_categorizer_mock() -> MagicMock:
+    cat = MagicMock(spec=HistoryCategorizer)
+    return cat
+
+
+def test_retry_no_failures_returns_original_results():
+    runner = _make_runner_for_retry()
+    wallet = MagicMock()
+    records = [{"accountId": "x", "categoryId": "cat-1"}]
+    results = [{"inputIndex": 0, "id": "r-1", "success": True}]
+
+    out = runner._retry_category_failures(records, results, wallet, categorizer=None)
+
+    assert out == results
+    wallet.post_records.assert_not_called()
+
+
+def test_retry_no_categorizer_returns_original_results():
+    runner = _make_runner_for_retry()
+    wallet = MagicMock()
+    records = [{"accountId": "x", "categoryId": "cat-1"}]
+    results = [{"inputIndex": 0, "error": "invalid category"}]
+
+    out = runner._retry_category_failures(records, results, wallet, categorizer=None)
+
+    assert out == results
+    wallet.post_records.assert_not_called()
+
+
+def test_retry_failed_record_without_category_id_not_retried():
+    """Errors on records that never had a categoryId are not retried."""
+    runner = _make_runner_for_retry()
+    wallet = MagicMock()
+    categorizer = _make_categorizer_mock()
+    records = [{"accountId": "x"}]  # no categoryId
+    results = [{"inputIndex": 0, "error": "some error"}]
+
+    out = runner._retry_category_failures(
+        records, results, wallet, categorizer=categorizer
+    )
+
+    assert out == results
+    wallet.post_records.assert_not_called()
+    categorizer.invalidate_cache.assert_not_called()
+
+
+def test_retry_failed_categorized_record_retried_without_category():
+    """A failed record with a categoryId is retried once without it."""
+    runner = _make_runner_for_retry()
+    wallet = MagicMock()
+    wallet.post_records.return_value = [
+        {"inputIndex": 0, "id": "r-retry", "success": True}
+    ]
+    categorizer = _make_categorizer_mock()
+
+    records = [{"accountId": "x", "categoryId": "cat-1", "note": "Coffee"}]
+    results = [{"inputIndex": 0, "error": "categoryId not found"}]
+
+    out = runner._retry_category_failures(
+        records, results, wallet, categorizer=categorizer
+    )
+
+    categorizer.invalidate_cache.assert_called_once()
+    wallet.post_records.assert_called_once_with([{"accountId": "x", "note": "Coffee"}])
+    assert out[0]["id"] == "r-retry"
+    assert out[0]["inputIndex"] == 0
+
+
+def test_retry_cache_invalidated_on_category_failure():
+    runner = _make_runner_for_retry()
+    wallet = MagicMock()
+    wallet.post_records.return_value = [{"inputIndex": 0, "id": "r-2", "success": True}]
+    categorizer = _make_categorizer_mock()
+
+    records = [{"categoryId": "cat-bad"}]
+    results = [{"inputIndex": 0, "error": "bad category"}]
+
+    runner._retry_category_failures(records, results, wallet, categorizer=categorizer)
+
+    categorizer.invalidate_cache.assert_called_once()
+
+
+def test_retry_only_failed_categorized_records_are_retried():
+    """Successful records and uncategorized failures are left untouched."""
+    runner = _make_runner_for_retry()
+    wallet = MagicMock()
+    wallet.post_records.return_value = [
+        {"inputIndex": 0, "id": "r-retry", "success": True}
+    ]
+    categorizer = _make_categorizer_mock()
+
+    records = [
+        {"accountId": "a", "categoryId": "cat-bad"},  # 0 — failed, has category → retry
+        {"accountId": "b", "categoryId": "cat-ok"},  # 1 — success, has category → keep
+        {"accountId": "c"},  # 2 — failed, no category → keep error
+    ]
+    results = [
+        {"inputIndex": 0, "error": "bad category"},
+        {"inputIndex": 1, "id": "r-1", "success": True},
+        {"inputIndex": 2, "error": "other error"},
+    ]
+
+    out = runner._retry_category_failures(
+        records, results, wallet, categorizer=categorizer
+    )
+
+    wallet.post_records.assert_called_once_with([{"accountId": "a"}])
+    out_by_index = {r["inputIndex"]: r for r in out}
+    assert out_by_index[0]["id"] == "r-retry"
+    assert out_by_index[1]["id"] == "r-1"
+    assert out_by_index[2]["error"] == "other error"
+
+
+def test_retry_if_retry_also_fails_retry_error_is_returned():
+    """When the retry itself fails, the retry error result is used (not the original)."""
+    runner = _make_runner_for_retry()
+    wallet = MagicMock()
+    wallet.post_records.return_value = [{"inputIndex": 0, "error": "still failing"}]
+    categorizer = _make_categorizer_mock()
+
+    records = [{"categoryId": "cat-bad", "note": "Coffee"}]
+    results = [{"inputIndex": 0, "error": "bad category"}]
+
+    out = runner._retry_category_failures(
+        records, results, wallet, categorizer=categorizer
+    )
+
+    assert out[0]["error"] == "still failing"
+    assert out[0]["inputIndex"] == 0
+
+
+def test_build_batch_exposes_categorizer_in_batch():
+    """build_batch stores the HistoryCategorizer in the returned _Batch."""
+    cfg = _make_cfg(category_strategy="history")
+    runner = SyncRunner(cfg, _make_notifier())
+    repo = _make_repo()
+
+    mock_categorizer = MagicMock(spec=HistoryCategorizer)
+    mock_categorizer.get_category_id.return_value = None
+
+    with (
+        patch("app.main.HistoryCategorizer", return_value=mock_categorizer),
+        patch("app.main.WalletClient") as mock_wallet_cls,
+    ):
+        batch = runner.build_batch(
+            [_card_event()], repo, wallet_client=mock_wallet_cls.return_value
+        )
+
+    assert batch.categorizer is mock_categorizer
+
+
+def test_build_batch_strategy_none_categorizer_is_none():
+    cfg = _make_cfg(category_strategy="none")
+    runner = SyncRunner(cfg, _make_notifier())
+    repo = _make_repo()
+    batch = runner.build_batch([_card_event()], repo)
+    assert batch.categorizer is None

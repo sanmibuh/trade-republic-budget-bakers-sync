@@ -340,7 +340,9 @@ bank-connected syncs).  The `CATEGORY_STRATEGY` env var enables automatic pre-as
 |---|---|
 | `none` (default) | No automatic categorization — fully backwards-compatible |
 | `history` | Enables history-based lookup via `HistoryCategorizer` |
-| `llm` | Reserved for a future iteration (LLM as fallback) |
+
+> `llm` is planned as a future strategy (LLM as fallback) but is **not implemented yet** — setting it
+> will raise `ValueError` at startup.
 
 **`history` strategy flow** (implemented in `app/categorizer.py`):
 1. On the first record of a sync run, `HistoryCategorizer` fetches all Wallet records for the last
@@ -352,9 +354,13 @@ bank-connected syncs).  The `CATEGORY_STRATEGY` env var enables automatic pre-as
 4. `CategoryCache` wraps `WalletClient.get_categories()` with a 24 h TTL to avoid repeated API calls.
    Call `invalidate()` to force a reload on the next access.
 
-The `categoryId` is applied post-handler in `build_records_for_event` (same pattern as `labelIds`)
-and the `HistoryCategorizer` is constructed once per `SyncRunner.build_batch` call and reused across
-all events in that batch.
+The `categoryId` is stamped onto records inside `SyncRunner.build_batch` via `_apply_category`
+(after `build_records_for_event` returns, same phase as `labelIds`).  The `HistoryCategorizer` is
+constructed once per `build_batch` call and reused across all events in that batch.
+
+If the Wallet API rejects a record due to an invalid `categoryId` (e.g. a category was deleted after
+the cache loaded), `SyncRunner._retry_category_failures` invalidates the category cache and retries
+the affected records once without a `categoryId`.
 
 `CATEGORY_STRATEGY` is validated in `config.py`; unknown values raise `ValueError` at startup.
 
