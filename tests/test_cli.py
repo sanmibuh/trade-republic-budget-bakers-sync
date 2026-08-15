@@ -439,3 +439,19 @@ def test_check_session_exits_zero_when_no_auth_state_record(tmp_path, monkeypatc
     with patch("app.config.read_data_dir", return_value=tmp_path):
         result = _runner().invoke(cli, ["check-session"])
     assert result.exit_code == 0
+
+
+def test_check_session_exits_two_when_db_is_unreadable(tmp_path, monkeypatch):
+    """Exit 2 when cookies are valid but sync.db cannot be read (corrupted/locked).
+
+    The bot interprets exit 2 as an unknown state (None) rather than
+    a hard auth failure, preventing false-positive ⚠️ alerts.
+    """
+    _write_valid_cookie(tmp_path)
+    monkeypatch.setenv("INSTANCE", "david")
+    # Write a non-SQLite file so sqlite3.connect raises DatabaseError
+    (tmp_path / "sync.db").write_text("not a sqlite database")
+
+    with patch("app.config.read_data_dir", return_value=tmp_path):
+        result = _runner().invoke(cli, ["check-session"])
+    assert result.exit_code == 2

@@ -2275,3 +2275,24 @@ def test_connect_writes_expired_auth_state_on_session_expired(tmp_path):
 
     with EventRepository(tmp_path / "sync.db") as repo:
         assert repo.get_auth_state("david") == "expired"
+
+
+def test_connect_writes_failed_auth_state_on_authentication_error(tmp_path):
+    """connect() must write status='failed' when AuthenticationError is raised."""
+    from unittest.mock import patch
+
+    from app.main import AuthenticationError, SyncRunner
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    with patch("app.main.TRClient") as MockTR:
+        MockTR.return_value.connect.side_effect = AuthenticationError("auth error")
+        with pytest.raises(AuthenticationError):
+            runner.connect()
+
+    with EventRepository(tmp_path / "sync.db") as repo:
+        assert repo.get_auth_state("david") == "failed"

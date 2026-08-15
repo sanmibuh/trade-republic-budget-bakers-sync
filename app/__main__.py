@@ -83,25 +83,27 @@ def check_session() -> None:
     instance with status ``"failed"`` or ``"expired"``, the command exits 1
     even when a cookies file is present — this catches the case where a failed
     login left the old session file in place.
-    """
-    import os
 
-    from app.config import has_valid_session, read_data_dir
+    Exit codes:
+        0 — session valid and auth state is ``ok`` (or no state recorded yet).
+        1 — session missing, expired, or auth state is ``failed``/``expired``.
+        2 — DB could not be read (corrupted/locked); the bot treats this as
+            an unknown/unreachable state rather than a hard auth failure.
+    """
+    from app.config import has_valid_session, read_data_dir, read_instance
     from app.persistence import EventRepository
 
     data_dir = read_data_dir()
     if not has_valid_session(data_dir):
         sys.exit(1)
 
-    # Resolve the instance name the same way Config.from_env() does.
-    instance = (
-        os.getenv("INSTANCE", "").strip() or os.getenv("OWNER_NAME", "backup").lower()
-    )
-
     db_path = data_dir / "sync.db"
     if db_path.exists():
-        with EventRepository(db_path) as repo:
-            auth_status = repo.get_auth_state(instance)
+        try:
+            with EventRepository(db_path) as repo:
+                auth_status = repo.get_auth_state(read_instance())
+        except Exception:
+            sys.exit(2)
         if auth_status in ("failed", "expired"):
             sys.exit(1)
 

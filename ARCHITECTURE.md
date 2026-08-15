@@ -279,6 +279,8 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   `INSTANCES`, `CONTAINER_PREFIX`, `BACKUP_SERVICE`.
 - `read_data_dir()` — standalone helper that returns the `DATA_DIR` path (default `/app/data`); used by
   `check-session` which only needs the data directory, not full credentials.
+- `read_instance()` — standalone helper that returns the logical instance name (`INSTANCE` env var, falling
+  back to `OWNER_NAME` lowercased); used by `check-session` to look up `auth_state` in `sync.db`.
 - All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
 ### OWNER_NAME

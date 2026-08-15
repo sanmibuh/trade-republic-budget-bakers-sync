@@ -82,6 +82,18 @@ def read_data_dir() -> Path:
     return Path(os.getenv("DATA_DIR", "/app/data"))
 
 
+def read_instance() -> str:
+    """Return the logical instance name for this container.
+
+    Reads ``INSTANCE`` env var; falls back to ``OWNER_NAME`` lowercased
+    (matching the logic in :meth:`Config.from_env`).
+    """
+    instance = os.getenv("INSTANCE", "").strip()
+    if instance:
+        return instance
+    return os.getenv("OWNER_NAME", _DEFAULT_OWNER_NAME).lower()
+
+
 def has_valid_session(data_dir: Path) -> bool:
     """Return True if cookies.txt exists and contains at least one non-expired cookie.
 
