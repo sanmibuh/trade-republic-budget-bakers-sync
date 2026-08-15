@@ -272,6 +272,10 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   validate sync-only credentials, so the backup container can run without them.
 - Both share optional fields: `OWNER_NAME` (default `"Backup"`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
   `DATA_DIR`, `ALLOW_INSECURE_SSL` (default `false`).
+- `Config.dedup_ttl_days` — controls how many days of processed-event records are retained in `sync.db`.
+  Read from `DEDUP_TTL_DAYS` (default `60`). Passed to `EventRepository.purge_old_records(ttl_days=...)`
+  at the start of each normal sync run (`run()`). The resync entry point (`run_resync`) does not purge,
+  as it is a targeted single-day operation.
 - `Config.instance` — logical instance name used for the Telegram 2FA prompt/`/code` routing. Read from
   `INSTANCE`, defaulting to `OWNER_NAME` lowercased (e.g. `david`, `eli`), which already matches the container
   instance name, so it need not be set explicitly in compose.

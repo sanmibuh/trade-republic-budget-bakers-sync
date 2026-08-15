@@ -114,6 +114,37 @@ def test_positive_int_env_rejects_negative(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# DEDUP_TTL_DAYS
+# ---------------------------------------------------------------------------
+
+
+def test_dedup_ttl_days_default(monkeypatch):
+    _set_sync_env(monkeypatch)
+    monkeypatch.delenv("DEDUP_TTL_DAYS", raising=False)
+    assert Config.from_env().dedup_ttl_days == 60
+
+
+def test_dedup_ttl_days_explicit(monkeypatch):
+    _set_sync_env(monkeypatch)
+    monkeypatch.setenv("DEDUP_TTL_DAYS", "90")
+    assert Config.from_env().dedup_ttl_days == 90
+
+
+def test_dedup_ttl_days_rejects_non_integer(monkeypatch):
+    _set_sync_env(monkeypatch)
+    monkeypatch.setenv("DEDUP_TTL_DAYS", "abc")
+    with pytest.raises(ValueError, match="integer"):
+        Config.from_env()
+
+
+def test_dedup_ttl_days_rejects_zero(monkeypatch):
+    _set_sync_env(monkeypatch)
+    monkeypatch.setenv("DEDUP_TTL_DAYS", "0")
+    with pytest.raises(ValueError, match="positive"):
+        Config.from_env()
+
+
+# ---------------------------------------------------------------------------
 # event_id
 # ---------------------------------------------------------------------------
 
@@ -784,6 +815,7 @@ def test_run_excluded_events_not_reprocessed_on_next_run(tmp_path):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
+        cfg.dedup_ttl_days = 60
         mock_cfg_cls.return_value = cfg
 
         runner = mock_runner_cls.return_value
@@ -837,6 +869,7 @@ def test_run_returns_zero_on_success(tmp_path):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
+        cfg.dedup_ttl_days = 60
         mock_cfg_cls.return_value = cfg
 
         runner = mock_runner_cls.return_value
@@ -879,6 +912,7 @@ def test_run_returns_zero_when_no_new_events(tmp_path):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
+        cfg.dedup_ttl_days = 60
         mock_cfg_cls.return_value = cfg
 
         runner = mock_runner_cls.return_value
@@ -937,6 +971,7 @@ def test_run_wallet_error_notifies_and_reraises(tmp_path):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
+        cfg.dedup_ttl_days = 60
         mock_cfg_cls.return_value = cfg
 
         runner = mock_runner_cls.return_value
@@ -967,6 +1002,7 @@ def test_run_logs_warning_when_sync_complete_not_sent(tmp_path):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
+        cfg.dedup_ttl_days = 60
         mock_cfg_cls.return_value = cfg
 
         runner = mock_runner_cls.return_value
@@ -1236,6 +1272,7 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
+        cfg.dedup_ttl_days = 60
         mock_cfg_cls.return_value = cfg
 
         runner = mock_runner_cls.return_value

@@ -508,7 +508,7 @@ def run() -> int:
     since = datetime.now(UTC) - timedelta(days=cfg.lookback_days)
 
     with EventRepository(cfg.data_dir / _SYNC_DB) as repo:
-        repo.purge_old_records()
+        repo.purge_old_records(ttl_days=cfg.dedup_ttl_days)
         runner = SyncRunner(cfg, notifier)
         events = runner.fetch_events(since)
 

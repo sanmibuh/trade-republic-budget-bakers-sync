@@ -132,6 +132,7 @@ class Config:
     telegram_bot_token: str | None
     telegram_chat_id: str | None
     lookback_days: int
+    dedup_ttl_days: int
     data_dir: Path
     instance: str = ""
     allow_insecure_ssl: bool = False
@@ -151,6 +152,7 @@ class Config:
             wallet_cash_account_id=_required_env("WALLET_CASH_ACCOUNT_ID"),
             wallet_portfolio_account_id=_required_env("WALLET_PORTFOLIO_ACCOUNT_ID"),
             lookback_days=_positive_int_env("LOOKBACK_DAYS", default=7),
+            dedup_ttl_days=_positive_int_env("DEDUP_TTL_DAYS", default=60),
             instance=instance,
             label_ids=_read_label_ids(),
         )
