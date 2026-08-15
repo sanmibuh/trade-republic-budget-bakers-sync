@@ -1690,9 +1690,9 @@ def test_docker_container_status_returns_none_on_exception():
         assert _docker_container_status("my-container") is None
 
 
-def test_docker_last_sync_summary_parses_success_from_log():
+def test_docker_last_sync_summary_parses_success_from_db():
     client = _make_docker_client(
-        output=b'{"status":"success","timestamp":"2026-08-11 10:00:00","synced":3,"failed":0,"excluded":1,"synced_at":null}'
+        output=b'{"status":"success","ran_at":"2026-08-11T10:00:00+00:00","saved":3,"failed":0,"excluded":1}'
     )
     with patch("app.bot.docker.from_env", return_value=client):
         result = _docker_last_sync_summary("my-container")
@@ -1703,20 +1703,19 @@ def test_docker_last_sync_summary_parses_success_from_log():
 
 def test_docker_last_sync_summary_uses_explicit_client():
     client = _make_docker_client(
-        output=b'{"status":"success","timestamp":"2026-08-11 10:00:00","synced":1,"failed":0,"excluded":0,"synced_at":null}'
+        output=b'{"status":"success","ran_at":"2026-08-11T10:00:00+00:00","saved":1,"failed":0,"excluded":0}'
     )
     assert _docker_last_sync_summary("my-container", client=client) == (
         "✅ success at 2026/08/11 10:00 UTC · saved 1 · failed 0 · excluded 0"
     )
 
 
-def test_docker_last_sync_summary_falls_back_to_last_synced_at():
-    client = _make_docker_client(
-        output=b'{"status":null,"timestamp":null,"synced":null,"failed":null,"excluded":null,"synced_at":"2026-08-11T10:00:00+00:00"}'
-    )
+def test_docker_last_sync_summary_returns_none_when_no_db_row():
+    """Script returns null (no sync_runs row yet) → return None."""
+    client = _make_docker_client(output=b"null")
     with patch("app.bot.docker.from_env", return_value=client):
         result = _docker_last_sync_summary("my-container")
-    assert result == "✅ last saved event at 2026/08/11 10:00 UTC"
+    assert result is None
 
 
 def test_docker_last_sync_summary_returns_none_on_invalid_payload():
@@ -2036,15 +2035,13 @@ def test_format_sync_timestamp_returns_raw_on_invalid_string():
 
 
 # ---------------------------------------------------------------------------
-# _docker_last_sync_summary — returns None when payload has no status or synced_at
+# _docker_last_sync_summary — returns None when no sync_runs row exists
 # ---------------------------------------------------------------------------
 
 
 def test_docker_last_sync_summary_returns_none_when_empty_payload():
-    """Payload with no status and no synced_at → return None."""
-    client = _make_docker_client(
-        output=b'{"status":null,"timestamp":null,"synced":null,"failed":null,"excluded":null,"synced_at":null}'
-    )
+    """Script returns null (no sync_runs row) → return None."""
+    client = _make_docker_client(output=b"null")
     with patch("app.bot.docker.from_env", return_value=client):
         result = _docker_last_sync_summary("my-container")
     assert result is None
