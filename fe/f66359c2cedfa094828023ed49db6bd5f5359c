@@ -1,0 +1,22 @@
+app/bot.py
+  h_97a91c9e567f87 93-95,99-110,120,975,989-991,993,997-999,1002-1003
+app/main.py
+  h_97a91c9e567f87 128-149,182,189,194,299-312
+app/persistence.py
+  h_97a91c9e567f87 85-95,118,282-325
+tests/test_bot.py
+  h_97a91c9e567f87 1695,1706,1713-1715,1718,2038,2043-2044
+tests/test_main.py
+  h_97a91c9e567f87 729-730,752-753,775-776,801-802,1151-1152,1173-1174,1198-1199,1220-1221,1243-1244,2379-2618
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "fef66359c2cedfa094828023ed49db6bd5f5359c",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
