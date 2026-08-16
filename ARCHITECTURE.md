@@ -26,7 +26,8 @@ app/
   notifier.py       # Notifier — Telegram notifications (transversal)
   bot.py            # TelegramBot — long-polling bot for remote command execution
   logging_setup.py  # Rotating file + console logging; configure_logging() for CLIs
-  main.py           # Sync orchestrator: SyncRunner class + run() / run_login() thin wrappers
+  sync_runner.py    # SyncRunner class + _SyncCounts / _Batch value objects + _build_code_provider
+  main.py           # Thin entry-point layer: run() / run_login() / run_resync() + _prepare bootstrap
 
 docker/
   base/Dockerfile   # python:3.11-slim + git + pip deps (incl. docker SDK); published as python-trade-republic
@@ -154,10 +155,11 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
   `/code`).
 - `run()` (sync) and `run_login()` share `_prepare(cfg)` (data dir + SSL circuit-breaker + logging + `Notifier`)
   as a module-level bootstrap helper.
-- Sync orchestration logic lives in the `SyncRunner` class (`main.py`). Its public methods — `connect`,
+- Sync orchestration logic lives in the `SyncRunner` class (`sync_runner.py`). Its public methods — `connect`,
   `fetch_events`, `build_batch`, `process_results` — accept `cfg` and `notifier` injected via the constructor,
   making dependencies explicit and easy to mock. `run()` and `run_login()` are thin wrappers that call `_prepare`,
-  construct a `SyncRunner`, and delegate to it.
+  construct a `SyncRunner`, and delegate to it. `main.py` re-exports `SyncRunner`, `_SyncCounts`, `_Batch`, and
+  `AuthenticationError` for backward compatibility.
 
 ### Deduplication
 - `processed_events` table in SQLite:
@@ -464,7 +466,8 @@ See `deploy/DEPLOY.md` for setup instructions.
 | `app/__main__.py` | click CLI: `sync`, `backup`, `bot`, `login`, `submit-code`, `check-session`; single entry point |
 | `app/categorizer.py` | `CategoryCache` (24 h TTL) + `HistoryCategorizer` (history-based majority-vote category assignment) |
 | `app/http_client.py` | SSL circuit-breaker shared by notifier and wallet_client; `http_post`, `build_session` |
-| `app/main.py` | `SyncRunner` class (`connect`, `fetch_events`, `build_batch`, `process_results`, `resync_day`) + `run()` / `run_login()` / `run_resync()` thin wrappers; `_prepare` bootstrap helper |
+| `app/sync_runner.py` | `SyncRunner` class (`connect`, `fetch_events`, `build_batch`, `process_results`, `resync_day`); `_SyncCounts`, `_Batch` value objects; `_build_code_provider` |
+| `app/main.py` | Thin entry-point layer: `run()`, `run_login()`, `run_resync()`, `_prepare` bootstrap helper; re-exports `SyncRunner` etc. from `sync_runner` |
 | `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |
 | `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions; `connect` uses a `code_provider` |
 | `app/twofa.py` | `TerminalCodeProvider`, `TelegramCodeProvider`, `select_code_provider`; `CODE_FILENAME` |

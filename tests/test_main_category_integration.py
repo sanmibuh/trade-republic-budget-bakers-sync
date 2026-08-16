@@ -8,9 +8,9 @@ import pytest
 
 from app.categorizer import HistoryCategorizer
 from app.config import Config
-from app.main import SyncRunner
 from app.notifier import Notifier
 from app.persistence import EventRepository
+from app.sync_runner import SyncRunner
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -90,8 +90,8 @@ def test_build_batch_strategy_history_assigns_category():
     mock_categorizer.get_category_id.return_value = "cat-food"
 
     with (
-        patch("app.main.HistoryCategorizer", return_value=mock_categorizer),
-        patch("app.main.WalletClient") as mock_wallet_cls,
+        patch("app.sync_runner.HistoryCategorizer", return_value=mock_categorizer),
+        patch("app.sync_runner.WalletClient") as mock_wallet_cls,
     ):
         batch = runner.build_batch(
             [_card_event("Starbucks")],
@@ -112,8 +112,8 @@ def test_build_batch_strategy_history_no_match_omits_category():
     mock_categorizer.get_category_id.return_value = None
 
     with (
-        patch("app.main.HistoryCategorizer", return_value=mock_categorizer),
-        patch("app.main.WalletClient") as mock_wallet_cls,
+        patch("app.sync_runner.HistoryCategorizer", return_value=mock_categorizer),
+        patch("app.sync_runner.WalletClient") as mock_wallet_cls,
     ):
         batch = runner.build_batch(
             [_card_event("NewMerchant")],
@@ -136,8 +136,10 @@ def test_build_batch_strategy_history_categorizer_reused_across_events():
     events = [_card_event("Starbucks"), _card_event("Costa")]
 
     with (
-        patch("app.main.HistoryCategorizer", return_value=mock_categorizer) as mock_cls,
-        patch("app.main.WalletClient") as mock_wallet_cls,
+        patch(
+            "app.sync_runner.HistoryCategorizer", return_value=mock_categorizer
+        ) as mock_cls,
+        patch("app.sync_runner.WalletClient") as mock_wallet_cls,
     ):
         runner.build_batch(events, repo, wallet_client=mock_wallet_cls.return_value)
 
@@ -155,8 +157,8 @@ def test_build_batch_strategy_history_zero_amount_not_categorized():
     mock_categorizer.get_category_id.return_value = "cat-food"
 
     with (
-        patch("app.main.HistoryCategorizer", return_value=mock_categorizer),
-        patch("app.main.WalletClient") as mock_wallet_cls,
+        patch("app.sync_runner.HistoryCategorizer", return_value=mock_categorizer),
+        patch("app.sync_runner.WalletClient") as mock_wallet_cls,
     ):
         batch = runner.build_batch(
             [_card_event("Zero", amount=0.0)],
@@ -371,8 +373,8 @@ def test_build_batch_exposes_categorizer_in_batch():
     mock_categorizer.get_category_id.return_value = None
 
     with (
-        patch("app.main.HistoryCategorizer", return_value=mock_categorizer),
-        patch("app.main.WalletClient") as mock_wallet_cls,
+        patch("app.sync_runner.HistoryCategorizer", return_value=mock_categorizer),
+        patch("app.sync_runner.WalletClient") as mock_wallet_cls,
     ):
         batch = runner.build_batch(
             [_card_event()], repo, wallet_client=mock_wallet_cls.return_value
