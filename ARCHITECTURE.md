@@ -4,8 +4,8 @@ Technical reference for developers and AI assistants. Covers module design, data
 and deployment context.
 
 > **Maintenance rule (for AI assistants and contributors):** update this file whenever a module is added, renamed, or
-> removed; a key design decision changes; the SQLite schema changes; the test count or file list changes; or a new
-> workflow is introduced. Keep it in sync with the code — stale docs are worse than no docs.
+> removed; a key design decision changes; the SQLite schema changes; or a new workflow is introduced.
+> Keep it in sync with the code — stale docs are worse than no docs.
 
 ---
 
@@ -27,7 +27,7 @@ app/
   bot.py            # TelegramBot — long-polling bot for remote command execution (wires bot_docker + bot_keyboards)
   bot_docker.py     # Docker exec helpers: _docker_exec_silent, _docker_check_session, container introspection
   bot_keyboards.py  # Inline keyboard builders: backup type/period pickers, instance pickers, date pickers
-  logging_setup.py  # Rotating file + console logging; configure_logging() for CLIs
+  logging_setup.py  # setup_logging(data_dir) for daemons (rotating file + console); configure_logging() for CLI entry points (console only)
   sync_runner.py    # SyncRunner class + _SyncCounts / _Batch value objects + _build_code_provider
   main.py           # Thin entry-point layer: run() / run_login() / run_resync() + _prepare bootstrap
 
@@ -460,28 +460,3 @@ make run-bot                           # Telegram bot
 ```
 
 See `deploy/DEPLOY.md` for setup instructions.
-
----
-
-## Relevant files (quick reference)
-
-| File | Role |
-|---|---|
-| `app/__main__.py` | click CLI: `sync`, `backup`, `bot`, `login`, `submit-code`, `check-session`; single entry point |
-| `app/categorizer.py` | `CategoryCache` (24 h TTL) + `HistoryCategorizer` (history-based majority-vote category assignment) |
-| `app/http_client.py` | SSL circuit-breaker shared by notifier and wallet_client; `http_post`, `build_session` |
-| `app/sync_runner.py` | `SyncRunner` class (`connect`, `fetch_events`, `build_batch`, `_notify_fetch_summary`, `_submit_batch`, `process_results`, `resync_day`); `_SyncCounts`, `_Batch` value objects; `_build_code_provider` |
-| `app/main.py` | Thin entry-point layer: `run()`, `run_login()`, `run_resync()`, `_prepare` bootstrap helper; re-exports `SyncRunner` etc. from `sync_runner` |
-| `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |
-| `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions; `connect` uses a `code_provider` |
-| `app/twofa.py` | `TerminalCodeProvider`, `TelegramCodeProvider`, `select_code_provider`; `CODE_FILENAME` |
-| `app/tr_mapper.py` | `_build_note`, `_note_extras`, `_HANDLERS`, `KNOWN_EVENT_TYPES`, `_make_record` |
-| `app/persistence.py` | `EventRepository`, `dedup_event_id`; `INSERT OR IGNORE`; `get_wallet_record_id` |
-| `app/config.py` | `Config`, `BackupConfig`, `BotEnv` dataclasses; `read_data_dir()`; `_read_label_ids()` |
-| `app/wallet_client.py` | `post_records` (sync) + `put_record` (resync) + `_get_all`/`_collect_page` + `get_*` (backup) |
-| `app/bot.py` | `TelegramBot` — polling loop, command handlers; wires `bot_docker` + `bot_keyboards`; re-exports all symbols |
-| `app/bot_docker.py` | Docker exec helpers: `_docker_exec_silent`, `_docker_check_session`, container introspection |
-| `app/bot_keyboards.py` | Stateless inline keyboard builders: backup pickers, instance pickers, resync date picker |
-| `app/logging_setup.py` | `setup_logging(data_dir)` for daemon; `configure_logging()` for CLI entry points |
-| `docker/app/entrypoint.sh` | `MODE=sync\|backup\|bot`; cron or one-shot depending on schedule vars |
-| `VERSION` | Single source of truth for the release version; bumping on `main` triggers the full release pipeline |
