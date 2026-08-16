@@ -1,0 +1,19 @@
+.github/scripts/gemini_review.py
+  s_3d3b541fe56656::t_1deabf80023636 1-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "0712f35305f4c46aab01d81f9b361e436f0efcba",
+  "prompts": {},
+  "sessions": {
+    "s_3d3b541fe56656": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ff386ff89ffeE5jklsjGayjRnV",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
