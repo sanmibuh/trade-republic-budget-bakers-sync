@@ -1,0 +1,18 @@
+app/main.py
+  h_97a91c9e567f87 18,42
+app/sync_runner.py
+  h_97a91c9e567f87 332
+tests/test_main_category_integration.py
+  h_97a91c9e567f87 366-398
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "aafe67382de7f5ccac8e70f530799e700c374564",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
