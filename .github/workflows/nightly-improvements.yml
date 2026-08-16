@@ -2,7 +2,7 @@ name: Nightly Improvements
 
 on:
   schedule:
-    - cron: "30 2 * * 1-5" # Weekdays at 02:30 UTC
+    - cron: "0 4 * * *" # Every day at 04:00 UTC
   workflow_dispatch:
     inputs:
       skip_autofix:
@@ -12,6 +12,11 @@ on:
         default: false
       skip_suggestions:
         description: "Skip suggestions job"
+        required: false
+        type: boolean
+        default: false
+      skip_ai_review:
+        description: "Skip AI review job"
         required: false
         type: boolean
         default: false
@@ -314,3 +319,150 @@ jobs:
             --title "$TITLE" \
             --body "$BODY" \
             --label "$LABELS"
+
+  ai-review:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_ai_review }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build code snapshot
+        run: |
+          {
+            for guide in AGENTS.md ARCHITECTURE.md; do
+              if [ -f "$guide" ]; then
+                echo "=== FILE: $guide ==="
+                cat "$guide"
+                echo ""
+              fi
+            done
+            echo "=== PROJECT STRUCTURE ==="
+            find app tests -name "*.py" | sort
+            echo ""
+            find app tests -name "*.py" | sort | while read -r f; do
+              echo "=== FILE: $f ==="
+              cat "$f"
+              echo ""
+            done
+          } > code_snapshot.txt
+
+      - name: Fetch open AI review issues
+        run: |
+          gh api \
+            "repos/${{ github.repository }}/issues?labels=ai-review&state=open&per_page=100" \
+            --jq '[.[] | select(.pull_request == null) | {number: .number, title: .title, body: .body}]' \
+            > open_issues.json
+          echo "Open ai-review issues:"
+          cat open_issues.json
+
+      - name: Run Gemini review
+        if: env.GEMINI_API_KEY != ''
+        run: |
+          echo "[]" > run-results.json
+          mapfile -t MODELS < <(grep -v '^#' .github/gemini-models.txt | grep -v '^[[:space:]]*$')
+          if [ ${#MODELS[@]} -eq 0 ]; then
+            echo "Error: .github/gemini-models.txt is empty or missing." >&2
+            exit 1
+          fi
+          for MODEL in "${MODELS[@]}"; do
+            echo "Trying model: $MODEL"
+            if python3 .github/scripts/gemini_review.py "$MODEL"; then
+              python3 .github/scripts/accumulate_attempt.py
+              break
+            else
+              EXIT=$?
+              python3 .github/scripts/accumulate_attempt.py
+              if [ $EXIT -eq 2 ]; then
+                echo "Model $MODEL skipped (not available, quota exceeded, or response issue), trying next..."
+                continue
+              else
+                exit $EXIT
+              fi
+            fi
+          done
+
+      - name: Create issues for new findings
+        if: env.GEMINI_API_KEY != '' && hashFiles('findings.json') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { model, findings } = JSON.parse(fs.readFileSync('findings.json', 'utf8'));
+
+            if (findings.length === 0) {
+              console.log('No new findings — nothing to create.');
+              return;
+            }
+
+            const label = 'ai-review';
+            const modelLabel = `model: ${model}`;
+            const priorityLabel = { high: '🔴', medium: '🟡', low: '🟢' };
+
+            // Ensure ai-review label exists
+            try {
+              await github.rest.issues.getLabel({ owner: context.repo.owner, repo: context.repo.repo, name: label });
+            } catch {
+              await github.rest.issues.createLabel({ owner: context.repo.owner, repo: context.repo.repo, name: label, color: '8B5CF6', description: 'Automated AI code review' });
+            }
+
+            // Replace any existing model:* labels with the current one
+            const existingLabels = await github.paginate(github.rest.issues.listLabelsForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            for (const l of existingLabels) {
+              if (l.name.startsWith('model: ') && l.name !== modelLabel) {
+                try {
+                  await github.rest.issues.deleteLabel({ owner: context.repo.owner, repo: context.repo.repo, name: l.name });
+                  console.log(`Deleted stale label: ${l.name}`);
+                } catch (e) {
+                  if (e.status !== 404) throw e;
+                }
+              }
+            }
+            try {
+              await github.rest.issues.getLabel({ owner: context.repo.owner, repo: context.repo.repo, name: modelLabel });
+            } catch {
+              await github.rest.issues.createLabel({ owner: context.repo.owner, repo: context.repo.repo, name: modelLabel, color: '0EA5E9', description: `Review generated by ${model}` });
+            }
+
+            for (const finding of findings) {
+              const priority = priorityLabel[finding.priority] ?? '🟢';
+              const footer = `\n\n---\n> ${priority} ${finding.priority} priority · Model: ${model} · ${new Date().toUTCString()}`;
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: finding.title,
+                body: finding.body + footer,
+                labels: [label, modelLabel]
+              });
+              console.log(`Created issue: ${finding.title}`);
+            }
+
+      - name: Persist model stats
+        if: env.GEMINI_API_KEY != '' && hashFiles('run-results.json') != ''
+        run: |
+          WORK_DIR="$(mktemp -d)"
+          cp run-results.json "$WORK_DIR/run-results.json"
+          cp .github/scripts/persist_model_stats.py "$WORK_DIR/persist_model_stats.py"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin ci-data
+          git checkout ci-data
+
+          python3 "$WORK_DIR/persist_model_stats.py" "$WORK_DIR/run-results.json"
+
+          git add model-stats.json model-summary.json
+          git diff --cached --quiet || git commit -m "chore(stats): nightly model usage $(date -u +%Y-%m-%d)"
+          git push origin ci-data
