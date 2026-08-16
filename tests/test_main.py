@@ -506,8 +506,8 @@ def test_filter_by_lookback_until_none_behaves_as_before():
 
 def test_build_batch_notifies_on_unknown_event_type(tmp_path):
     from app.config import Config
-    from app.main import SyncRunner
     from app.notifier import Notifier
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock(spec=Config)
     cfg.wallet_cash_account_id = "cash"
@@ -530,8 +530,8 @@ def test_build_batch_notifies_on_unknown_event_type(tmp_path):
 
 def test_build_batch_no_notification_for_known_event_type(tmp_path):
     from app.config import Config
-    from app.main import SyncRunner
     from app.notifier import Notifier
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock(spec=Config)
     cfg.wallet_cash_account_id = "cash"
@@ -559,8 +559,8 @@ def test_build_batch_no_notification_for_known_event_type(tmp_path):
 
 def test_build_batch_excludes_zero_amount_event(tmp_path):
     from app.config import Config
-    from app.main import SyncRunner
     from app.notifier import Notifier
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock(spec=Config)
     cfg.wallet_cash_account_id = "cash"
@@ -592,7 +592,7 @@ def test_build_batch_excludes_zero_amount_event(tmp_path):
 def test_fetch_events_login_failed_exits():
     from unittest.mock import patch
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
     from app.tr_client import LoginFailedError
 
     cfg = MagicMock()
@@ -600,7 +600,7 @@ def test_fetch_events_login_failed_exits():
     runner = SyncRunner(cfg, notifier)
     since = datetime.now(UTC)
 
-    with patch("app.main.TRClient") as MockTR:
+    with patch("app.sync_runner.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = LoginFailedError("bad pin")
         with pytest.raises(SystemExit) as exc_info:
             runner.fetch_events(since)
@@ -612,7 +612,7 @@ def test_fetch_events_login_failed_exits():
 def test_fetch_events_session_expired_exits():
     from unittest.mock import patch
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
     from app.tr_client import SessionExpiredError
 
     cfg = MagicMock()
@@ -620,7 +620,7 @@ def test_fetch_events_session_expired_exits():
     runner = SyncRunner(cfg, notifier)
     since = datetime.now(UTC)
 
-    with patch("app.main.TRClient") as MockTR:
+    with patch("app.sync_runner.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = SessionExpiredError("needs bootstrap")
         with pytest.raises(SystemExit) as exc_info:
             runner.fetch_events(since)
@@ -635,7 +635,7 @@ def test_fetch_events_http_401_exits():
 
     from requests import HTTPError
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     notifier = MagicMock()
@@ -646,7 +646,7 @@ def test_fetch_events_http_401_exits():
     err.response = MagicMock()
     err.response.status_code = 401
 
-    with patch("app.main.TRClient") as MockTR:
+    with patch("app.sync_runner.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = err
         with pytest.raises(SystemExit) as exc_info:
             runner.fetch_events(since)
@@ -660,7 +660,7 @@ def test_fetch_events_http_non_401_reraises():
 
     from requests import HTTPError
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     notifier = MagicMock()
@@ -671,7 +671,7 @@ def test_fetch_events_http_non_401_reraises():
     err.response = MagicMock()
     err.response.status_code = 500
 
-    with patch("app.main.TRClient") as MockTR:
+    with patch("app.sync_runner.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = err
         with pytest.raises(HTTPError):
             runner.fetch_events(since)
@@ -682,7 +682,7 @@ def test_fetch_events_http_non_401_reraises():
 def test_fetch_events_unexpected_exception_reraises():
     from unittest.mock import patch
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     notifier = MagicMock()
@@ -690,7 +690,7 @@ def test_fetch_events_unexpected_exception_reraises():
     since = datetime.now(UTC)
 
     boom = RuntimeError("unexpected")
-    with patch("app.main.TRClient") as MockTR:
+    with patch("app.sync_runner.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = boom
         with pytest.raises(RuntimeError):
             runner.fetch_events(since)
@@ -702,7 +702,7 @@ def test_handle_http_error_401_raises_system_exit(tmp_path):
     """_handle_http_error must raise SystemExit(1) and notify for 401 responses."""
     from requests import HTTPError
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
@@ -725,7 +725,7 @@ def test_handle_http_error_non_401_notifies_error(tmp_path):
     """_handle_http_error must call notifier.error and return for non-401 responses."""
     from requests import HTTPError
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
@@ -747,7 +747,7 @@ def test_handle_http_error_none_response_notifies_error(tmp_path):
     """_handle_http_error must handle exc.response being None without crashing."""
     from requests import HTTPError
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
@@ -766,7 +766,7 @@ def test_handle_http_error_none_response_notifies_error(tmp_path):
 def test_fetch_events_success_returns_events():
     from unittest.mock import patch
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     notifier = MagicMock()
@@ -774,7 +774,7 @@ def test_fetch_events_success_returns_events():
     since = datetime.now(UTC)
     fake_events = [{"id": "e1"}, {"id": "e2"}]
 
-    with patch("app.main.TRClient") as MockTR:
+    with patch("app.sync_runner.TRClient") as MockTR:
         MockTR.return_value.fetch_timeline_events.return_value = fake_events
         result = runner.fetch_events(since)
 
@@ -787,8 +787,8 @@ def test_fetch_events_success_returns_events():
 
 
 def test_process_results_marks_successful_events(tmp_path):
-    from app.main import SyncRunner
     from app.notifier import Notifier
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.instance = "david"
@@ -810,8 +810,8 @@ def test_process_results_marks_successful_events(tmp_path):
 
 
 def test_process_results_counts_failures(tmp_path):
-    from app.main import SyncRunner
     from app.notifier import Notifier
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.instance = "david"
@@ -833,8 +833,8 @@ def test_process_results_counts_failures(tmp_path):
 
 
 def test_process_results_skips_events_with_no_records(tmp_path):
-    from app.main import SyncRunner
     from app.notifier import Notifier
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.instance = "david"
@@ -859,8 +859,8 @@ def test_process_results_preserves_excluded_count(tmp_path):
     Regression: previously the caller had to re-assign counts.excluded after
     calling process_results, which was fragile and easy to delete silently.
     """
-    from app.main import SyncRunner
     from app.notifier import Notifier
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.instance = "david"
@@ -922,7 +922,7 @@ def test_run_excluded_events_not_reprocessed_on_next_run(tmp_path):
         # Simulate build_batch marking the event as processed in a real repo
         # and returning an empty batch (all excluded)
         def fake_build_batch(new_events, repo, *, wallet_client=None):
-            from app.main import _Batch
+            from app.sync_runner import _Batch
 
             for ev in new_events:
                 repo.mark_processed(ev)
@@ -1031,7 +1031,7 @@ def test_run_authentication_error_exits(tmp_path):
     """except AuthenticationError branch in fetch_events — simulate via patching."""
     from unittest.mock import patch
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     notifier = MagicMock()
@@ -1042,7 +1042,7 @@ def test_run_authentication_error_exits(tmp_path):
 
     AuthErr = main_module.AuthenticationError
 
-    with patch("app.main.TRClient") as MockTR:
+    with patch("app.sync_runner.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = AuthErr("auth required")
         with pytest.raises(SystemExit) as exc_info:
             runner.fetch_events(since)
@@ -1209,8 +1209,8 @@ def test_get_wallet_record_id_returns_none_when_id_is_null(tmp_path):
 
 
 def test_process_results_passes_wallet_record_id(tmp_path):
-    from app.main import SyncRunner
     from app.notifier import Notifier
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.instance = "david"
@@ -1231,8 +1231,8 @@ def test_process_results_passes_wallet_record_id(tmp_path):
 
 def test_process_results_stores_joined_ids_for_multi_record_event(tmp_path):
     """An event that maps to 2 Wallet records stores both IDs joined by comma."""
-    from app.main import SyncRunner
     from app.notifier import Notifier
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.instance = "david"
@@ -1256,8 +1256,8 @@ def test_process_results_stores_joined_ids_for_multi_record_event(tmp_path):
 
 def test_process_results_no_wallet_id_when_result_has_no_id(tmp_path):
     """If the API result has no 'id' field, wallet_record_id is stored as None."""
-    from app.main import SyncRunner
     from app.notifier import Notifier
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.instance = "david"
@@ -1278,8 +1278,8 @@ def test_process_results_no_wallet_id_when_result_has_no_id(tmp_path):
 
 def test_process_results_missing_index_counts_as_failure(tmp_path):
     """An event whose record index is absent from API results is not marked processed."""
-    from app.main import SyncRunner
     from app.notifier import Notifier
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.instance = "david"
@@ -1301,8 +1301,8 @@ def test_process_results_missing_index_counts_as_failure(tmp_path):
 
 def test_process_results_missing_index_notifies(tmp_path):
     """A missing result index triggers a warning via notifier."""
-    from app.main import SyncRunner
     from app.notifier import Notifier
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.instance = "david"
@@ -1420,8 +1420,8 @@ def test_run_login_connects_and_returns_zero(tmp_path):
         patch("app.main.setup_logging"),
         patch("app.main.http_client.configure"),
         patch("app.main.Notifier") as mock_notifier_cls,
-        patch("app.main.TRClient") as MockTR,
-        patch("app.main._build_code_provider", return_value=MagicMock()),
+        patch("app.sync_runner.TRClient") as MockTR,
+        patch("app.sync_runner._build_code_provider", return_value=MagicMock()),
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
@@ -1447,8 +1447,8 @@ def test_run_login_session_expired_notifies_and_exits(tmp_path):
         patch("app.main.setup_logging"),
         patch("app.main.http_client.configure"),
         patch("app.main.Notifier") as mock_notifier_cls,
-        patch("app.main.TRClient") as MockTR,
-        patch("app.main._build_code_provider", return_value=None),
+        patch("app.sync_runner.TRClient") as MockTR,
+        patch("app.sync_runner._build_code_provider", return_value=None),
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
@@ -1473,8 +1473,8 @@ def test_run_login_login_failed_notifies_and_exits(tmp_path):
         patch("app.main.setup_logging"),
         patch("app.main.http_client.configure"),
         patch("app.main.Notifier") as mock_notifier_cls,
-        patch("app.main.TRClient") as MockTR,
-        patch("app.main._build_code_provider", return_value=MagicMock()),
+        patch("app.sync_runner.TRClient") as MockTR,
+        patch("app.sync_runner._build_code_provider", return_value=MagicMock()),
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
@@ -1498,8 +1498,8 @@ def test_run_login_unexpected_error_notifies_and_exits(tmp_path):
         patch("app.main.setup_logging"),
         patch("app.main.http_client.configure"),
         patch("app.main.Notifier") as mock_notifier_cls,
-        patch("app.main.TRClient") as MockTR,
-        patch("app.main._build_code_provider", return_value=MagicMock()),
+        patch("app.sync_runner.TRClient") as MockTR,
+        patch("app.sync_runner._build_code_provider", return_value=MagicMock()),
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
@@ -1552,7 +1552,7 @@ def test_prepare_configures_environment_and_returns_notifier(tmp_path):
 def test_connect_builds_client_and_calls_connect_with_code_provider():
     from unittest.mock import patch
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.phone_number = "+49123"
@@ -1563,8 +1563,10 @@ def test_connect_builds_client_and_calls_connect_with_code_provider():
     provider = MagicMock()
 
     with (
-        patch("app.main.TRClient") as MockTR,
-        patch("app.main._build_code_provider", return_value=provider) as mock_build,
+        patch("app.sync_runner.TRClient") as MockTR,
+        patch(
+            "app.sync_runner._build_code_provider", return_value=provider
+        ) as mock_build,
     ):
         result = runner.connect()
 
@@ -1645,7 +1647,7 @@ def test_mark_processed_force_falls_back_to_str_on_type_error(tmp_path, monkeypa
 
 def _make_runner_with_mocks():
     """Return a (runner, cfg, notifier) tuple with MagicMock deps."""
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.wallet_cash_account_id = "cash-id"
@@ -1690,11 +1692,11 @@ def test_resync_day_skips_dedup_filter(tmp_path):
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
             patch(
-                "app.main.filter_by_lookback",
+                "app.sync_runner.filter_by_lookback",
                 return_value=[event],
             ),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[{"accountId": "cash-id"}],
             ),
         ):
@@ -1720,9 +1722,9 @@ def test_resync_day_updates_existing_records_via_put(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[{"accountId": "cash-id"}],
             ),
         ):
@@ -1751,9 +1753,9 @@ def test_resync_day_inserts_new_events_via_post(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[{"accountId": "cash-id"}],
             ),
         ):
@@ -1779,9 +1781,9 @@ def test_resync_day_multi_record_event_put_called_for_each_id(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[
                     {"accountId": "cash-id"},
                     {"accountId": "portfolio-id"},
@@ -1808,8 +1810,8 @@ def test_resync_day_excluded_zero_amount_events_marked_force(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
-            patch("app.main.build_records_for_event", return_value=[]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.build_records_for_event", return_value=[]),
         ):
             runner.resync_day("2026-07-15", repo, wallet_client)
 
@@ -1841,8 +1843,11 @@ def test_resync_day_returns_counts(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=events),
-            patch("app.main.filter_by_lookback", return_value=events),
-            patch("app.main.build_records_for_event", side_effect=_fake_build_records),
+            patch("app.sync_runner.filter_by_lookback", return_value=events),
+            patch(
+                "app.sync_runner.build_records_for_event",
+                side_effect=_fake_build_records,
+            ),
         ):
             counts = runner.resync_day("2026-07-15", repo, wallet_client)
 
@@ -1963,8 +1968,8 @@ def test_resync_day_unknown_event_type_notifies(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
-            patch("app.main.build_records_for_event", return_value=[]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.build_records_for_event", return_value=[]),
         ):
             runner.resync_day("2026-07-15", repo, wallet_client)
 
@@ -1987,9 +1992,9 @@ def test_resync_day_put_failure_increments_failed(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[{"accountId": "cash-id"}],
             ),
         ):
@@ -2014,9 +2019,9 @@ def test_resync_day_post_failure_for_new_event_increments_failed(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[{"accountId": "cash-id"}],
             ),
         ):
@@ -2041,9 +2046,9 @@ def test_resync_day_post_item_error_field_increments_failed(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[{"accountId": "cash-id"}],
             ),
         ):
@@ -2070,9 +2075,9 @@ def test_resync_day_post_missing_result_increments_failed(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[
                     {"accountId": "cash-id"},
                     {"accountId": "portfolio-id"},
@@ -2105,9 +2110,9 @@ def test_resync_day_extra_subrecord_post_item_error_increments_failed(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[
                     {"accountId": "cash-id"},
                     {"accountId": "portfolio-id"},
@@ -2137,9 +2142,9 @@ def test_resync_day_extra_subrecord_empty_post_response_increments_failed(tmp_pa
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[
                     {"accountId": "cash-id"},
                     {"accountId": "portfolio-id"},
@@ -2178,9 +2183,9 @@ def test_resync_day_post_preserves_inputindex_order(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[
                     {"accountId": "cash-id"},
                     {"accountId": "portfolio-id"},
@@ -2213,9 +2218,9 @@ def test_resync_day_extra_subrecord_falls_back_to_post(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[
                     {"accountId": "cash-id"},
                     {"accountId": "portfolio-id"},
@@ -2251,9 +2256,9 @@ def test_resync_day_extra_subrecord_post_failure_increments_failed(tmp_path):
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.main.filter_by_lookback", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
             patch(
-                "app.main.build_records_for_event",
+                "app.sync_runner.build_records_for_event",
                 return_value=[
                     {"accountId": "cash-id"},
                     {"accountId": "portfolio-id"},
@@ -2363,7 +2368,7 @@ def test_connect_writes_ok_auth_state_on_success(tmp_path):
     """connect() must write status='ok' to auth_state when login succeeds."""
     from unittest.mock import patch
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
@@ -2371,7 +2376,7 @@ def test_connect_writes_ok_auth_state_on_success(tmp_path):
     notifier = MagicMock()
     runner = SyncRunner(cfg, notifier)
 
-    with patch("app.main.TRClient"):
+    with patch("app.sync_runner.TRClient"):
         runner.connect()
 
     with EventRepository(tmp_path / "sync.db") as repo:
@@ -2382,7 +2387,7 @@ def test_connect_writes_failed_auth_state_on_login_failed(tmp_path):
     """connect() must write status='failed' when LoginFailedError is raised."""
     from unittest.mock import patch
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
     from app.tr_client import LoginFailedError
 
     cfg = MagicMock()
@@ -2391,7 +2396,7 @@ def test_connect_writes_failed_auth_state_on_login_failed(tmp_path):
     notifier = MagicMock()
     runner = SyncRunner(cfg, notifier)
 
-    with patch("app.main.TRClient") as MockTR:
+    with patch("app.sync_runner.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = LoginFailedError("bad pin")
         with pytest.raises(LoginFailedError):
             runner.connect()
@@ -2404,7 +2409,7 @@ def test_connect_writes_expired_auth_state_on_session_expired(tmp_path):
     """connect() must write status='expired' when SessionExpiredError is raised."""
     from unittest.mock import patch
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
     from app.tr_client import SessionExpiredError
 
     cfg = MagicMock()
@@ -2413,7 +2418,7 @@ def test_connect_writes_expired_auth_state_on_session_expired(tmp_path):
     notifier = MagicMock()
     runner = SyncRunner(cfg, notifier)
 
-    with patch("app.main.TRClient") as MockTR:
+    with patch("app.sync_runner.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = SessionExpiredError("expired")
         with pytest.raises(SessionExpiredError):
             runner.connect()
@@ -2426,7 +2431,7 @@ def test_connect_writes_failed_auth_state_on_authentication_error(tmp_path):
     """connect() must write status='failed' when AuthenticationError is raised."""
     from unittest.mock import patch
 
-    from app.main import AuthenticationError, SyncRunner
+    from app.sync_runner import AuthenticationError, SyncRunner
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
@@ -2434,7 +2439,7 @@ def test_connect_writes_failed_auth_state_on_authentication_error(tmp_path):
     notifier = MagicMock()
     runner = SyncRunner(cfg, notifier)
 
-    with patch("app.main.TRClient") as MockTR:
+    with patch("app.sync_runner.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = AuthenticationError("auth error")
         with pytest.raises(AuthenticationError):
             runner.connect()
@@ -2550,7 +2555,7 @@ def test_set_sync_run_stores_ran_at_timestamp(tmp_path):
 
 def test_process_results_persists_sync_run_success(tmp_path):
     """process_results must write a success sync_run row when all events succeed."""
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
@@ -2580,7 +2585,7 @@ def test_process_results_persists_sync_run_success(tmp_path):
 
 def test_process_results_persists_sync_run_partial(tmp_path):
     """process_results must write a partial sync_run when some events fail."""
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
@@ -2611,7 +2616,7 @@ def test_process_results_persists_sync_run_partial(tmp_path):
 
 def test_process_results_persists_sync_run_failed(tmp_path):
     """process_results must write a failed sync_run when all events fail."""
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
@@ -2640,7 +2645,7 @@ def test_fetch_events_persists_failed_sync_run_on_login_error(tmp_path):
     """fetch_events must write a failed sync_run when LoginFailedError is raised."""
     from unittest.mock import patch
 
-    from app.main import SyncRunner
+    from app.sync_runner import SyncRunner
     from app.tr_client import LoginFailedError
 
     cfg = MagicMock()
@@ -2650,7 +2655,7 @@ def test_fetch_events_persists_failed_sync_run_on_login_error(tmp_path):
     runner = SyncRunner(cfg, notifier)
     since = datetime(2024, 1, 1, tzinfo=UTC)
 
-    with patch("app.main.TRClient") as MockTR:
+    with patch("app.sync_runner.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = LoginFailedError("fail")
         with pytest.raises(SystemExit):
             runner.fetch_events(since)
@@ -2665,7 +2670,7 @@ def test_fetch_events_persists_failed_sync_run_on_auth_error(tmp_path):
     """fetch_events must write a failed sync_run when AuthenticationError is raised."""
     from unittest.mock import patch
 
-    from app.main import AuthenticationError, SyncRunner
+    from app.sync_runner import AuthenticationError, SyncRunner
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
@@ -2674,7 +2679,7 @@ def test_fetch_events_persists_failed_sync_run_on_auth_error(tmp_path):
     runner = SyncRunner(cfg, notifier)
     since = datetime(2024, 1, 1, tzinfo=UTC)
 
-    with patch("app.main.TRClient") as MockTR:
+    with patch("app.sync_runner.TRClient") as MockTR:
         MockTR.return_value.connect.side_effect = AuthenticationError("auth")
         with pytest.raises(SystemExit):
             runner.fetch_events(since)
