@@ -424,6 +424,79 @@ class SyncRunner:
         return counts
 
     # ------------------------------------------------------------------
+    # run() orchestration helpers
+    # ------------------------------------------------------------------
+
+    def _notify_fetch_summary(
+        self,
+        since: datetime,
+        recent_events: list[dict[str, Any]],
+        new_events: list[dict[str, Any]],
+    ) -> int:
+        """Log and notify about the fetch results.
+
+        Args:
+            since:         Start of the lookback window.
+            recent_events: All events within the lookback window.
+            new_events:    Subset of *recent_events* not yet processed (after dedup).
+
+        Returns:
+            The number of skipped (already-processed) events.
+        """
+        skipped_count = len(recent_events) - len(new_events)
+        log.info("%d new events to sync (after dedup)", len(new_events))
+        self._notifier.fetch_summary(
+            since=since.strftime("%Y-%m-%d"),
+            until=datetime.now(UTC).strftime("%Y-%m-%d"),
+            fetched=len(recent_events),
+            new=len(new_events),
+            skipped=skipped_count,
+        )
+        return skipped_count
+
+    def _submit_batch(
+        self,
+        batch: _Batch,
+        wallet_client: WalletClient,
+        repo: EventRepository,
+        *,
+        new_events: list[dict[str, Any]],
+    ) -> _SyncCounts:
+        """Submit *batch* to the Wallet API and persist the results.
+
+        When *batch* has no records (all events were excluded), the repository
+        is committed immediately and the excluded count is returned.
+
+        Args:
+            batch:         Pre-built batch from :meth:`build_batch`.
+            wallet_client: Authenticated wallet API client.
+            repo:          Open repository for marking events as processed.
+            new_events:    The same list of new events passed to :meth:`build_batch`.
+
+        Returns:
+            A :class:`_SyncCounts` with synced / excluded / failed tallies.
+        """
+        if not batch.records:
+            repo.commit()
+            return _SyncCounts(excluded=batch.excluded_count)
+
+        results = wallet_client.post_records(batch.records)
+        results = self._retry_category_failures(
+            batch.records,
+            results,
+            wallet_client,
+            categorizer=batch.categorizer,
+        )
+        log.debug("API results: %s", results)
+        return self.process_results(
+            results,
+            new_events,
+            batch.event_record_indices,
+            repo,
+            excluded_count=batch.excluded_count,
+        )
+
+    # ------------------------------------------------------------------
     # resync_day helpers
     # ------------------------------------------------------------------
 

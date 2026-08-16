@@ -4,40 +4,11 @@ Technical reference for developers and AI assistants. Covers module design, data
 and deployment context.
 
 > **Maintenance rule (for AI assistants and contributors):** update this file whenever a module is added, renamed, or
-> removed; a key design decision changes; the SQLite schema changes; the test count or file list changes; or a new
-> workflow is introduced. Keep it in sync with the code — stale docs are worse than no docs.
+> removed; a key design decision changes; the SQLite schema changes; or a new workflow is introduced.
+> Keep it in sync with the code — stale docs are worse than no docs.
 
 ---
 
-## Module structure
-
-```
-app/
-  __main__.py       # CLI entry point — click group with `sync`, `backup`, and `bot` subcommands
-  categorizer.py    # CategoryCache (24h TTL) + HistoryCategorizer (history-based category lookup)
-  config.py         # Config and BackupConfig dataclasses — reads all env vars in one place
-  http_client.py    # Shared HTTP helpers: ssl circuit-breaker, http_post, build_session
-  persistence.py    # EventRepository (SQLite dedup)
-  tr_mapper.py      # TR event → BudgetBakers record mapping
-  tr_client.py      # TRClient — pytr wrapper: login, 2FA, timeline fetch
-  twofa.py          # 2FA code providers (terminal / Telegram) + selector
-  wallet_client.py  # WalletClient — BudgetBakers HTTP API (POST records + GET backup)
-  backup.py         # Backup logic: auto / monthly / yearly modes
-  notifier.py       # Notifier — Telegram notifications (transversal)
-  bot.py            # TelegramBot — long-polling bot for remote command execution (wires bot_docker + bot_keyboards)
-  bot_docker.py     # Docker exec helpers: _docker_exec_silent, _docker_check_session, container introspection
-  bot_keyboards.py  # Inline keyboard builders: backup type/period pickers, instance pickers, date pickers
-  logging_setup.py  # Rotating file + console logging; configure_logging() for CLIs
-  sync_runner.py    # SyncRunner class + _SyncCounts / _Batch value objects + _build_code_provider
-  main.py           # Thin entry-point layer: run() / run_login() / run_resync() + _prepare bootstrap
-
-docker/
-  base/Dockerfile   # python:3.11-slim + git + pip deps (incl. docker SDK); published as python-trade-republic
-  app/Dockerfile    # installs cron, copies app code + entrypoint.sh
-  app/entrypoint.sh # MODE=sync|backup|bot; one-shot if schedule not set
-```
-
----
 
 ## Data flow — Sync
 
@@ -306,6 +277,10 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 - Sync services (`sync-david`, `sync-eli`) set it explicitly for per-owner notifications.
 - The backup service omits it; notifications show `"Backup"` as the owner.
 
+### Logging (`app/logging_setup.py`)
+- `setup_logging(data_dir)` — used by long-running daemons (sync, backup, bot); sets up rotating file handler + console handler.
+- `configure_logging()` — used by CLI entry points (`login`, `submit-code`, `check-session`); console only, no file.
+
 ### SSL circuit-breaker (`app/http_client.py`)
 - `SSLCircuitBreaker` — class that encapsulates circuit state (`verify`, `allow_insecure`) and policy.
   - `configure(allow_insecure_ssl)` — sets the policy and resets any previously tripped state.
@@ -460,28 +435,3 @@ make run-bot                           # Telegram bot
 ```
 
 See `deploy/DEPLOY.md` for setup instructions.
-
----
-
-## Relevant files (quick reference)
-
-| File | Role |
-|---|---|
-| `app/__main__.py` | click CLI: `sync`, `backup`, `bot`, `login`, `submit-code`, `check-session`; single entry point |
-| `app/categorizer.py` | `CategoryCache` (24 h TTL) + `HistoryCategorizer` (history-based majority-vote category assignment) |
-| `app/http_client.py` | SSL circuit-breaker shared by notifier and wallet_client; `http_post`, `build_session` |
-| `app/sync_runner.py` | `SyncRunner` class (`connect`, `fetch_events`, `build_batch`, `process_results`, `resync_day`); `_SyncCounts`, `_Batch` value objects; `_build_code_provider` |
-| `app/main.py` | Thin entry-point layer: `run()`, `run_login()`, `run_resync()`, `_prepare` bootstrap helper; re-exports `SyncRunner` etc. from `sync_runner` |
-| `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |
-| `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions; `connect` uses a `code_provider` |
-| `app/twofa.py` | `TerminalCodeProvider`, `TelegramCodeProvider`, `select_code_provider`; `CODE_FILENAME` |
-| `app/tr_mapper.py` | `_build_note`, `_note_extras`, `_HANDLERS`, `KNOWN_EVENT_TYPES`, `_make_record` |
-| `app/persistence.py` | `EventRepository`, `dedup_event_id`; `INSERT OR IGNORE`; `get_wallet_record_id` |
-| `app/config.py` | `Config`, `BackupConfig`, `BotEnv` dataclasses; `read_data_dir()`; `_read_label_ids()` |
-| `app/wallet_client.py` | `post_records` (sync) + `put_record` (resync) + `_get_all`/`_collect_page` + `get_*` (backup) |
-| `app/bot.py` | `TelegramBot` — polling loop, command handlers; wires `bot_docker` + `bot_keyboards`; re-exports all symbols |
-| `app/bot_docker.py` | Docker exec helpers: `_docker_exec_silent`, `_docker_check_session`, container introspection |
-| `app/bot_keyboards.py` | Stateless inline keyboard builders: backup pickers, instance pickers, resync date picker |
-| `app/logging_setup.py` | `setup_logging(data_dir)` for daemon; `configure_logging()` for CLI entry points |
-| `docker/app/entrypoint.sh` | `MODE=sync\|backup\|bot`; cron or one-shot depending on schedule vars |
-| `VERSION` | Single source of truth for the release version; bumping on `main` triggers the full release pipeline |

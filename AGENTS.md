@@ -36,7 +36,6 @@ Never write implementation code without a corresponding test. Coverage should st
 - A new module is added or an existing one is renamed/removed.
 - A key design decision changes (e.g. container naming, env var behaviour, data flow).
 - The SQLite schema changes (new columns, new tables, migrations).
-- The test count or file list changes.
 - A new workflow or release mechanism is introduced.
 
 ### Roadmap items

@@ -1066,3 +1066,97 @@ def test_build_records_includes_label_ids_when_matched():
         label_ids={"BANK_TRANSACTION_INCOMING": "uuid-label-in"},
     )
     assert records[0].get("labelIds") == ["uuid-label-in"]
+
+
+# ---------------------------------------------------------------------------
+# filter_by_lookback
+# ---------------------------------------------------------------------------
+
+
+def _make_event(timestamp: str, **kwargs) -> dict:
+    return {"timestamp": timestamp, **kwargs}
+
+
+def test_filter_by_lookback_keeps_recent():
+    from app.tr_mapper import filter_by_lookback
+
+    since = datetime(2024, 1, 10, tzinfo=UTC)
+    assert len(filter_by_lookback([_make_event("2024-01-11T00:00:00Z")], since)) == 1
+
+
+def test_filter_by_lookback_removes_old():
+    from app.tr_mapper import filter_by_lookback
+
+    since = datetime(2024, 1, 10, tzinfo=UTC)
+    assert filter_by_lookback([_make_event("2024-01-09T00:00:00Z")], since) == []
+
+
+def test_filter_by_lookback_keeps_event_on_boundary():
+    from app.tr_mapper import filter_by_lookback
+
+    since = datetime(2024, 1, 10, 0, 0, 0, tzinfo=UTC)
+    assert len(filter_by_lookback([_make_event("2024-01-10T00:00:00Z")], since)) == 1
+
+
+def test_filter_by_lookback_keeps_event_with_unparseable_timestamp():
+    from app.tr_mapper import filter_by_lookback
+
+    since = datetime(2024, 1, 10, tzinfo=UTC)
+    assert len(filter_by_lookback([{"timestamp": "not-a-date"}], since)) == 1
+
+
+def test_filter_by_lookback_keeps_event_without_timestamp():
+    from app.tr_mapper import filter_by_lookback
+
+    since = datetime(2024, 1, 10, tzinfo=UTC)
+    assert len(filter_by_lookback([{"amount": "5"}], since)) == 1
+
+
+def test_filter_by_lookback_naive_timestamp_treated_as_utc():
+    from app.tr_mapper import filter_by_lookback
+
+    since = datetime(2024, 1, 10, tzinfo=UTC)
+    assert len(filter_by_lookback([_make_event("2024-01-11T00:00:00")], since)) == 1
+
+
+def test_filter_by_lookback_multiple_events():
+    from app.tr_mapper import filter_by_lookback
+
+    since = datetime(2024, 1, 10, tzinfo=UTC)
+    events = [
+        _make_event("2024-01-09T00:00:00Z"),
+        _make_event("2024-01-11T00:00:00Z"),
+        _make_event("2024-01-12T00:00:00Z"),
+    ]
+    assert len(filter_by_lookback(events, since)) == 2
+
+
+def test_filter_by_lookback_with_until_excludes_events_on_or_after():
+    """Events at or after `until` must be excluded when until is provided."""
+    from app.tr_mapper import filter_by_lookback
+
+    since = datetime(2024, 1, 10, tzinfo=UTC)
+    until = datetime(2024, 1, 11, tzinfo=UTC)
+    events = [
+        _make_event("2024-01-09T00:00:00Z"),  # before since → excluded
+        _make_event("2024-01-10T06:00:00Z"),  # within window → kept
+        _make_event("2024-01-11T00:00:00Z"),  # exactly at until → excluded
+        _make_event("2024-01-12T00:00:00Z"),  # after until → excluded
+    ]
+    result = filter_by_lookback(events, since, until=until)
+    assert len(result) == 1
+    assert result[0]["timestamp"] == "2024-01-10T06:00:00Z"
+
+
+def test_filter_by_lookback_until_none_behaves_as_before():
+    """until=None must produce the same result as not passing until."""
+    from app.tr_mapper import filter_by_lookback
+
+    since = datetime(2024, 1, 10, tzinfo=UTC)
+    events = [
+        _make_event("2024-01-10T00:00:00Z"),
+        _make_event("2024-01-11T00:00:00Z"),
+    ]
+    assert filter_by_lookback(events, since, until=None) == filter_by_lookback(
+        events, since
+    )
