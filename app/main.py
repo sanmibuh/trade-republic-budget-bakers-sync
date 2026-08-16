@@ -63,42 +63,16 @@ def run() -> int:
 
         recent_events = filter_by_lookback(events, since)
         new_events = repo.filter_unprocessed(recent_events)
-        skipped_count = len(recent_events) - len(new_events)
-        log.info("%d new events to sync (after dedup)", len(new_events))
-
-        notifier.fetch_summary(
-            since=since.strftime("%Y-%m-%d"),
-            until=datetime.now(UTC).strftime("%Y-%m-%d"),
-            fetched=len(recent_events),
-            new=len(new_events),
-            skipped=skipped_count,
-        )
+        skipped_count = runner._notify_fetch_summary(since, recent_events, new_events)
 
         counts = _SyncCounts()
         try:
             wallet_client = WalletClient(api_key=cfg.wallet_api_key)
             batch = runner.build_batch(new_events, repo, wallet_client=wallet_client)
-            counts.excluded = batch.excluded_count
-
-            if batch.records:
-                results = wallet_client.post_records(batch.records)
-                results = runner._retry_category_failures(
-                    batch.records,
-                    results,
-                    wallet_client,
-                    categorizer=batch.categorizer,
-                )
-                log.debug("API results: %s", results)
-                counts = runner.process_results(
-                    results,
-                    new_events,
-                    batch.event_record_indices,
-                    repo,
-                    excluded_count=batch.excluded_count,
-                )
-            else:
-                repo.commit()
-
+            counts.excluded = batch.excluded_count  # preserved for finally on exception
+            counts = runner._submit_batch(
+                batch, wallet_client, repo, new_events=new_events
+            )
             log.info(
                 "Sync complete. synced=%d excluded=%d failed=%d",
                 counts.synced,

@@ -470,7 +470,7 @@ See `deploy/DEPLOY.md` for setup instructions.
 | `app/__main__.py` | click CLI: `sync`, `backup`, `bot`, `login`, `submit-code`, `check-session`; single entry point |
 | `app/categorizer.py` | `CategoryCache` (24 h TTL) + `HistoryCategorizer` (history-based majority-vote category assignment) |
 | `app/http_client.py` | SSL circuit-breaker shared by notifier and wallet_client; `http_post`, `build_session` |
-| `app/sync_runner.py` | `SyncRunner` class (`connect`, `fetch_events`, `build_batch`, `process_results`, `resync_day`); `_SyncCounts`, `_Batch` value objects; `_build_code_provider` |
+| `app/sync_runner.py` | `SyncRunner` class (`connect`, `fetch_events`, `build_batch`, `_notify_fetch_summary`, `_submit_batch`, `process_results`, `resync_day`); `_SyncCounts`, `_Batch` value objects; `_build_code_provider` |
 | `app/main.py` | Thin entry-point layer: `run()`, `run_login()`, `run_resync()`, `_prepare` bootstrap helper; re-exports `SyncRunner` etc. from `sync_runner` |
 | `app/backup.py` | Backup logic: `run_auto`, `run_monthly`, `run_yearly`; `_parse_monthly/yearly_param` |
 | `app/tr_client.py` | `TRClient` with `event_callback`; no module-level functions; `connect` uses a `code_provider` |

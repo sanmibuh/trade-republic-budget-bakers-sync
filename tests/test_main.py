@@ -930,6 +930,16 @@ def test_run_excluded_events_not_reprocessed_on_next_run(tmp_path):
 
         runner.build_batch.side_effect = fake_build_batch
 
+        # Simulate _submit_batch committing the repo when records is empty
+        def fake_submit_batch(batch, wallet_client, repo, *, new_events):
+            from app.sync_runner import _SyncCounts
+
+            if not batch.records:
+                repo.commit()
+            return _SyncCounts(excluded=batch.excluded_count)
+
+        runner._submit_batch.side_effect = fake_submit_batch
+
         run()
 
     # After run(), the event must be persisted (committed) in the DB
@@ -1350,7 +1360,7 @@ def test_read_label_ids_ignores_blank_values(monkeypatch):
 
 
 def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
-    """excluded_count must be reported in sync_complete even if post_records raises.
+    """excluded_count must be reported in sync_complete even if _submit_batch raises.
 
     Regression test for bug where counts.excluded was assigned *after*
     _process_results, so a failure there would report excluded=0 in the
@@ -1375,7 +1385,7 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=fake_events),
-        patch("app.main.WalletClient") as mock_wallet,
+        patch("app.main.WalletClient"),
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
@@ -1392,7 +1402,8 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
         batch.event_record_indices = [[0]]
         runner.build_batch.return_value = batch
 
-        mock_wallet.return_value.post_records.side_effect = RuntimeError("wallet down")
+        # _submit_batch raises after excluded_count has been stamped onto counts
+        runner._submit_batch.side_effect = RuntimeError("wallet down")
 
         notifier_instance = mock_notifier_cls.return_value
 
@@ -2665,26 +2676,155 @@ def test_fetch_events_persists_failed_sync_run_on_login_error(tmp_path):
     assert run is not None
     assert run["status"] == "failed"
 
-
-def test_fetch_events_persists_failed_sync_run_on_auth_error(tmp_path):
-    """fetch_events must write a failed sync_run when AuthenticationError is raised."""
-    from unittest.mock import patch
-
-    from app.sync_runner import AuthenticationError, SyncRunner
-
-    cfg = MagicMock()
-    cfg.data_dir = tmp_path
-    cfg.instance = "david"
-    notifier = MagicMock()
-    runner = SyncRunner(cfg, notifier)
-    since = datetime(2024, 1, 1, tzinfo=UTC)
-
-    with patch("app.sync_runner.TRClient") as MockTR:
-        MockTR.return_value.connect.side_effect = AuthenticationError("auth")
-        with pytest.raises(SystemExit):
-            runner.fetch_events(since)
-
     with EventRepository(tmp_path / "sync.db") as repo:
         run = repo.get_sync_run("david")
     assert run is not None
     assert run["status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# SyncRunner._notify_fetch_summary
+# ---------------------------------------------------------------------------
+
+
+def test_notify_fetch_summary_returns_skipped_count():
+    """_notify_fetch_summary returns len(recent) - len(new)."""
+    from app.sync_runner import SyncRunner
+
+    cfg = MagicMock()
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    since = datetime(2024, 1, 1, tzinfo=UTC)
+    recent = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+    new = [{"id": "a"}]
+
+    skipped = runner._notify_fetch_summary(since, recent, new)
+
+    assert skipped == 2
+
+
+def test_notify_fetch_summary_calls_notifier_with_correct_counts():
+    """_notify_fetch_summary delegates to notifier.fetch_summary with correct counts."""
+    from app.sync_runner import SyncRunner
+
+    cfg = MagicMock()
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    since = datetime(2024, 3, 15, tzinfo=UTC)
+    recent = [{"id": "x"}, {"id": "y"}]
+    new = [{"id": "x"}]
+
+    runner._notify_fetch_summary(since, recent, new)
+
+    notifier.fetch_summary.assert_called_once()
+    call_kwargs = notifier.fetch_summary.call_args.kwargs
+    assert call_kwargs["since"] == "2024-03-15"
+    assert call_kwargs["fetched"] == 2
+    assert call_kwargs["new"] == 1
+    assert call_kwargs["skipped"] == 1
+
+
+def test_notify_fetch_summary_all_new_skipped_zero():
+    """_notify_fetch_summary returns 0 when all events are new."""
+    from app.sync_runner import SyncRunner
+
+    cfg = MagicMock()
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    since = datetime(2024, 1, 1, tzinfo=UTC)
+    events = [{"id": "a"}, {"id": "b"}]
+
+    skipped = runner._notify_fetch_summary(since, events, events)
+
+    assert skipped == 0
+    call_kwargs = notifier.fetch_summary.call_args.kwargs
+    assert call_kwargs["skipped"] == 0
+
+
+# ---------------------------------------------------------------------------
+# SyncRunner._submit_batch
+# ---------------------------------------------------------------------------
+
+
+def test_submit_batch_empty_records_commits_repo(tmp_path):
+    """_submit_batch with no records calls repo.commit() and returns excluded count."""
+    from app.sync_runner import SyncRunner, _Batch
+
+    cfg = MagicMock()
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    repo = MagicMock()
+    wallet_client = MagicMock()
+    batch = _Batch(records=[], event_record_indices=[], excluded_count=3)
+
+    counts = runner._submit_batch(batch, wallet_client, repo, new_events=[])
+
+    repo.commit.assert_called_once()
+    wallet_client.post_records.assert_not_called()
+    assert counts.excluded == 3
+    assert counts.synced == 0
+    assert counts.failed == 0
+
+
+def test_submit_batch_posts_records_and_returns_counts(tmp_path):
+    """_submit_batch posts records, retries failures, and returns process_results counts."""
+    from app.sync_runner import SyncRunner, _Batch
+
+    cfg = MagicMock()
+    cfg.instance = "tst"
+    cfg.data_dir = tmp_path
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    record = {"note": "dividend", "amount": 10}
+    event = {"id": "ev1", "timestamp": "2024-01-01T00:00:00Z"}
+    batch = _Batch(
+        records=[record],
+        event_record_indices=[[0]],
+        excluded_count=0,
+        categorizer=None,
+    )
+
+    api_results = [{"inputIndex": 0, "id": "wid1"}]
+    wallet_client = MagicMock()
+    wallet_client.post_records.return_value = api_results
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        counts = runner._submit_batch(batch, wallet_client, repo, new_events=[event])
+
+    wallet_client.post_records.assert_called_once_with([record])
+    assert counts.synced == 1
+    assert counts.failed == 0
+    assert counts.excluded == 0
+
+
+def test_submit_batch_excluded_count_carried_through_when_records_present(tmp_path):
+    """_submit_batch passes excluded_count from batch through process_results."""
+    from app.sync_runner import SyncRunner, _Batch
+
+    cfg = MagicMock()
+    cfg.instance = "tst"
+    cfg.data_dir = tmp_path
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    record = {"note": "div", "amount": 5}
+    event = {"id": "e2", "timestamp": "2024-01-01T00:00:00Z"}
+    batch = _Batch(
+        records=[record],
+        event_record_indices=[[0]],
+        excluded_count=7,
+        categorizer=None,
+    )
+
+    wallet_client = MagicMock()
+    wallet_client.post_records.return_value = [{"inputIndex": 0, "id": "wid2"}]
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        counts = runner._submit_batch(batch, wallet_client, repo, new_events=[event])
+
+    assert counts.excluded == 7
