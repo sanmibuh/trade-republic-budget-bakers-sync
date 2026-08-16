@@ -9,35 +9,6 @@ and deployment context.
 
 ---
 
-## Module structure
-
-```
-app/
-  __main__.py       # CLI entry point — click group with `sync`, `backup`, and `bot` subcommands
-  categorizer.py    # CategoryCache (24h TTL) + HistoryCategorizer (history-based category lookup)
-  config.py         # Config and BackupConfig dataclasses — reads all env vars in one place
-  http_client.py    # Shared HTTP helpers: ssl circuit-breaker, http_post, build_session
-  persistence.py    # EventRepository (SQLite dedup)
-  tr_mapper.py      # TR event → BudgetBakers record mapping
-  tr_client.py      # TRClient — pytr wrapper: login, 2FA, timeline fetch
-  twofa.py          # 2FA code providers (terminal / Telegram) + selector
-  wallet_client.py  # WalletClient — BudgetBakers HTTP API (POST records + GET backup)
-  backup.py         # Backup logic: auto / monthly / yearly modes
-  notifier.py       # Notifier — Telegram notifications (transversal)
-  bot.py            # TelegramBot — long-polling bot for remote command execution (wires bot_docker + bot_keyboards)
-  bot_docker.py     # Docker exec helpers: _docker_exec_silent, _docker_check_session, container introspection
-  bot_keyboards.py  # Inline keyboard builders: backup type/period pickers, instance pickers, date pickers
-  logging_setup.py  # setup_logging(data_dir) for daemons (rotating file + console); configure_logging() for CLI entry points (console only)
-  sync_runner.py    # SyncRunner class + _SyncCounts / _Batch value objects + _build_code_provider
-  main.py           # Thin entry-point layer: run() / run_login() / run_resync() + _prepare bootstrap
-
-docker/
-  base/Dockerfile   # python:3.11-slim + git + pip deps (incl. docker SDK); published as python-trade-republic
-  app/Dockerfile    # installs cron, copies app code + entrypoint.sh
-  app/entrypoint.sh # MODE=sync|backup|bot; one-shot if schedule not set
-```
-
----
 
 ## Data flow — Sync
 
@@ -305,6 +276,10 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 - `OWNER_NAME` is optional — defaults to `"Backup"` when not set.
 - Sync services (`sync-david`, `sync-eli`) set it explicitly for per-owner notifications.
 - The backup service omits it; notifications show `"Backup"` as the owner.
+
+### Logging (`app/logging_setup.py`)
+- `setup_logging(data_dir)` — used by long-running daemons (sync, backup, bot); sets up rotating file handler + console handler.
+- `configure_logging()` — used by CLI entry points (`login`, `submit-code`, `check-session`); console only, no file.
 
 ### SSL circuit-breaker (`app/http_client.py`)
 - `SSLCircuitBreaker` — class that encapsulates circuit state (`verify`, `allow_insecure`) and policy.
