@@ -156,7 +156,7 @@ def test_instance_buttons_rows_split_at_three():
 
 def test_instance_buttons_empty_instances():
     rows = instance_buttons("sync", [])
-    assert rows == [[]] or rows == []
+    assert rows == []
 
 
 # ---------------------------------------------------------------------------

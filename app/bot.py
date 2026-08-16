@@ -67,26 +67,12 @@ from app.bot_docker import (
 )
 from app.bot_keyboards import (
     _CB_SEP,
-)
-from app.bot_keyboards import (
     BACKUP_ICONS as _BACKUP_ICONS,
-)
-from app.bot_keyboards import (
     backup_type_buttons as _backup_type_buttons_fn,
-)
-from app.bot_keyboards import (
     instance_buttons as _instance_buttons_fn,
-)
-from app.bot_keyboards import (
     instance_buttons_for_resync as _instance_buttons_for_resync_fn,
-)
-from app.bot_keyboards import (
     month_buttons as _month_buttons_fn,
-)
-from app.bot_keyboards import (
     resync_date_buttons as _resync_date_buttons_fn,
-)
-from app.bot_keyboards import (
     year_buttons as _year_buttons_fn,
 )
 from app.config import BotEnv

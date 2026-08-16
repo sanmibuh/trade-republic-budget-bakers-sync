@@ -90,7 +90,7 @@ def instance_buttons(cmd: str, names: list[str]) -> list[list[dict]]:
         for name in names
     ]
     if not buttons:
-        return [[]]
+        return []
     return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
 
 
@@ -112,7 +112,7 @@ def instance_buttons_for_resync(date_str: str, names: list[str]) -> list[list[di
         for name in names
     ]
     if not buttons:
-        return [[]]
+        return []
     return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
 
 
