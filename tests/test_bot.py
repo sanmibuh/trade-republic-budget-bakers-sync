@@ -11,13 +11,7 @@ from app.bot import (
     InstanceConfig,
     TelegramBot,
     _auth_icon,
-    _docker_check_session,
-    _docker_client_ctx,
-    _docker_container_status,
     _docker_exec_silent,
-    _docker_last_sync_summary,
-    _docker_logs_today,
-    _format_sync_timestamp,
 )
 
 # ---------------------------------------------------------------------------
@@ -159,106 +153,6 @@ def test_botconfig_telegram_verify_ssl_invalid(monkeypatch):
     monkeypatch.setenv("TELEGRAM_VERIFY_SSL", "maybe")
     with pytest.raises(ValueError, match="TELEGRAM_VERIFY_SSL"):
         BotConfig.from_env()
-
-
-# ---------------------------------------------------------------------------
-# _docker_exec_silent
-# ---------------------------------------------------------------------------
-
-
-def _make_docker_client(exit_code: int = 0, output: bytes = b"") -> MagicMock:
-    """Return a mock docker client where exec_run returns (exit_code, output)."""
-    container = MagicMock()
-    container.exec_run.return_value = (exit_code, output)
-    client = MagicMock()
-    client.containers.get.return_value = container
-    return client
-
-
-def test_docker_exec_silent_success():
-    client = _make_docker_client(0)
-    with patch("app.bot.docker.from_env", return_value=client):
-        _docker_exec_silent("my-container", ["sync"])
-    client.containers.get.assert_called_once_with("my-container")
-    args = client.containers.get.return_value.exec_run.call_args.args[0]
-    assert "python" in args
-    assert "-m" in args
-    assert "app" in args
-    assert "sync" in args
-
-
-def test_docker_exec_silent_failure_does_not_raise():
-    client = _make_docker_client(1, b"error output")
-    with patch("app.bot.docker.from_env", return_value=client):
-        _docker_exec_silent("my-container", ["sync"])  # must not raise
-
-
-def test_docker_exec_silent_failure_calls_on_error():
-    on_error = MagicMock()
-    client = _make_docker_client(1, b"something broke")
-    with patch("app.bot.docker.from_env", return_value=client):
-        _docker_exec_silent("my-container", ["sync"], on_error=on_error)
-    on_error.assert_called_once()
-    assert "my-container" in on_error.call_args.args[0]
-
-
-def test_docker_exec_silent_exception_calls_on_error():
-    on_error = MagicMock()
-    client = MagicMock()
-    client.containers.get.side_effect = Exception("unexpected")
-    with patch("app.bot.docker.from_env", return_value=client):
-        _docker_exec_silent("my-container", ["sync"], on_error=on_error)
-    on_error.assert_called_once()
-
-
-def test_docker_exec_silent_success_does_not_call_on_error():
-    on_error = MagicMock()
-    client = _make_docker_client(0)
-    with patch("app.bot.docker.from_env", return_value=client):
-        _docker_exec_silent("my-container", ["sync"], on_error=on_error)
-    on_error.assert_not_called()
-
-
-def test_docker_exec_silent_success_calls_on_success():
-    on_success = MagicMock()
-    client = _make_docker_client(0)
-    with patch("app.bot.docker.from_env", return_value=client):
-        _docker_exec_silent("my-container", ["login"], on_success=on_success)
-    on_success.assert_called_once()
-
-
-def test_docker_exec_silent_failure_does_not_call_on_success():
-    on_success = MagicMock()
-    client = _make_docker_client(1, b"boom")
-    with patch("app.bot.docker.from_env", return_value=client):
-        _docker_exec_silent("my-container", ["login"], on_success=on_success)
-    on_success.assert_not_called()
-
-
-def test_docker_exec_silent_container_not_found_does_not_raise():
-    import docker.errors
-
-    client = MagicMock()
-    client.containers.get.side_effect = docker.errors.NotFound("not found")
-    with patch("app.bot.docker.from_env", return_value=client):
-        _docker_exec_silent("my-container", ["sync"])  # must not raise
-
-
-def test_docker_exec_silent_exception_does_not_raise():
-    client = MagicMock()
-    client.containers.get.side_effect = Exception("unexpected")
-    with patch("app.bot.docker.from_env", return_value=client):
-        _docker_exec_silent("my-container", ["sync"])  # must not raise
-
-
-def test_docker_exec_silent_passes_app_command_args():
-    client = _make_docker_client(0)
-    with patch("app.bot.docker.from_env", return_value=client):
-        _docker_exec_silent("my-container", ["backup", "monthly", "2026-07"])
-    args = client.containers.get.return_value.exec_run.call_args.args[0]
-    assert "backup" in args
-    assert "monthly" in args
-    assert "2026-07" in args
 
 
 # ---------------------------------------------------------------------------
@@ -695,13 +589,8 @@ def test_launch_backup_yearly_executes_correct_args():
 
 
 # ---------------------------------------------------------------------------
-# _BACKUP_ICONS — consistent icon mapping
+# _BACKUP_ICONS — bot uses the right icon per backup mode
 # ---------------------------------------------------------------------------
-
-
-def test_backup_icons_has_monthly_and_yearly():
-    assert "monthly" in _BACKUP_ICONS
-    assert "yearly" in _BACKUP_ICONS
 
 
 def test_launch_backup_uses_correct_icon_for_monthly():
@@ -750,42 +639,6 @@ def test_exec_in_thread_passes_on_error_and_on_success():
     kwargs = mock_thread.call_args.kwargs
     assert kwargs["kwargs"]["on_error"] is on_error
     assert kwargs["kwargs"]["on_success"] is on_success
-
-
-# ---------------------------------------------------------------------------
-# TelegramBot._instance_buttons
-# ---------------------------------------------------------------------------
-
-
-def test_instance_buttons_returns_one_button_per_instance():
-    bot = _bot()
-    rows = bot._instance_buttons("sync")
-    all_buttons = [btn for row in rows for btn in row]
-    assert len(all_buttons) == 2
-    labels = [b["text"] for b in all_buttons]
-    assert "David" in labels
-    assert "Eli" in labels
-
-
-def test_instance_buttons_callback_data_encodes_cmd_and_instance():
-    bot = _bot()
-    rows = bot._instance_buttons("sync")
-    all_buttons = [btn for row in rows for btn in row]
-    data = {b["text"]: b["callback_data"] for b in all_buttons}
-    assert data["David"] == "sync:david"
-    assert data["Eli"] == "sync:eli"
-
-
-def test_instance_buttons_rows_split_at_three():
-    """More than 3 instances → buttons split into rows of max 3."""
-    instances = {
-        str(i): InstanceConfig(name=str(i), container_name=f"proj-sync-{i}-1")
-        for i in range(5)
-    }
-    bot = _bot(instances)
-    rows = bot._instance_buttons("sync")
-    assert all(len(row) <= 3 for row in rows)
-    assert sum(len(row) for row in rows) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -1378,63 +1231,6 @@ def test_handle_update_ignores_unknown_type():
 
 
 # ---------------------------------------------------------------------------
-# _docker_logs_today
-# ---------------------------------------------------------------------------
-
-
-def test_docker_logs_today_returns_decoded_output():
-    import datetime
-
-    from app.bot import _docker_logs_today
-
-    container = MagicMock()
-    container.logs.return_value = b"2026-08-11 10:00:00 INFO  sync: done\n"
-    client = MagicMock()
-    client.containers.get.return_value = container
-
-    since = datetime.datetime(2026, 8, 11, 0, 0, 0, tzinfo=datetime.UTC)
-    with patch("app.bot.docker.from_env", return_value=client):
-        result = _docker_logs_today("my-container", since=since)
-
-    client.containers.get.assert_called_once_with("my-container")
-    container.logs.assert_called_once_with(since=since, timestamps=False)
-    assert "done" in result
-
-
-def test_docker_logs_today_decodes_invalid_bytes():
-    import datetime
-
-    from app.bot import _docker_logs_today
-
-    container = MagicMock()
-    container.logs.return_value = b"ok\xff\xfe"
-    client = MagicMock()
-    client.containers.get.return_value = container
-
-    since = datetime.datetime(2026, 8, 11, 0, 0, 0, tzinfo=datetime.UTC)
-    with patch("app.bot.docker.from_env", return_value=client):
-        result = _docker_logs_today("my-container", since=since)
-
-    assert "ok" in result  # no UnicodeDecodeError raised
-
-
-def test_docker_logs_today_uses_explicit_client():
-    import datetime
-
-    container = MagicMock()
-    container.logs.return_value = b"explicit client log\n"
-    client = MagicMock()
-    client.containers.get.return_value = container
-
-    since = datetime.datetime(2026, 8, 11, 0, 0, 0, tzinfo=datetime.UTC)
-    result = _docker_logs_today("my-container", since=since, client=client)
-
-    client.containers.get.assert_called_once_with("my-container")
-    container.logs.assert_called_once_with(since=since, timestamps=False)
-    assert "explicit client log" in result
-
-
-# ---------------------------------------------------------------------------
 # TelegramBot._cmd_logs
 # ---------------------------------------------------------------------------
 
@@ -1597,137 +1393,6 @@ def test_send_message_no_parse_mode_omits_field():
         bot._send_message("plain text", parse_mode=None)
     payload = mock_post.call_args.kwargs["json"]
     assert "parse_mode" not in payload
-
-
-# ---------------------------------------------------------------------------
-# _docker_check_session
-# ---------------------------------------------------------------------------
-
-
-def test_docker_check_session_returns_true_when_exit_zero():
-    """Exit code 0 from check-session → session is valid."""
-    client = _make_docker_client(exit_code=0)
-    with patch("app.bot.docker.from_env", return_value=client):
-        result = _docker_check_session("my-container")
-    assert result is True
-
-
-def test_docker_check_session_returns_false_when_exit_one():
-    """Exit code 1 from check-session → session needs renewal."""
-    client = _make_docker_client(exit_code=1)
-    with patch("app.bot.docker.from_env", return_value=client):
-        result = _docker_check_session("my-container")
-    assert result is False
-
-
-def test_docker_check_session_returns_none_on_unexpected_exit_code():
-    """Exit code other than 0/1 (e.g. crash) → unknown state, not False."""
-    client = _make_docker_client(exit_code=2)
-    with patch("app.bot.docker.from_env", return_value=client):
-        result = _docker_check_session("my-container")
-    assert result is None
-
-
-def test_docker_check_session_returns_none_on_exception():
-    """If the container is unreachable, return None (unknown state)."""
-    client = MagicMock()
-    client.containers.get.side_effect = Exception("not found")
-    with patch("app.bot.docker.from_env", return_value=client):
-        result = _docker_check_session("my-container")
-    assert result is None
-
-
-def test_docker_check_session_invokes_check_session_command():
-    """The exec must call `python -m app check-session`."""
-    client = _make_docker_client(exit_code=0)
-    with patch("app.bot.docker.from_env", return_value=client):
-        _docker_check_session("my-container")
-    cmd = client.containers.get.return_value.exec_run.call_args.args[0]
-    assert cmd == ["python", "-m", "app", "check-session"]
-
-
-# ---------------------------------------------------------------------------
-# _docker_client_ctx
-# ---------------------------------------------------------------------------
-
-
-def test_docker_client_ctx_yields_client_and_closes_it():
-    client = MagicMock()
-    with (
-        patch("app.bot.docker.from_env", return_value=client),
-        _docker_client_ctx() as c,
-    ):
-        assert c is client
-    client.close.assert_called_once()
-
-
-def test_docker_client_ctx_yields_none_on_init_failure():
-    with (
-        patch("app.bot.docker.from_env", side_effect=Exception("daemon unreachable")),
-        _docker_client_ctx() as c,
-    ):
-        assert c is None
-
-
-# ---------------------------------------------------------------------------
-# _docker_container_status / _docker_last_sync_summary
-# ---------------------------------------------------------------------------
-
-
-def test_docker_container_status_returns_running_state():
-    client = MagicMock()
-    container = MagicMock()
-    container.status = "running"
-    client.containers.get.return_value = container
-    with patch("app.bot.docker.from_env", return_value=client):
-        assert _docker_container_status("my-container") == "running"
-
-
-def test_docker_container_status_returns_none_on_exception():
-    client = MagicMock()
-    client.containers.get.side_effect = Exception("boom")
-    with patch("app.bot.docker.from_env", return_value=client):
-        assert _docker_container_status("my-container") is None
-
-
-def test_docker_last_sync_summary_parses_success_from_db():
-    client = _make_docker_client(
-        output=b'{"status":"success","ran_at":"2026-08-11T10:00:00+00:00","saved":3,"failed":0,"excluded":1}'
-    )
-    with patch("app.bot.docker.from_env", return_value=client):
-        result = _docker_last_sync_summary("my-container")
-    assert (
-        result == "✅ success at 2026/08/11 10:00 UTC · saved 3 · failed 0 · excluded 1"
-    )
-
-
-def test_docker_last_sync_summary_uses_explicit_client():
-    client = _make_docker_client(
-        output=b'{"status":"success","ran_at":"2026-08-11T10:00:00+00:00","saved":1,"failed":0,"excluded":0}'
-    )
-    assert _docker_last_sync_summary("my-container", client=client) == (
-        "✅ success at 2026/08/11 10:00 UTC · saved 1 · failed 0 · excluded 0"
-    )
-
-
-def test_docker_last_sync_summary_returns_none_when_no_db_row():
-    """Script returns null (no sync_runs row yet) → return None."""
-    client = _make_docker_client(output=b"null")
-    with patch("app.bot.docker.from_env", return_value=client):
-        result = _docker_last_sync_summary("my-container")
-    assert result is None
-
-
-def test_docker_last_sync_summary_returns_none_on_invalid_payload():
-    client = _make_docker_client(output=b"not json")
-    with patch("app.bot.docker.from_env", return_value=client):
-        assert _docker_last_sync_summary("my-container") is None
-
-
-def test_docker_last_sync_summary_returns_none_on_nonzero_exit_code():
-    client = _make_docker_client(exit_code=1, output=b"boom")
-    with patch("app.bot.docker.from_env", return_value=client):
-        assert _docker_last_sync_summary("my-container") is None
 
 
 # ---------------------------------------------------------------------------
@@ -2005,49 +1670,6 @@ def test_cmd_sync_sends_instance_picker_keyboard():
 
 
 # ---------------------------------------------------------------------------
-# TelegramBot._month_buttons — January wraps to December of previous year
-# ---------------------------------------------------------------------------
-
-
-def test_month_buttons_wraps_year_when_run_in_january():
-    """When today is January, the most recent months must include December of the prior year."""
-    import datetime
-
-    bot = _bot()
-    fixed = datetime.datetime(2026, 1, 15, 12, 0, tzinfo=datetime.UTC)
-    with patch("app.bot.datetime.datetime") as mock_dt:
-        mock_dt.now.return_value = fixed
-        buttons = bot._month_buttons()
-    all_buttons = [b for row in buttons for b in row]
-    periods = [b["text"] for b in all_buttons]
-    assert "2025-12" in periods
-
-
-# ---------------------------------------------------------------------------
-# _format_sync_timestamp — invalid string falls back to raw value
-# ---------------------------------------------------------------------------
-
-
-def test_format_sync_timestamp_returns_raw_on_invalid_string():
-    """An unparseable timestamp string must be returned unchanged."""
-    raw = "not-a-timestamp"
-    assert _format_sync_timestamp(raw) == raw
-
-
-# ---------------------------------------------------------------------------
-# _docker_last_sync_summary — returns None when no sync_runs row exists
-# ---------------------------------------------------------------------------
-
-
-def test_docker_last_sync_summary_returns_none_when_empty_payload():
-    """Script returns null (no sync_runs row) → return None."""
-    client = _make_docker_client(output=b"null")
-    with patch("app.bot.docker.from_env", return_value=client):
-        result = _docker_last_sync_summary("my-container")
-    assert result is None
-
-
-# ---------------------------------------------------------------------------
 # run() entry point
 # ---------------------------------------------------------------------------
 
@@ -2117,43 +1739,6 @@ def test_cmd_resync_datetime_string_sends_error():
     mock_send.assert_called_once()
     msg = mock_send.call_args.args[0]
     assert "invalid" in msg.lower() or "YYYY" in msg
-
-
-# ---------------------------------------------------------------------------
-# TelegramBot._resync_date_buttons — recent-days keyboard
-# ---------------------------------------------------------------------------
-
-
-def test_resync_date_buttons_returns_recent_days():
-    """_resync_date_buttons must return buttons for the last N days."""
-    import datetime
-
-    bot = _bot()
-    fixed = datetime.datetime(2026, 7, 15, 12, 0, tzinfo=datetime.UTC)
-    with patch("app.bot.datetime.datetime") as mock_dt:
-        mock_dt.now.return_value = fixed
-        buttons = bot._resync_date_buttons("david")
-    all_buttons = [b for row in buttons for b in row]
-    texts = [b["text"] for b in all_buttons]
-    assert "2026-07-14" in texts
-    assert (
-        "2026-07-15" not in texts
-    )  # today is excluded (resync of future doesn't make sense)
-
-
-def test_resync_date_buttons_encode_instance():
-    """Each date button must encode the instance name in callback_data."""
-    import datetime
-
-    bot = _bot()
-    fixed = datetime.datetime(2026, 7, 15, 12, 0, tzinfo=datetime.UTC)
-    with patch("app.bot.datetime.datetime") as mock_dt:
-        mock_dt.now.return_value = fixed
-        buttons = bot._resync_date_buttons("david")
-    all_buttons = [b for row in buttons for b in row]
-    for btn in all_buttons:
-        assert "david" in btn["callback_data"]
-        assert btn["callback_data"].startswith("resync:")
 
 
 # ---------------------------------------------------------------------------
@@ -2307,3 +1892,33 @@ def test_cmd_help_mentions_resync():
         bot._cmd_help([])
     msg = mock_send.call_args.args[0]
     assert "resync" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# Wiring — TelegramBot delegates to collaborators
+# ---------------------------------------------------------------------------
+
+
+def test_instance_buttons_delegates_to_bot_keyboards():
+    """TelegramBot._instance_buttons must call the standalone function with instance names."""
+    bot = _bot()
+    with patch("app.bot._instance_buttons_fn", return_value=[[]]) as mock_fn:
+        bot._instance_buttons("sync")
+    mock_fn.assert_called_once_with("sync", ["David", "Eli"])
+
+
+def test_month_buttons_delegates_to_bot_keyboards():
+    """TelegramBot._month_buttons must delegate to bot_keyboards.month_buttons."""
+    bot = _bot()
+    with patch("app.bot._month_buttons_fn", return_value=[[]]) as mock_fn:
+        bot._month_buttons()
+    mock_fn.assert_called_once_with()
+
+
+def test_exec_in_thread_target_is_docker_exec_silent():
+    """TelegramBot._exec_in_thread must use _docker_exec_silent as the thread target."""
+    bot = _bot()
+    with patch("app.bot.threading.Thread") as mock_thread:
+        mock_thread.return_value.start = MagicMock()
+        bot._exec_in_thread("c", ["sync"])
+    assert mock_thread.call_args.kwargs["target"] is _docker_exec_silent

@@ -44,13 +44,11 @@ Interaction flow for /backup with args:
 
 from __future__ import annotations
 
-import contextlib
 import datetime
-import json
 import logging
 import threading
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -58,66 +56,51 @@ import requests
 import urllib3
 
 import docker
+from app.bot_docker import (
+    _docker_check_session,
+    _docker_client_ctx,
+    _docker_container_status,
+    _docker_exec_silent,
+    _docker_last_sync_summary,
+    _docker_logs_today,
+    _format_sync_timestamp,
+)
+from app.bot_keyboards import (
+    _CB_SEP,
+    BACKUP_ICONS as _BACKUP_ICONS,
+    backup_type_buttons as _backup_type_buttons_fn,
+    instance_buttons as _instance_buttons_fn,
+    instance_buttons_for_resync as _instance_buttons_for_resync_fn,
+    month_buttons as _month_buttons_fn,
+    resync_date_buttons as _resync_date_buttons_fn,
+    year_buttons as _year_buttons_fn,
+)
 from app.config import BotEnv
 from app.notifier import _escape_markdown as _esc
 
 log = logging.getLogger(__name__)
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
-_YEAR_BUTTON_COUNT = 3  # number of recent years offered in the yearly backup keyboard
-_MONTH_BUTTON_COUNT = (
-    4  # number of recent months offered in the monthly backup keyboard
-)
-_RESYNC_DAY_COUNT = 7  # number of recent days offered in the resync date picker
-
-# Separator used inside callback_data to encode command + param + instance.
-# Must not appear in instance names or period params (YYYY-MM / YYYY contain only digits and hyphens).
-_CB_SEP = ":"
-
 _MAX_LOG_CHARS = 3800  # safe limit below Telegram's 4096-char message cap
 
-# Icons used in backup ACK messages — must stay in sync with _backup_type_buttons().
-_BACKUP_ICONS: dict[str, str] = {
-    "monthly": "📅",
-    "yearly": "📆",
-}
-
-_LAST_SYNC_SUMMARY_SCRIPT = """
-import json
-import os
-import sqlite3
-from pathlib import Path
-
-data_dir = Path(os.environ.get("DATA_DIR", "/app/data"))
-db_path = data_dir / "sync.db"
-instance = os.environ.get("INSTANCE", "")
-result = None
-if db_path.exists() and instance:
-    conn = None
-    try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        row = conn.execute(
-            "SELECT status, ran_at, saved, failed, excluded FROM sync_runs WHERE instance = ?",
-            (instance,),
-        ).fetchone()
-        if row:
-            result = {
-                "status": row[0],
-                "ran_at": row[1],
-                "saved": row[2],
-                "failed": row[3],
-                "excluded": row[4],
-            }
-    except Exception:
-        pass
-    finally:
-        try:
-            if conn is not None:
-                conn.close()
-        except Exception:
-            pass
-print(json.dumps(result))
-"""
+# Re-export docker helpers so existing imports from app.bot keep working.
+__all__ = [
+    "_BACKUP_ICONS",
+    "_CB_SEP",
+    "_MAX_LOG_CHARS",
+    "BotConfig",
+    "InstanceConfig",
+    "TelegramBot",
+    "_auth_icon",
+    "_docker_check_session",
+    "_docker_client_ctx",
+    "_docker_container_status",
+    "_docker_exec_silent",
+    "_docker_last_sync_summary",
+    "_docker_logs_today",
+    "_format_sync_timestamp",
+    "run",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +348,6 @@ class TelegramBot:
             return
 
         parts = data.split(_CB_SEP)
-        # Encoded format: "<cmd>:<param>" (backup_yearly) or "<cmd>:<instance>" (sync)
         if len(parts) < 2:
             log.warning("Malformed callback_data: %r", data)
             return
@@ -526,13 +508,7 @@ class TelegramBot:
         self._pick_instance("sync", "🔄 *Sync* — Choose instance:")
 
     def _cmd_resync(self, args: list[str]) -> None:
-        """Handle /resync [YYYY-MM-DD].
-
-        With no date: show instance picker; after instance is chosen a date
-        picker will appear (``resync_pick_date:<instance>`` callback).
-        With a date arg: validate the date, then show an instance picker that
-        encodes the date directly (``resync:<date>:<instance>`` callback).
-        """
+        """Handle /resync [YYYY-MM-DD]."""
         if not args:
             self._pick_instance("resync_pick_date", "🔁 *Resync* — Choose instance:")
             return
@@ -628,25 +604,6 @@ class TelegramBot:
             on_error=self._send_message,
         )
 
-    def _backup_type_buttons(self) -> list[list[dict]]:
-        """Inline keyboard with Monthly and Yearly type-selection buttons."""
-        return [
-            [
-                {"text": "📅 Monthly", "callback_data": f"backup_type{_CB_SEP}monthly"},
-                {"text": "📆 Yearly", "callback_data": f"backup_type{_CB_SEP}yearly"},
-            ]
-        ]
-
-    def _year_buttons(self) -> list[list[dict]]:
-        """Inline keyboard with the most recent years (previous year first)."""
-        current_year = datetime.datetime.now(tz=datetime.UTC).year
-        years = [current_year - i for i in range(1, _YEAR_BUTTON_COUNT + 1)]
-        buttons = [
-            {"text": str(y), "callback_data": f"backup_yearly{_CB_SEP}{y}"}
-            for y in years
-        ]
-        return [buttons]
-
     # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------
@@ -687,20 +644,7 @@ class TelegramBot:
         self._send_message(msg)
 
     def _maybe_submit_pending_code(self, code: str) -> bool:
-        """Submit *code* to the single pending login instance, or prompt if ambiguous.
-
-        Snapshots ``_pending_login`` at the start to avoid RuntimeError if a
-        worker thread mutates the dict concurrently.
-
-        When ``_pending_login`` is empty (e.g. login was triggered by a cron sync
-        rather than by the user via ``/login``), falls back to the configured
-        instances:
-        - Single instance → submits directly (seamless happy path).
-        - Multiple instances → asks the user to use ``/code <instance> <code>``.
-
-        Returns True if the code was submitted (message should be deleted by caller),
-        False if nothing was submitted (no pending login, or ambiguous — prompt sent).
-        """
+        """Submit *code* to the single pending login instance, or prompt if ambiguous."""
         pending = dict(self._pending_login)  # snapshot before any iteration
         if not pending:
             instances = self._cfg.instances
@@ -749,14 +693,13 @@ class TelegramBot:
             self._send_message(header + "_No logs today\\._")
             return
 
-        # Truncate to stay within Telegram's message limit.
         if len(text) > _MAX_LOG_CHARS:
             text = "[... truncated ...]\n" + text[-_MAX_LOG_CHARS:]
 
         self._send_message(header + text, parse_mode=None)
 
     # ------------------------------------------------------------------
-    # Keyboard builder
+    # Keyboard builder wrappers — delegate to app.bot_keyboards
     # ------------------------------------------------------------------
 
     def _pick_instance(self, cmd: str, prompt: str) -> None:
@@ -764,55 +707,24 @@ class TelegramBot:
         self._send_message(prompt, keyboard=self._instance_buttons(cmd))
 
     def _instance_buttons(self, cmd: str) -> list[list[dict]]:
-        """Build an inline keyboard row with one button per sync instance."""
-        buttons = [
-            {"text": inst.name, "callback_data": f"{cmd}{_CB_SEP}{inst.name.lower()}"}
-            for inst in self._cfg.instances.values()
-        ]
-        return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+        names = [inst.name for inst in self._cfg.instances.values()]
+        return _instance_buttons_fn(cmd, names)
 
     def _instance_buttons_for_resync(self, date_str: str) -> list[list[dict]]:
-        """Build an instance-picker keyboard that encodes *date_str* in the callback."""
-        buttons = [
-            {
-                "text": inst.name,
-                "callback_data": f"resync{_CB_SEP}{date_str}{_CB_SEP}{inst.name.lower()}",
-            }
-            for inst in self._cfg.instances.values()
-        ]
-        return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+        names = [inst.name for inst in self._cfg.instances.values()]
+        return _instance_buttons_for_resync_fn(date_str, names)
 
     def _resync_date_buttons(self, instance_key: str) -> list[list[dict]]:
-        """Build a date-picker keyboard with the most recent days (yesterday first)."""
-        today = datetime.datetime.now(tz=datetime.UTC).date()
-        days = [
-            str(today - datetime.timedelta(days=i))
-            for i in range(1, _RESYNC_DAY_COUNT + 1)
-        ]
-        buttons = [
-            {
-                "text": d,
-                "callback_data": f"resync{_CB_SEP}{d}{_CB_SEP}{instance_key}",
-            }
-            for d in days
-        ]
-        return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+        return _resync_date_buttons_fn(instance_key)
+
+    def _backup_type_buttons(self) -> list[list[dict]]:
+        return _backup_type_buttons_fn()
+
+    def _year_buttons(self) -> list[list[dict]]:
+        return _year_buttons_fn()
 
     def _month_buttons(self) -> list[list[dict]]:
-        """Inline keyboard with the most recent months (previous month first)."""
-        today = datetime.datetime.now(tz=datetime.UTC).date()
-        months = []
-        year, month = today.year, today.month
-        for _ in range(_MONTH_BUTTON_COUNT):
-            month -= 1
-            if month == 0:
-                month = 12
-                year -= 1
-            months.append(f"{year}-{month:02d}")
-        buttons = [
-            {"text": m, "callback_data": f"backup_monthly{_CB_SEP}{m}"} for m in months
-        ]
-        return [buttons]
+        return _month_buttons_fn()
 
     # ------------------------------------------------------------------
     # Telegram API helpers
@@ -884,185 +796,6 @@ class TelegramBot:
             )
         except requests.RequestException as exc:
             log.warning("Failed to delete message %s: %s", message_id, exc)
-
-
-# ---------------------------------------------------------------------------
-# Docker helpers
-# ---------------------------------------------------------------------------
-
-
-@contextlib.contextmanager
-def _docker_client_ctx() -> Generator[docker.DockerClient | None, None, None]:
-    """Context manager that yields a Docker client and closes it on exit.
-
-    Yields ``None`` (without raising) if the Docker daemon is unreachable so
-    callers can handle the unavailable-client case without extra try/except.
-    """
-    client = None
-    try:
-        client = docker.from_env()
-    except Exception as exc:
-        log.debug("docker client init failed: %s", exc)
-    try:
-        yield client
-    finally:
-        if client is not None:
-            client.close()
-
-
-def _docker_check_session(
-    container_name: str, client: docker.DockerClient | None = None
-) -> bool | None:
-    """Check whether the saved Trade Republic session is valid for *container_name*.
-
-    Runs ``python -m app check-session`` inside the container via the Docker SDK.
-
-    Returns:
-        True   — credentials file present (session was saved).
-        False  — credentials file absent (login required).
-        None   — container unreachable or exec failed unexpectedly.
-    """
-    try:
-        client = client or docker.from_env()
-        container = client.containers.get(container_name)
-        exit_code, _ = container.exec_run(["python", "-m", "app", "check-session"])
-        if exit_code == 0:
-            return True
-        if exit_code == 1:
-            return False
-        # Unexpected exit code (e.g. crash, missing module) — treat as unknown.
-        log.warning(
-            "check-session exited with unexpected code %s for %s",
-            exit_code,
-            container_name,
-        )
-        return None
-    except Exception as exc:
-        log.debug("check-session exec failed for %s: %s", container_name, exc)
-        return None
-
-
-def _docker_container_status(
-    container_name: str, client: docker.DockerClient | None = None
-) -> str | None:
-    """Return the Docker container status for *container_name*."""
-    try:
-        client = client or docker.from_env()
-        container = client.containers.get(container_name)
-        return container.status
-    except Exception as exc:
-        log.debug("container status lookup failed for %s: %s", container_name, exc)
-        return None
-
-
-def _format_sync_timestamp(raw: str) -> str:
-    """Format log/DB timestamps as `YYYY/MM/DD HH:MM UTC` for Telegram output."""
-    try:
-        if "T" in raw:
-            parsed = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        else:
-            parsed = datetime.datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(
-                tzinfo=datetime.UTC
-            )
-        return parsed.astimezone(datetime.UTC).strftime("%Y/%m/%d %H:%M UTC")
-    except ValueError:
-        return raw
-
-
-def _docker_last_sync_summary(
-    container_name: str, client: docker.DockerClient | None = None
-) -> str | None:
-    """Return a human-readable summary of the most recent sync run from the DB."""
-    try:
-        client = client or docker.from_env()
-        container = client.containers.get(container_name)
-        exit_code, output = container.exec_run(
-            ["python", "-c", _LAST_SYNC_SUMMARY_SCRIPT]
-        )
-        if exit_code != 0:
-            return None
-        payload = json.loads(output.decode(errors="replace"))
-    except Exception as exc:
-        log.debug("last sync lookup failed for %s: %s", container_name, exc)
-        return None
-
-    if payload is None:
-        return None
-
-    status = payload.get("status")
-    ran_at = payload.get("ran_at")
-    if status in {"success", "partial", "failed"}:
-        icon = {"success": "✅", "partial": "⚠️", "failed": "❌"}[status]
-        parts = [f"{icon} {status}"]
-        if ran_at:
-            parts[0] = f"{parts[0]} at {_format_sync_timestamp(ran_at)}"
-        saved = payload.get("saved")
-        failed = payload.get("failed")
-        excluded = payload.get("excluded")
-        if saved is not None:
-            parts.append(f"saved {saved}")
-        if failed is not None:
-            parts.append(f"failed {failed}")
-        if excluded is not None:
-            parts.append(f"excluded {excluded}")
-        return " · ".join(parts)
-    return None
-
-
-def _docker_logs_today(
-    container_name: str,
-    since: datetime.datetime,
-    client: docker.DockerClient | None = None,
-) -> str:
-    """Return stdout/stderr logs for *container_name* since *since* (UTC datetime)."""
-    client = client or docker.from_env()
-    container = client.containers.get(container_name)
-    raw: bytes = container.logs(since=since, timestamps=False)
-    return raw.decode(errors="replace")
-
-
-def _docker_exec_silent(
-    container_name: str,
-    app_args: list[str],
-    on_error: Callable[[str], None] | None = None,
-    on_success: Callable[[], None] | None = None,
-) -> None:
-    """Run `python -m app <app_args>` inside a container via the Docker SDK.
-
-    Does NOT send any Telegram message on success by default — the container's
-    own Notifier handles that. Callers that need explicit success feedback (e.g.
-    `login`, which may finish silently by resuming a still-valid session) can
-    pass `on_success`. On failure, calls `on_error(message)` if provided.
-    """
-    cmd = ["python", "-m", "app", *app_args]
-    log.info("Executing: docker exec %s %s", container_name, " ".join(cmd))
-    try:
-        client = docker.from_env()
-        container = client.containers.get(container_name)
-        env = container.attrs["Config"]["Env"]
-        exit_code, output = container.exec_run(cmd, environment=env)
-        if exit_code == 0:
-            log.info(
-                "docker exec finished successfully for container %s", container_name
-            )
-            if on_success:
-                on_success()
-        else:
-            details = output.decode(errors="replace").strip() if output else ""
-            log.warning(
-                "docker exec exited with code %s for container %s:\n%s",
-                exit_code,
-                container_name,
-                details,
-            )
-            if on_error:
-                on_error(
-                    f"❌ Command failed on `{container_name}` \\(exit {exit_code}\\)\\."
-                )
-    except Exception as exc:
-        log.warning("docker exec failed for container %s: %s", container_name, exc)
-        if on_error:
-            on_error(f"❌ Could not exec on `{container_name}`: {exc}")
 
 
 # ---------------------------------------------------------------------------

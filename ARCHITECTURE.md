@@ -24,7 +24,9 @@ app/
   wallet_client.py  # WalletClient — BudgetBakers HTTP API (POST records + GET backup)
   backup.py         # Backup logic: auto / monthly / yearly modes
   notifier.py       # Notifier — Telegram notifications (transversal)
-  bot.py            # TelegramBot — long-polling bot for remote command execution
+  bot.py            # TelegramBot — long-polling bot for remote command execution (wires bot_docker + bot_keyboards)
+  bot_docker.py     # Docker exec helpers: _docker_exec_silent, _docker_check_session, container introspection
+  bot_keyboards.py  # Inline keyboard builders: backup type/period pickers, instance pickers, date pickers
   logging_setup.py  # Rotating file + console logging; configure_logging() for CLIs
   sync_runner.py    # SyncRunner class + _SyncCounts / _Batch value objects + _build_code_provider
   main.py           # Thin entry-point layer: run() / run_login() / run_resync() + _prepare bootstrap
@@ -247,7 +249,9 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 - Yearly cleanup removes the 12 monthly files whose period is covered by the yearly backup.
 
 ### Telegram bot
-- `app/bot.py`: long-polling bot dispatching commands to Docker containers via the Docker SDK (`docker` Python package).
+- `app/bot.py`: long-polling bot and command handlers; wires `app/bot_docker.py` and `app/bot_keyboards.py`; re-exports all public symbols for backward compatibility.
+- `app/bot_docker.py`: Docker exec helpers (`_docker_exec_silent`, `_docker_check_session`, `_docker_container_status`, `_docker_logs_today`, `_docker_last_sync_summary`, `_docker_client_ctx`); isolated so they can be unit-tested independently.
+- `app/bot_keyboards.py`: stateless inline keyboard builder functions (backup type/period pickers, instance pickers, resync date picker); no dependency on bot state or Docker.
 - `BotConfig` reads `INSTANCES` (sync instances), `CONTAINER_PREFIX`, and `BACKUP_SERVICE` from env.
 - `CONTAINER_PREFIX` must match the Docker Compose project `name:` field (e.g. `tr-sync`) — fixed in
   `docker-compose.yml` via `name: tr-sync` so it never changes regardless of the directory name.
@@ -475,6 +479,9 @@ See `deploy/DEPLOY.md` for setup instructions.
 | `app/persistence.py` | `EventRepository`, `dedup_event_id`; `INSERT OR IGNORE`; `get_wallet_record_id` |
 | `app/config.py` | `Config`, `BackupConfig`, `BotEnv` dataclasses; `read_data_dir()`; `_read_label_ids()` |
 | `app/wallet_client.py` | `post_records` (sync) + `put_record` (resync) + `_get_all`/`_collect_page` + `get_*` (backup) |
+| `app/bot.py` | `TelegramBot` — polling loop, command handlers; wires `bot_docker` + `bot_keyboards`; re-exports all symbols |
+| `app/bot_docker.py` | Docker exec helpers: `_docker_exec_silent`, `_docker_check_session`, container introspection |
+| `app/bot_keyboards.py` | Stateless inline keyboard builders: backup pickers, instance pickers, resync date picker |
 | `app/logging_setup.py` | `setup_logging(data_dir)` for daemon; `configure_logging()` for CLI entry points |
 | `docker/app/entrypoint.sh` | `MODE=sync\|backup\|bot`; cron or one-shot depending on schedule vars |
 | `VERSION` | Single source of truth for the release version; bumping on `main` triggers the full release pipeline |
