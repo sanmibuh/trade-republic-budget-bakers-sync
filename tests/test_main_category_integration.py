@@ -363,6 +363,39 @@ def test_retry_if_retry_also_fails_retry_error_is_returned():
     assert out[0]["inputIndex"] == 0
 
 
+def test_retry_results_returned_in_sorted_inputindex_order():
+    """Output must be sorted by inputIndex so downstream logic that relies on list
+    position (e.g. the enumerate() fallback in process_results) remains correct even
+    when the API returns results in non-sequential inputIndex order."""
+    runner = _make_runner_for_retry()
+    wallet = MagicMock()
+    # Retry record at index 0 — post_records returns it
+    wallet.post_records.return_value = [{"inputIndex": 0, "id": "r-retry"}]
+    categorizer = _make_categorizer_mock()
+
+    records = [
+        {"categoryId": "cat-bad"},  # 0 — fails → retried
+        {"categoryId": "cat-ok"},  # 1 — succeeds → kept
+        {"categoryId": "cat-ok"},  # 2 — succeeds → kept
+    ]
+    # API returns results in reverse order (non-sequential inputIndex)
+    results = [
+        {"inputIndex": 2, "id": "r-2"},
+        {"inputIndex": 1, "id": "r-1"},
+        {"inputIndex": 0, "error": "bad category"},
+    ]
+
+    out = runner._retry_category_failures(
+        records, results, wallet, categorizer=categorizer
+    )
+
+    # Results must come back in ascending inputIndex order regardless of input order
+    indices = [r["inputIndex"] for r in out]
+    assert indices == sorted(indices)
+    assert out[0]["inputIndex"] == 0
+    assert out[0]["id"] == "r-retry"
+
+
 def test_build_batch_exposes_categorizer_in_batch():
     """build_batch stores the HistoryCategorizer in the returned _Batch."""
     cfg = _make_cfg(category_strategy="history")

@@ -15,7 +15,7 @@ from app.sync_runner import (  # noqa: F401 — re-exported for backward compati
     _Batch,
     _SyncCounts,
 )
-from app.tr_client import LoginFailedError, SessionExpiredError
+from app.tr_client import LoginFailedError, SessionExpiredError, TRClient
 from app.tr_mapper import filter_by_lookback
 from app.wallet_client import WalletClient
 
@@ -39,7 +39,7 @@ def _prepare(cfg: Config) -> Notifier:
     return Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)
 
 
-def _connect(cfg: Config, notifier: Notifier):
+def _connect(cfg: Config, notifier: Notifier) -> TRClient:
     """Thin wrapper used by run_login(); delegates to SyncRunner.connect()."""
     return SyncRunner(cfg, notifier).connect()
 

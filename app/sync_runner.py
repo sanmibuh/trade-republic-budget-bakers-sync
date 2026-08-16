@@ -329,7 +329,7 @@ class SyncRunner:
                 merged["inputIndex"] = orig_idx
                 results_by_index[orig_idx] = merged
 
-        return list(results_by_index.values())
+        return [results_by_index[k] for k in sorted(results_by_index)]
 
     def _process_event_result(
         self,
