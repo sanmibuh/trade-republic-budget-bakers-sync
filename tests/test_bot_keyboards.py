@@ -211,3 +211,8 @@ def test_resync_date_buttons_encode_instance():
         for btn in row:
             assert "david" in btn["callback_data"]
             assert btn["callback_data"].startswith(f"resync{_CB_SEP}")
+
+
+def test_instance_buttons_for_resync_empty_names_returns_empty():
+    """instance_buttons_for_resync with no names must return an empty list."""
+    assert instance_buttons_for_resync("2026-08-01", []) == []

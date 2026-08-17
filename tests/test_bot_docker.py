@@ -305,3 +305,12 @@ def test_format_sync_timestamp_naive_datetime_string():
 def test_format_sync_timestamp_returns_raw_on_invalid_string():
     raw = "not-a-timestamp"
     assert _format_sync_timestamp(raw) == raw
+
+
+def test_docker_last_sync_summary_returns_none_for_unknown_status():
+    """_docker_last_sync_summary must return None when status is not a known value."""
+    client = _make_docker_client(
+        output=b'{"status":"pending","ran_at":"2026-08-11T10:00:00+00:00"}'
+    )
+    with patch("app.bot_docker.docker.from_env", return_value=client):
+        assert _docker_last_sync_summary("my-container") is None

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -1205,6 +1206,28 @@ def test_process_results_persists_sync_run_failed(tmp_path):
     assert run["status"] == "failed"
     assert run["saved"] == 0
     assert run["failed"] == 1
+
+
+def test_process_results_logs_warning_when_set_sync_run_raises(tmp_path, caplog):
+    """process_results must log a warning and not raise when set_sync_run fails."""
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.instance = "david"
+    notifier = MagicMock()
+    runner = SyncRunner(cfg, notifier)
+
+    event = {"id": "e1", "amount": 100}
+    results = [{"inputIndex": 0, "id": "w1"}]
+
+    with (
+        EventRepository(tmp_path / "sync.db") as repo,
+        patch.object(repo, "set_sync_run", side_effect=RuntimeError("db locked")),
+        caplog.at_level(logging.WARNING, logger="app.sync_runner"),
+    ):
+        counts = runner.process_results(results, [event], [[0]], repo)
+
+    assert counts.synced == 1
+    assert any("Failed to persist sync_run" in r.message for r in caplog.records)
 
 
 def test_fetch_events_persists_failed_sync_run_on_login_error(tmp_path):
