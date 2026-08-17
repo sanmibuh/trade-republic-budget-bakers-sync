@@ -1217,6 +1217,4 @@ def test_savings_plan_pending_appends_transaktion_to_note():
 
 
 def test_savings_plan_pending_is_known_event_type():
-    from app.tr_mapper import KNOWN_EVENT_TYPES
-
     assert "TRADING_SAVINGSPLAN_EXECUTION_PENDING" in KNOWN_EVENT_TYPES
