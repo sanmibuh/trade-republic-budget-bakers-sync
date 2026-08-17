@@ -1,0 +1,19 @@
+app/bot.py
+  s_5cbd53ae78d0a1::t_45f0799b9b5e6f 666-672
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "144e5e512947a54121f20e28b4f3d06f8d293701",
+  "prompts": {},
+  "sessions": {
+    "s_5cbd53ae78d0a1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fee45224bffecRUEqtyR0LV78P",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
