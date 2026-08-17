@@ -1,0 +1,14 @@
+.github/workflows/bump-version.yml
+  h_97a91c9e567f87 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "b22f8d95b49252639ebc0fc9202e9cdf939e69e2",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
