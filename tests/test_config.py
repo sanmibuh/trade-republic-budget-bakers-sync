@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.config import BackupConfig, Config, has_valid_session
+from app.config import BackupConfig, Config, has_valid_session, read_instance
 
 BASE_ENV = {
     "PHONE_NUMBER": "+34600000000",
@@ -429,3 +429,13 @@ def test_read_label_ids_ignores_blank_values(monkeypatch):
     monkeypatch.setenv("LABEL_BANK_TRANSACTION_INCOMING", "   ")
 
     assert "BANK_TRANSACTION_INCOMING" not in Config.from_env().label_ids
+
+
+def test_read_instance_falls_back_to_default_owner_name(monkeypatch):
+    """read_instance() with no INSTANCE and no OWNER_NAME returns lowercased default."""
+    monkeypatch.delenv("INSTANCE", raising=False)
+    monkeypatch.delenv("OWNER_NAME", raising=False)
+
+    result = read_instance()
+
+    assert result == "backup"
