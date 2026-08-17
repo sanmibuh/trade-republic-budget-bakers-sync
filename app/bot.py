@@ -57,6 +57,7 @@ import urllib3
 
 import docker
 from app.bot_docker import (
+    _docker_check_awaiting_code,
     _docker_check_session,
     _docker_client_ctx,
     _docker_container_status,
@@ -644,7 +645,12 @@ class TelegramBot:
         self._send_message(msg)
 
     def _maybe_submit_pending_code(self, code: str) -> bool:
-        """Submit *code* to the single pending login instance, or prompt if ambiguous."""
+        """Submit *code* to the single pending login instance, or prompt if ambiguous.
+
+        When ``_pending_login`` is empty (login was triggered by a cron sync rather
+        than the ``/login`` Telegram command), falls back to querying each container
+        via ``check-pending`` to discover which ones are actively waiting for a code.
+        """
         pending = dict(self._pending_login)  # snapshot before any iteration
         if not pending:
             instances = self._cfg.instances
@@ -656,6 +662,27 @@ class TelegramBot:
                     on_error=self._send_message,
                 )
                 return True
+            # Multi-instance: probe Docker to find which containers are awaiting a code.
+            docker_pending = {
+                name: inst
+                for name, inst in instances.items()
+                if _docker_check_awaiting_code(inst.container_name) is True
+            }
+            if len(docker_pending) == 1:
+                inst = next(iter(docker_pending.values()))
+                self._exec_in_thread(
+                    inst.container_name,
+                    ["submit-code", code],
+                    on_error=self._send_message,
+                )
+                return True
+            if len(docker_pending) > 1:
+                names = ", ".join(f"*{_esc(k)}*" for k in sorted(docker_pending))
+                self._send_message(
+                    f"⚠️ Multiple logins pending: {names}\\. "
+                    "Use `/code <instance> <code>` to specify which one\\."
+                )
+                return False
             names = ", ".join(f"*{_esc(k)}*" for k in sorted(instances))
             self._send_message(
                 f"⚠️ Multiple instances configured: {names}\\. "

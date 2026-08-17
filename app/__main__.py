@@ -68,6 +68,27 @@ def submit_code(code: str) -> None:
     (cfg.data_dir / CODE_FILENAME).write_text(code.strip())
 
 
+@cli.command(name="check-pending")
+def check_pending() -> None:
+    """Exit 0 if a 2FA login is currently waiting for a code, 1 otherwise.
+
+    Used by the Telegram bot to detect which containers are blocked on
+    authenticator input, so plain-digit replies can be routed automatically
+    even when the login was triggered by a cron sync rather than the /login
+    command.
+
+    Exit codes:
+        0 — the pending-login marker file is present (container awaiting code).
+        1 — no active 2FA request for this instance.
+    """
+    from app.config import Config
+    from app.twofa import PENDING_FILENAME
+
+    cfg = Config.from_env()
+    pending_file = cfg.data_dir / PENDING_FILENAME
+    sys.exit(0 if pending_file.exists() else 1)
+
+
 @cli.command(name="check-session")
 def check_session() -> None:
     """Exit 0 if a saved Trade Republic session exists, 1 if login is required.

@@ -6,6 +6,7 @@ import datetime
 from unittest.mock import MagicMock, patch
 
 from app.bot_docker import (
+    _docker_check_awaiting_code,
     _docker_check_session,
     _docker_client_ctx,
     _docker_container_status,
@@ -314,3 +315,44 @@ def test_docker_last_sync_summary_returns_none_for_unknown_status():
     )
     with patch("app.bot_docker.docker.from_env", return_value=client):
         assert _docker_last_sync_summary("my-container") is None
+
+
+# ---------------------------------------------------------------------------
+# _docker_check_awaiting_code
+# ---------------------------------------------------------------------------
+
+
+def test_docker_check_awaiting_code_returns_true_when_exit_zero():
+    """Exit code 0 means the container has an active pending-login marker."""
+    client = _make_docker_client(exit_code=0)
+    with patch("app.bot_docker.docker.from_env", return_value=client):
+        assert _docker_check_awaiting_code("my-container") is True
+
+
+def test_docker_check_awaiting_code_returns_false_when_exit_one():
+    """Exit code 1 means no pending-login marker is present."""
+    client = _make_docker_client(exit_code=1)
+    with patch("app.bot_docker.docker.from_env", return_value=client):
+        assert _docker_check_awaiting_code("my-container") is False
+
+
+def test_docker_check_awaiting_code_returns_none_on_unexpected_exit_code():
+    client = _make_docker_client(exit_code=2)
+    with patch("app.bot_docker.docker.from_env", return_value=client):
+        assert _docker_check_awaiting_code("my-container") is None
+
+
+def test_docker_check_awaiting_code_returns_none_on_exception():
+    client = MagicMock()
+    client.containers.get.side_effect = Exception("not found")
+    with patch("app.bot_docker.docker.from_env", return_value=client):
+        assert _docker_check_awaiting_code("my-container") is None
+
+
+def test_docker_check_awaiting_code_invokes_check_pending_command():
+    """Must call ``python -m app check-pending`` inside the container."""
+    client = _make_docker_client(exit_code=0)
+    with patch("app.bot_docker.docker.from_env", return_value=client):
+        _docker_check_awaiting_code("my-container")
+    cmd = client.containers.get.return_value.exec_run.call_args.args[0]
+    assert "check-pending" in cmd

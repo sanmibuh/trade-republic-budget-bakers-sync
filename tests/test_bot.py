@@ -1041,6 +1041,7 @@ def test_maybe_submit_pending_code_multi_instance_no_pending_sends_disambiguatio
     a plain-digit message should prompt the user to use /code <instance> <code>."""
     bot = _bot()  # default has david + eli
     with (
+        patch("app.bot._docker_check_awaiting_code", return_value=False),
         patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message") as mock_send,
     ):
@@ -1057,6 +1058,7 @@ def test_handle_message_digit_cron_multi_instance_sends_disambiguation():
     instances should ask the user to disambiguate."""
     bot = _bot()  # david + eli
     with (
+        patch("app.bot._docker_check_awaiting_code", return_value=False),
         patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message") as mock_send,
     ):
@@ -1066,7 +1068,66 @@ def test_handle_message_digit_cron_multi_instance_sends_disambiguation():
     assert "/code" in mock_send.call_args.args[0]
 
 
-def test_handle_message_unknown_plain_text_ignored_from_other_chat():
+def test_maybe_submit_pending_code_docker_single_awaiting_submits_directly():
+    """When _pending_login is empty but exactly one container is awaiting a code
+    (detected via Docker check-pending), the code is submitted to that instance."""
+    bot = _bot()  # david + eli
+    david = bot._cfg.instances["david"]
+
+    def docker_check(container_name: str) -> bool:
+        return container_name == david.container_name
+
+    with (
+        patch("app.bot._docker_check_awaiting_code", side_effect=docker_check),
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message"),
+    ):
+        result = bot._maybe_submit_pending_code("123456")
+
+    assert result is True
+    mock_exec.assert_called_once_with(
+        david.container_name, ["submit-code", "123456"], on_error=ANY
+    )
+
+
+def test_maybe_submit_pending_code_docker_multiple_awaiting_sends_disambiguation():
+    """When _pending_login is empty but multiple containers are awaiting a code,
+    the user is asked to specify with /code <instance> <code>."""
+    bot = _bot()  # david + eli
+
+    with (
+        patch("app.bot._docker_check_awaiting_code", return_value=True),
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        result = bot._maybe_submit_pending_code("123456")
+
+    assert result is False
+    mock_exec.assert_not_called()
+    sent = mock_send.call_args.args[0]
+    assert "/code" in sent
+
+
+def test_handle_message_digit_docker_single_awaiting_submits_and_deletes():
+    """Plain-digit reply on multi-instance setup is submitted and deleted when
+    exactly one container is awaiting a code via Docker pending check."""
+    bot = _bot()  # david + eli
+    david = bot._cfg.instances["david"]
+
+    def docker_check(container_name: str) -> bool:
+        return container_name == david.container_name
+
+    with (
+        patch("app.bot._docker_check_awaiting_code", side_effect=docker_check),
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_delete_message") as mock_delete,
+    ):
+        bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
+
+    mock_exec.assert_called_once()
+    mock_delete.assert_called_once_with(77)
+
     """Messages from unauthorized chats are never answered."""
     bot = _bot()
     with patch.object(bot, "_send_message") as mock_send:
