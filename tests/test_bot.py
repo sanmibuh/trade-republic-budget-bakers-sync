@@ -1128,6 +1128,8 @@ def test_handle_message_digit_docker_single_awaiting_submits_and_deletes():
     mock_exec.assert_called_once()
     mock_delete.assert_called_once_with(77)
 
+
+def test_handle_message_unknown_plain_text_ignored_from_other_chat():
     """Messages from unauthorized chats are never answered."""
     bot = _bot()
     with patch.object(bot, "_send_message") as mock_send:
