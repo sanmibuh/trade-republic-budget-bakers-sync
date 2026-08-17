@@ -1,0 +1,22 @@
+tests/test_bot_docker.py
+  h_97a91c9e567f87 308-316
+tests/test_bot_keyboards.py
+  h_97a91c9e567f87 214-218
+tests/test_config.py
+  h_97a91c9e567f87 5,432-441
+tests/test_history_categorizer.py
+  h_97a91c9e567f87 201-211
+tests/test_sync_runner.py
+  h_97a91c9e567f87 3,5,1211-1230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "acbd31fe7406e4fe9b59dd133317ae770d73e32d",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
