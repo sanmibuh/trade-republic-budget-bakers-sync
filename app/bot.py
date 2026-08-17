@@ -663,13 +663,23 @@ class TelegramBot:
                 )
                 return True
             # Multi-instance: probe Docker to find which containers are awaiting a code.
+            # Short-circuit as soon as two pending containers are found — there is no
+            # need to query the rest if we already know the result is ambiguous.
+            # If the Docker daemon is unreachable (_docker_client_ctx yields None),
+            # skip probing entirely to avoid per-instance reconnect attempts.
             with _docker_client_ctx() as docker_client:
-                docker_pending = {
-                    name: inst
-                    for name, inst in instances.items()
-                    if _docker_check_awaiting_code(inst.container_name, docker_client)
-                    is True
-                }
+                docker_pending: dict[str, InstanceConfig] = {}
+                if docker_client is not None:
+                    for name, inst in instances.items():
+                        if (
+                            _docker_check_awaiting_code(
+                                inst.container_name, docker_client
+                            )
+                            is True
+                        ):
+                            docker_pending[name] = inst
+                            if len(docker_pending) > 1:
+                                break
             if len(docker_pending) == 1:
                 inst = next(iter(docker_pending.values()))
                 self._exec_in_thread(

@@ -1053,6 +1053,32 @@ def test_maybe_submit_pending_code_multi_instance_no_pending_sends_disambiguatio
     assert "/code" in sent
 
 
+def test_maybe_submit_pending_code_docker_unavailable_skips_probing():
+    """When the Docker daemon is unreachable (_docker_client_ctx yields None),
+    _docker_check_awaiting_code must never be called and the generic
+    disambiguation message must still be sent."""
+    bot = _bot()  # david + eli
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def null_ctx():
+        yield None
+
+    with (
+        patch("app.bot._docker_client_ctx", return_value=null_ctx()),
+        patch("app.bot._docker_check_awaiting_code") as mock_check,
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        result = bot._maybe_submit_pending_code("123456")
+
+    assert result is False
+    mock_check.assert_not_called()
+    mock_exec.assert_not_called()
+    assert "/code" in mock_send.call_args.args[0]
+
+
 def test_handle_message_digit_cron_multi_instance_sends_disambiguation():
     """Replying with a digit-only code while _pending_login is empty with multiple
     instances should ask the user to disambiguate."""
@@ -1127,6 +1153,34 @@ def test_handle_message_digit_docker_single_awaiting_submits_and_deletes():
 
     mock_exec.assert_called_once()
     mock_delete.assert_called_once_with(77)
+
+
+def test_maybe_submit_pending_code_docker_short_circuits_after_two_pending():
+    """Docker pending check must stop querying containers as soon as two are found —
+    no need to probe the third when the result is already ambiguous."""
+    three_instances = {
+        "user1": InstanceConfig(name="User1", container_name="proj-sync-user1-1"),
+        "user2": InstanceConfig(name="User2", container_name="proj-sync-user2-1"),
+        "user3": InstanceConfig(name="User3", container_name="proj-sync-user3-1"),
+    }
+    bot = _bot(instances=three_instances)
+    call_count = 0
+
+    def docker_check(container_name: str, client=None) -> bool:
+        nonlocal call_count
+        call_count += 1
+        # user1 and user2 are pending; user3 should never be queried
+        return container_name in ("proj-sync-user1-1", "proj-sync-user2-1")
+
+    with (
+        patch("app.bot._docker_check_awaiting_code", side_effect=docker_check),
+        patch.object(bot, "_exec_in_thread"),
+        patch.object(bot, "_send_message"),
+    ):
+        result = bot._maybe_submit_pending_code("123456")
+
+    assert result is False
+    assert call_count == 2  # stopped after finding david + eli; ana never queried
 
 
 def test_handle_message_unknown_plain_text_ignored_from_other_chat():
