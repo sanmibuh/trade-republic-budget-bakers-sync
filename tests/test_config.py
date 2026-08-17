@@ -439,3 +439,11 @@ def test_read_instance_falls_back_to_default_owner_name(monkeypatch):
     result = read_instance()
 
     assert result == "backup"
+
+
+def test_read_instance_uses_instance_env_var_when_set(monkeypatch):
+    """read_instance() returns INSTANCE as-is when the env var is set."""
+    monkeypatch.setenv("INSTANCE", "my-account")
+    monkeypatch.setenv("OWNER_NAME", "David")
+
+    assert read_instance() == "my-account"

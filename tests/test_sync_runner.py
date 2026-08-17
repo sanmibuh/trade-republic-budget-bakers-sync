@@ -1219,9 +1219,11 @@ def test_process_results_logs_warning_when_set_sync_run_raises(tmp_path, caplog)
     event = {"id": "e1", "amount": 100}
     results = [{"inputIndex": 0, "id": "w1"}]
 
-    with EventRepository(tmp_path / "sync.db") as repo, patch.object(
-        repo, "set_sync_run", side_effect=RuntimeError("db locked")
-    ), caplog.at_level(logging.WARNING, logger="app.sync_runner"):
+    with (
+        EventRepository(tmp_path / "sync.db") as repo,
+        patch.object(repo, "set_sync_run", side_effect=RuntimeError("db locked")),
+        caplog.at_level(logging.WARNING, logger="app.sync_runner"),
+    ):
         counts = runner.process_results(results, [event], [[0]], repo)
 
     assert counts.synced == 1
