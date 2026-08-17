@@ -1160,3 +1160,61 @@ def test_filter_by_lookback_until_none_behaves_as_before():
     assert filter_by_lookback(events, since, until=None) == filter_by_lookback(
         events, since
     )
+
+
+# ---------------------------------------------------------------------------
+# TRADING_SAVINGSPLAN_EXECUTION_PENDING
+# ---------------------------------------------------------------------------
+
+
+def test_savings_plan_pending_uses_transfer_to_portfolio():
+    event = {
+        "eventType": "TRADING_SAVINGSPLAN_EXECUTION_PENDING",
+        "timestamp": "2024-06-01T10:00:00Z",
+        "amount": "-75.00",
+        "title": "Core MSCI World USD (Acc)",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+
+    assert len(records) == 1
+    r = records[0]
+    assert r["accountId"] == "cash"
+    assert r["transfer"] == {"pairingMode": "new", "accountId": "port"}
+    assert r["paymentType"] == "transfer"
+
+
+def test_savings_plan_pending_note_prefixed():
+    event = {
+        "eventType": "TRADING_SAVINGSPLAN_EXECUTION_PENDING",
+        "timestamp": "2024-06-01T10:00:00Z",
+        "amount": "-75.00",
+        "title": "Core MSCI World USD (Acc)",
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert records[0]["note"] == "Savings Plan Pending: Core MSCI World USD (Acc)"
+
+
+def test_savings_plan_pending_appends_transaktion_to_note():
+    details = _make_table_details(("Transaktion", "0,597 × 125,90 €"))
+    event = {
+        "eventType": "TRADING_SAVINGSPLAN_EXECUTION_PENDING",
+        "timestamp": "2024-06-01T10:00:00Z",
+        "amount": "-75.00",
+        "title": "Core MSCI World USD (Acc)",
+        "details": details,
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert (
+        records[0]["note"]
+        == "Savings Plan Pending: Core MSCI World USD (Acc) · 0,597 × 125,90 €"
+    )
+
+
+def test_savings_plan_pending_is_known_event_type():
+    assert "TRADING_SAVINGSPLAN_EXECUTION_PENDING" in KNOWN_EVENT_TYPES
