@@ -25,8 +25,8 @@ def _cfg(
 ) -> BotConfig:
     if instances is None:
         instances = {
-            "david": InstanceConfig(name="David", container_name="proj-sync-david-1"),
-            "eli": InstanceConfig(name="Eli", container_name="proj-sync-eli-1"),
+            "user1": InstanceConfig(name="User1", container_name="proj-sync-user1-1"),
+            "user2": InstanceConfig(name="User2", container_name="proj-sync-user2-1"),
         }
     return BotConfig(
         bot_token="tok",
@@ -50,7 +50,7 @@ def _bot(
 _VALID_ENV = {
     "TELEGRAM_BOT_TOKEN": "mytoken",
     "TELEGRAM_CHAT_ID": "123",
-    "INSTANCES": "david,eli",
+    "INSTANCES": "user1,user2",
     "CONTAINER_PREFIX": "myproject",
 }
 
@@ -61,11 +61,11 @@ def test_botconfig_from_env_valid(monkeypatch):
     cfg = BotConfig.from_env()
     assert cfg.bot_token == "mytoken"
     assert cfg.chat_id == "123"
-    assert "david" in cfg.instances
-    assert "eli" in cfg.instances
+    assert "user1" in cfg.instances
+    assert "user2" in cfg.instances
     # Sync containers include "sync-" prefix
-    assert cfg.instances["david"].container_name == "myproject-sync-david-1"
-    assert cfg.instances["eli"].container_name == "myproject-sync-eli-1"
+    assert cfg.instances["user1"].container_name == "myproject-sync-user1-1"
+    assert cfg.instances["user2"].container_name == "myproject-sync-user2-1"
 
 
 def test_botconfig_from_env_backup_container_default(monkeypatch):
@@ -126,10 +126,10 @@ def test_botconfig_from_env_missing_prefix(monkeypatch):
 def test_botconfig_from_env_instance_names_normalised(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.setenv("INSTANCES", " David , Eli ")  # extra spaces
+    monkeypatch.setenv("INSTANCES", " User1 , User2 ")  # extra spaces
     cfg = BotConfig.from_env()
-    assert "david" in cfg.instances
-    assert "eli" in cfg.instances
+    assert "user1" in cfg.instances
+    assert "user2" in cfg.instances
 
 
 def test_botconfig_telegram_verify_ssl_default_true(monkeypatch):
@@ -247,7 +247,7 @@ def test_handle_message_deletes_code_message_for_privacy():
         patch.object(bot, "_delete_message") as mock_delete,
     ):
         bot._handle_message(
-            {"chat": {"id": 42}, "message_id": 555, "text": "/code david 123456"}
+            {"chat": {"id": 42}, "message_id": 555, "text": "/code user1 123456"}
         )
     mock_delete.assert_called_once_with(555)
 
@@ -666,7 +666,7 @@ def test_callback_query_unauthorized_chat_ignored():
         patch.object(bot, "_launch_sync") as mock_sync,
     ):
         bot._handle_callback_query(
-            {"id": "cq1", "data": "sync:david", "message": {"chat": {"id": 9999}}}
+            {"id": "cq1", "data": "sync:user1", "message": {"chat": {"id": 9999}}}
         )
     mock_sync.assert_not_called()
 
@@ -678,10 +678,10 @@ def test_callback_query_sync_dispatches_launch_sync():
         patch.object(bot, "_launch_sync") as mock_sync,
     ):
         bot._handle_callback_query(
-            {"id": "cq1", "data": "sync:david", "message": {"chat": {"id": 42}}}
+            {"id": "cq1", "data": "sync:user1", "message": {"chat": {"id": 42}}}
         )
     mock_sync.assert_called_once()
-    assert mock_sync.call_args.args[0].name == "David"
+    assert mock_sync.call_args.args[0].name == "User1"
 
 
 def test_callback_query_unknown_instance_replies():
@@ -716,7 +716,7 @@ def test_callback_query_unknown_cmd_logs_warning_and_does_not_raise():
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._handle_callback_query(
-            {"id": "cq1", "data": "badcmd:david", "message": {"chat": {"id": 42}}}
+            {"id": "cq1", "data": "badcmd:user1", "message": {"chat": {"id": 42}}}
         )
     mock_send.assert_not_called()
 
@@ -728,19 +728,19 @@ def test_callback_query_unknown_cmd_logs_warning_and_does_not_raise():
 
 def test_launch_sync_sends_ack_and_starts_thread():
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message") as mock_send,
         patch.object(bot, "_exec_in_thread"),
     ):
         bot._launch_sync(inst)
     mock_send.assert_called_once()
-    assert "David" in mock_send.call_args.args[0]
+    assert "User1" in mock_send.call_args.args[0]
 
 
 def test_launch_sync_passes_correct_args_to_exec():
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message"),
         patch.object(bot, "_exec_in_thread") as mock_exec,
@@ -762,8 +762,8 @@ def test_cmd_login_sends_keyboard_with_instances():
     keyboard = mock_send.call_args.kwargs["keyboard"]
     all_buttons = [btn for row in keyboard for btn in row]
     labels = [b["text"] for b in all_buttons]
-    assert "David" in labels
-    assert "Eli" in labels
+    assert "User1" in labels
+    assert "User2" in labels
 
 
 def test_login_buttons_callback_data_encodes_login_cmd():
@@ -782,27 +782,27 @@ def test_callback_query_login_dispatches_launch_login():
         patch.object(bot, "_launch_login") as mock_login,
     ):
         bot._handle_callback_query(
-            {"id": "cq1", "data": "login:david", "message": {"chat": {"id": 42}}}
+            {"id": "cq1", "data": "login:user1", "message": {"chat": {"id": 42}}}
         )
     mock_login.assert_called_once()
-    assert mock_login.call_args.args[0].name == "David"
+    assert mock_login.call_args.args[0].name == "User1"
 
 
 def test_launch_login_sends_ack_and_starts_thread():
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message") as mock_send,
         patch.object(bot, "_exec_in_thread"),
     ):
         bot._launch_login(inst)
     mock_send.assert_called_once()
-    assert "David" in mock_send.call_args.args[0]
+    assert "User1" in mock_send.call_args.args[0]
 
 
 def test_launch_login_passes_correct_args_to_exec():
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message"),
         patch.object(bot, "_exec_in_thread") as mock_exec,
@@ -816,7 +816,7 @@ def test_launch_login_passes_correct_args_to_exec():
 
 def test_launch_login_reports_success_via_on_success():
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message") as mock_send,
         patch.object(bot, "_exec_in_thread") as mock_exec,
@@ -827,13 +827,13 @@ def test_launch_login_reports_success_via_on_success():
         mock_send.reset_mock()
         on_success()
     mock_send.assert_called_once()
-    assert "David" in mock_send.call_args.args[0]
+    assert "User1" in mock_send.call_args.args[0]
 
 
 def test_launch_login_auto_syncs_on_success():
     """After a successful login, the bot automatically triggers a sync for the same instance."""
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message"),
         patch.object(bot, "_exec_in_thread") as mock_exec,
@@ -853,51 +853,51 @@ def test_launch_login_auto_syncs_on_success():
 def test_launch_login_marks_instance_as_pending():
     """While login exec is running, the instance should be in _pending_login."""
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message"),
         patch.object(bot, "_exec_in_thread"),
     ):
         bot._launch_login(inst)
-    assert "david" in bot._pending_login
+    assert "user1" in bot._pending_login
 
 
 def test_on_login_success_removes_pending_state():
     """After success, the instance is removed from _pending_login."""
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message"),
         patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_launch_sync"),
     ):
         bot._launch_login(inst)
-        assert "david" in bot._pending_login
+        assert "user1" in bot._pending_login
         on_success = mock_exec.call_args.kwargs["on_success"]
         on_success()
-    assert "david" not in bot._pending_login
+    assert "user1" not in bot._pending_login
 
 
 def test_on_login_error_removes_pending_state():
     """After an error, the instance is also removed from _pending_login."""
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message"),
         patch.object(bot, "_exec_in_thread") as mock_exec,
     ):
         bot._launch_login(inst)
-        assert "david" in bot._pending_login
+        assert "user1" in bot._pending_login
         on_error = mock_exec.call_args.kwargs["on_error"]
         on_error("❌ failed")
-    assert "david" not in bot._pending_login
+    assert "user1" not in bot._pending_login
 
 
 def test_handle_message_digit_string_submitted_to_pending_instance():
     """A digit-only reply is treated as 2FA code when exactly one instance is pending."""
     bot = _bot()
-    inst = bot._cfg.instances["david"]
-    bot._pending_login["david"] = inst
+    inst = bot._cfg.instances["user1"]
+    bot._pending_login["user1"] = inst
     with (
         patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message"),
@@ -929,8 +929,8 @@ def test_handle_message_digit_string_not_deleted_when_no_pending_login_multi_ins
 def test_handle_message_digit_string_not_deleted_when_multiple_pending():
     """Digit message is not deleted when multiple instances are pending (just a prompt is sent)."""
     bot = _bot()
-    bot._pending_login["david"] = bot._cfg.instances["david"]
-    bot._pending_login["eli"] = bot._cfg.instances["eli"]
+    bot._pending_login["user1"] = bot._cfg.instances["user1"]
+    bot._pending_login["user2"] = bot._cfg.instances["user2"]
     with (
         patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message"),
@@ -958,8 +958,8 @@ def test_handle_message_digit_string_prompts_disambiguation_when_no_pending_logi
 def test_handle_message_digit_string_sends_prompt_when_multiple_pending():
     """When multiple instances are pending, ask which one the code is for."""
     bot = _bot()
-    bot._pending_login["david"] = bot._cfg.instances["david"]
-    bot._pending_login["eli"] = bot._cfg.instances["eli"]
+    bot._pending_login["user1"] = bot._cfg.instances["user1"]
+    bot._pending_login["user2"] = bot._cfg.instances["user2"]
     with (
         patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message") as mock_send,
@@ -968,15 +968,15 @@ def test_handle_message_digit_string_sends_prompt_when_multiple_pending():
     mock_exec.assert_not_called()
     mock_send.assert_called_once()
     sent_text = mock_send.call_args.args[0]
-    assert "david" in sent_text.lower() or "eli" in sent_text.lower()
+    assert "user1" in sent_text.lower() or "user2" in sent_text.lower()
 
 
 def test_maybe_submit_pending_code_snapshots_dict_to_avoid_race():
     """_maybe_submit_pending_code must snapshot _pending_login before iterating
     so a concurrent mutation from a worker thread doesn't cause RuntimeError."""
     bot = _bot()
-    inst = bot._cfg.instances["david"]
-    bot._pending_login["david"] = inst
+    inst = bot._cfg.instances["user1"]
+    bot._pending_login["user1"] = inst
 
     # Simulate the worker thread clearing pending state mid-iteration by
     # patching _exec_in_thread to mutate _pending_login before returning.
@@ -1003,7 +1003,7 @@ def test_maybe_submit_pending_code_single_instance_no_pending_submits_directly()
     """When _pending_login is empty and there is exactly one configured instance,
     a plain-digit message should be submitted to that instance (cron 2FA fallback)."""
     single_instance = {
-        "david": InstanceConfig(name="David", container_name="proj-sync-david-1")
+        "user1": InstanceConfig(name="User1", container_name="proj-sync-user1-1")
     }
     bot = _bot(instances=single_instance)
     with (
@@ -1013,7 +1013,7 @@ def test_maybe_submit_pending_code_single_instance_no_pending_submits_directly()
         result = bot._maybe_submit_pending_code("123456")
     assert result is True
     mock_exec.assert_called_once_with(
-        "proj-sync-david-1", ["submit-code", "123456"], on_error=ANY
+        "proj-sync-user1-1", ["submit-code", "123456"], on_error=ANY
     )
 
 
@@ -1021,7 +1021,7 @@ def test_handle_message_digit_cron_single_instance_submits_code():
     """Replying with a digit-only code while _pending_login is empty should work
     for single-instance setups (cron-triggered 2FA) and delete the sensitive message."""
     single_instance = {
-        "david": InstanceConfig(name="David", container_name="proj-sync-david-1")
+        "user1": InstanceConfig(name="User1", container_name="proj-sync-user1-1")
     }
     bot = _bot(instances=single_instance)
     with (
@@ -1031,7 +1031,7 @@ def test_handle_message_digit_cron_single_instance_submits_code():
     ):
         bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
     mock_exec.assert_called_once_with(
-        "proj-sync-david-1", ["submit-code", "123456"], on_error=ANY
+        "proj-sync-user1-1", ["submit-code", "123456"], on_error=ANY
     )
     mock_delete.assert_called_once_with(77)
 
@@ -1039,8 +1039,9 @@ def test_handle_message_digit_cron_single_instance_submits_code():
 def test_maybe_submit_pending_code_multi_instance_no_pending_sends_disambiguation():
     """When _pending_login is empty and there are multiple instances,
     a plain-digit message should prompt the user to use /code <instance> <code>."""
-    bot = _bot()  # default has david + eli
+    bot = _bot()  # default has user1 + user2
     with (
+        patch("app.bot._docker_check_awaiting_code", return_value=False),
         patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message") as mock_send,
     ):
@@ -1052,11 +1053,38 @@ def test_maybe_submit_pending_code_multi_instance_no_pending_sends_disambiguatio
     assert "/code" in sent
 
 
+def test_maybe_submit_pending_code_docker_unavailable_skips_probing():
+    """When the Docker daemon is unreachable (_docker_client_ctx yields None),
+    _docker_check_awaiting_code must never be called and the generic
+    disambiguation message must still be sent."""
+    bot = _bot()  # user1 + user2
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def null_ctx():
+        yield None
+
+    with (
+        patch("app.bot._docker_client_ctx", return_value=null_ctx()),
+        patch("app.bot._docker_check_awaiting_code") as mock_check,
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        result = bot._maybe_submit_pending_code("123456")
+
+    assert result is False
+    mock_check.assert_not_called()
+    mock_exec.assert_not_called()
+    assert "/code" in mock_send.call_args.args[0]
+
+
 def test_handle_message_digit_cron_multi_instance_sends_disambiguation():
     """Replying with a digit-only code while _pending_login is empty with multiple
     instances should ask the user to disambiguate."""
-    bot = _bot()  # david + eli
+    bot = _bot()  # user1 + user2
     with (
+        patch("app.bot._docker_check_awaiting_code", return_value=False),
         patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message") as mock_send,
     ):
@@ -1064,6 +1092,95 @@ def test_handle_message_digit_cron_multi_instance_sends_disambiguation():
     mock_exec.assert_not_called()
     mock_send.assert_called_once()
     assert "/code" in mock_send.call_args.args[0]
+
+
+def test_maybe_submit_pending_code_docker_single_awaiting_submits_directly():
+    """When _pending_login is empty but exactly one container is awaiting a code
+    (detected via Docker check-pending), the code is submitted to that instance."""
+    bot = _bot()  # user1 + user2
+    user1 = bot._cfg.instances["user1"]
+
+    def docker_check(container_name: str, client=None) -> bool:
+        return container_name == user1.container_name
+
+    with (
+        patch("app.bot._docker_check_awaiting_code", side_effect=docker_check),
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message"),
+    ):
+        result = bot._maybe_submit_pending_code("123456")
+
+    assert result is True
+    mock_exec.assert_called_once_with(
+        user1.container_name, ["submit-code", "123456"], on_error=ANY
+    )
+
+
+def test_maybe_submit_pending_code_docker_multiple_awaiting_sends_disambiguation():
+    """When _pending_login is empty but multiple containers are awaiting a code,
+    the user is asked to specify with /code <instance> <code>."""
+    bot = _bot()  # user1 + user2
+
+    with (
+        patch("app.bot._docker_check_awaiting_code", return_value=True),
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        result = bot._maybe_submit_pending_code("123456")
+
+    assert result is False
+    mock_exec.assert_not_called()
+    sent = mock_send.call_args.args[0]
+    assert "/code" in sent
+
+
+def test_handle_message_digit_docker_single_awaiting_submits_and_deletes():
+    """Plain-digit reply on multi-instance setup is submitted and deleted when
+    exactly one container is awaiting a code via Docker pending check."""
+    bot = _bot()  # user1 + user2
+    user1 = bot._cfg.instances["user1"]
+
+    def docker_check(container_name: str, client=None) -> bool:
+        return container_name == user1.container_name
+
+    with (
+        patch("app.bot._docker_check_awaiting_code", side_effect=docker_check),
+        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_delete_message") as mock_delete,
+    ):
+        bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
+
+    mock_exec.assert_called_once()
+    mock_delete.assert_called_once_with(77)
+
+
+def test_maybe_submit_pending_code_docker_short_circuits_after_two_pending():
+    """Docker pending check must stop querying containers as soon as two are found —
+    no need to probe the third when the result is already ambiguous."""
+    three_instances = {
+        "user1": InstanceConfig(name="User1", container_name="proj-sync-user1-1"),
+        "user2": InstanceConfig(name="User2", container_name="proj-sync-user2-1"),
+        "user3": InstanceConfig(name="User3", container_name="proj-sync-user3-1"),
+    }
+    bot = _bot(instances=three_instances)
+    call_count = 0
+
+    def docker_check(container_name: str, client=None) -> bool:
+        nonlocal call_count
+        call_count += 1
+        # user1 and user2 are pending; user3 should never be queried
+        return container_name in ("proj-sync-user1-1", "proj-sync-user2-1")
+
+    with (
+        patch("app.bot._docker_check_awaiting_code", side_effect=docker_check),
+        patch.object(bot, "_exec_in_thread"),
+        patch.object(bot, "_send_message"),
+    ):
+        result = bot._maybe_submit_pending_code("123456")
+
+    assert result is False
+    assert call_count == 2  # stopped after finding user1 + user2; user3 never queried
 
 
 def test_handle_message_unknown_plain_text_ignored_from_other_chat():
@@ -1080,9 +1197,9 @@ def test_cmd_code_executes_submit_code_for_instance():
         patch.object(bot, "_send_message") as mock_send,
         patch.object(bot, "_exec_in_thread") as mock_exec,
     ):
-        bot._cmd_code(["david", "123456"])
+        bot._cmd_code(["user1", "123456"])
     mock_exec.assert_called_once_with(
-        "proj-sync-david-1", ["submit-code", "123456"], on_error=ANY
+        "proj-sync-user1-1", ["submit-code", "123456"], on_error=ANY
     )
     mock_send.assert_called_once()
 
@@ -1093,7 +1210,7 @@ def test_cmd_code_missing_args_sends_usage():
         patch.object(bot, "_send_message") as mock_send,
         patch("app.bot.threading.Thread") as mock_thread,
     ):
-        bot._cmd_code(["david"])
+        bot._cmd_code(["user1"])
     mock_thread.assert_not_called()
     mock_send.assert_called_once()
     assert "code" in mock_send.call_args.args[0].lower()
@@ -1117,7 +1234,7 @@ def test_cmd_code_non_digit_code_sends_error():
         patch.object(bot, "_send_message") as mock_send,
         patch("app.bot.threading.Thread") as mock_thread,
     ):
-        bot._cmd_code(["david", "abc123"])
+        bot._cmd_code(["user1", "abc123"])
     mock_thread.assert_not_called()
     mock_send.assert_called_once()
 
@@ -1125,8 +1242,8 @@ def test_cmd_code_non_digit_code_sends_error():
 def test_handle_message_dispatches_code():
     bot = _bot()
     with patch.object(bot, "_cmd_code") as mock_code:
-        bot._handle_message({"chat": {"id": 42}, "text": "/code david 123456"})
-    mock_code.assert_called_once_with(["david", "123456"])
+        bot._handle_message({"chat": {"id": 42}, "text": "/code user1 123456"})
+    mock_code.assert_called_once_with(["user1", "123456"])
 
 
 # ---------------------------------------------------------------------------
@@ -1244,8 +1361,8 @@ def test_cmd_logs_sends_keyboard_with_instances():
     assert "keyboard" in kwargs
     all_buttons = [btn for row in kwargs["keyboard"] for btn in row]
     labels = [b["text"] for b in all_buttons]
-    assert "David" in labels
-    assert "Eli" in labels
+    assert "User1" in labels
+    assert "User2" in labels
 
 
 def test_cmd_logs_callback_data_encodes_logs_cmd():
@@ -1279,13 +1396,13 @@ def test_callback_query_logs_dispatches_fetch_and_send_logs():
         bot._handle_callback_query(
             {
                 "id": "cq1",
-                "data": "logs:david",
+                "data": "logs:user1",
                 "message": {"chat": {"id": 42}},
             }
         )
     mock_thread.assert_called_once()
     assert mock_thread.call_args.kwargs["target"] == bot._fetch_and_send_logs
-    assert mock_thread.call_args.kwargs["args"][0].name == "David"
+    assert mock_thread.call_args.kwargs["args"][0].name == "User1"
 
 
 # ---------------------------------------------------------------------------
@@ -1295,7 +1412,7 @@ def test_callback_query_logs_dispatches_fetch_and_send_logs():
 
 def test_fetch_and_send_logs_sends_todays_logs():
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch(
             "app.bot._docker_logs_today", return_value="INFO sync: all done\n"
@@ -1313,7 +1430,7 @@ def test_fetch_and_send_logs_sends_todays_logs():
 
 def test_fetch_and_send_logs_empty_logs_sends_notice():
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch("app.bot._docker_logs_today", return_value=""),
         patch.object(bot, "_send_message") as mock_send,
@@ -1327,7 +1444,7 @@ def test_fetch_and_send_logs_truncates_long_output():
     from app.bot import _MAX_LOG_CHARS
 
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     long_log = "x" * (_MAX_LOG_CHARS + 500)
     with (
         patch("app.bot._docker_logs_today", return_value=long_log),
@@ -1342,7 +1459,7 @@ def test_fetch_and_send_logs_truncates_long_output():
 
 def test_fetch_and_send_logs_sends_error_on_exception():
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch(
             "app.bot._docker_logs_today", side_effect=Exception("container not found")
@@ -1757,11 +1874,11 @@ def test_callback_resync_pick_date_sends_date_keyboard():
         bot._handle_callback_query(
             {
                 "id": "cq1",
-                "data": "resync_pick_date:david",
+                "data": "resync_pick_date:user1",
                 "message": {"chat": {"id": 42}},
             }
         )
-    mock_dates.assert_called_once_with("david")
+    mock_dates.assert_called_once_with("user1")
     mock_send.assert_called_once()
 
 
@@ -1775,14 +1892,14 @@ def test_callback_resync_dispatches_launch_resync():
         bot._handle_callback_query(
             {
                 "id": "cq1",
-                "data": "resync:2026-07-15:david",
+                "data": "resync:2026-07-15:user1",
                 "message": {"chat": {"id": 42}},
             }
         )
     mock_launch.assert_called_once()
     inst, date_str = mock_launch.call_args.args
     assert date_str == "2026-07-15"
-    assert inst.name == "David"
+    assert inst.name == "User1"
 
 
 def test_callback_resync_unknown_instance_replies():
@@ -1844,7 +1961,7 @@ def test_callback_resync_malformed_too_few_parts_does_not_raise():
 
 def test_launch_resync_sends_ack_and_starts_thread():
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message") as mock_send,
         patch.object(bot, "_exec_in_thread") as mock_exec,
@@ -1856,7 +1973,7 @@ def test_launch_resync_sends_ack_and_starts_thread():
 
 def test_launch_resync_passes_correct_args():
     bot = _bot()
-    inst = bot._cfg.instances["david"]
+    inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message"),
         patch.object(bot, "_exec_in_thread") as mock_exec,
@@ -1904,7 +2021,7 @@ def test_instance_buttons_delegates_to_bot_keyboards():
     bot = _bot()
     with patch("app.bot._instance_buttons_fn", return_value=[[]]) as mock_fn:
         bot._instance_buttons("sync")
-    mock_fn.assert_called_once_with("sync", ["David", "Eli"])
+    mock_fn.assert_called_once_with("sync", ["User1", "User2"])
 
 
 def test_month_buttons_delegates_to_bot_keyboards():

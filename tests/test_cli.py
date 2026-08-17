@@ -455,3 +455,31 @@ def test_check_session_exits_two_when_db_is_unreadable(tmp_path, monkeypatch):
     with patch("app.config.read_data_dir", return_value=tmp_path):
         result = _runner().invoke(cli, ["check-session"])
     assert result.exit_code == 2
+
+
+# ---------------------------------------------------------------------------
+# check-pending command
+# ---------------------------------------------------------------------------
+
+
+def test_check_pending_exits_zero_when_pending_file_present(tmp_path):
+    """check-pending exits 0 when the .tr_2fa_pending marker exists."""
+    from app.twofa import PENDING_FILENAME
+
+    (tmp_path / PENDING_FILENAME).touch()
+    with patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)):
+        result = _runner().invoke(cli, ["check-pending"])
+    assert result.exit_code == 0
+
+
+def test_check_pending_exits_one_when_pending_file_absent(tmp_path):
+    """check-pending exits 1 when no login is currently waiting."""
+    with patch("app.config.Config.from_env", return_value=_mock_cfg(tmp_path)):
+        result = _runner().invoke(cli, ["check-pending"])
+    assert result.exit_code == 1
+
+
+def test_check_pending_help():
+    result = _runner().invoke(cli, ["check-pending", "--help"])
+    assert result.exit_code == 0
+    assert "pending" in result.output.lower()

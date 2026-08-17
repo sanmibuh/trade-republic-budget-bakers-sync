@@ -57,6 +57,7 @@ import urllib3
 
 import docker
 from app.bot_docker import (
+    _docker_check_awaiting_code,
     _docker_check_session,
     _docker_client_ctx,
     _docker_container_status,
@@ -644,36 +645,87 @@ class TelegramBot:
         self._send_message(msg)
 
     def _maybe_submit_pending_code(self, code: str) -> bool:
-        """Submit *code* to the single pending login instance, or prompt if ambiguous."""
+        """Submit *code* to the single pending login instance, or prompt if ambiguous.
+
+        When ``_pending_login`` is empty (login was triggered by a cron sync rather
+        than the ``/login`` Telegram command), falls back to querying each container
+        via ``check-pending`` to discover which ones are actively waiting for a code.
+        """
         pending = dict(self._pending_login)  # snapshot before any iteration
-        if not pending:
-            instances = self._cfg.instances
-            if len(instances) == 1:
-                inst = next(iter(instances.values()))
-                self._exec_in_thread(
-                    inst.container_name,
-                    ["submit-code", code],
-                    on_error=self._send_message,
-                )
-                return True
-            names = ", ".join(f"*{_esc(k)}*" for k in sorted(instances))
-            self._send_message(
-                f"⚠️ Multiple instances configured: {names}\\. "
-                "Use `/code <instance> <code>` to specify which one\\."
-            )
-            return False
+        if pending:
+            return self._submit_code_from_pending(pending, code)
+        return self._submit_code_no_pending(code)
+
+    def _submit_code_to(self, inst: InstanceConfig, code: str) -> bool:
+        """Dispatch *code* to *inst* and return True."""
+        self._exec_in_thread(
+            inst.container_name, ["submit-code", code], on_error=self._send_message
+        )
+        return True
+
+    def _submit_code_from_pending(
+        self, pending: dict[str, InstanceConfig], code: str
+    ) -> bool:
+        """Submit *code* when ``_pending_login`` is non-empty."""
         if len(pending) == 1:
-            inst = next(iter(pending.values()))
-            self._exec_in_thread(
-                inst.container_name, ["submit-code", code], on_error=self._send_message
-            )
-            return True
+            return self._submit_code_to(next(iter(pending.values())), code)
         names = ", ".join(f"*{_esc(k)}*" for k in sorted(pending))
         self._send_message(
             f"⚠️ Multiple logins pending: {names}\\. "
             "Use `/code <instance> <code>` to specify which one\\."
         )
         return False
+
+    def _submit_code_no_pending(self, code: str) -> bool:
+        """Submit *code* when ``_pending_login`` is empty.
+
+        For a single-instance setup submits directly.  For multi-instance setups,
+        probes Docker to discover which containers are awaiting a code and routes
+        accordingly, falling back to a generic disambiguation prompt when the daemon
+        is unreachable or no container is waiting.
+        """
+        instances = self._cfg.instances
+        if len(instances) == 1:
+            return self._submit_code_to(next(iter(instances.values())), code)
+        docker_pending = self._probe_docker_pending(instances)
+        if len(docker_pending) == 1:
+            return self._submit_code_to(next(iter(docker_pending.values())), code)
+        if len(docker_pending) > 1:
+            names = ", ".join(f"*{_esc(k)}*" for k in sorted(docker_pending))
+            self._send_message(
+                f"⚠️ Multiple logins pending: {names}\\. "
+                "Use `/code <instance> <code>` to specify which one\\."
+            )
+            return False
+        names = ", ".join(f"*{_esc(k)}*" for k in sorted(instances))
+        self._send_message(
+            f"⚠️ Multiple instances configured: {names}\\. "
+            "Use `/code <instance> <code>` to specify which one\\."
+        )
+        return False
+
+    def _probe_docker_pending(
+        self, instances: dict[str, InstanceConfig]
+    ) -> dict[str, InstanceConfig]:
+        """Query each container via ``check-pending`` and return those awaiting a code.
+
+        Uses a single shared Docker client and short-circuits after finding two
+        pending containers (result is already ambiguous).  Returns an empty dict
+        when the Docker daemon is unreachable.
+        """
+        pending: dict[str, InstanceConfig] = {}
+        with _docker_client_ctx() as docker_client:
+            if docker_client is None:
+                return pending
+            for name, inst in instances.items():
+                if (
+                    _docker_check_awaiting_code(inst.container_name, docker_client)
+                    is True
+                ):
+                    pending[name] = inst
+                    if len(pending) > 1:
+                        break
+        return pending
 
     def _fetch_and_send_logs(self, inst: InstanceConfig) -> None:
         """Fetch today's logs for *inst* and send them to Telegram."""

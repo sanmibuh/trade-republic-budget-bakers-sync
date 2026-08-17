@@ -88,6 +88,37 @@ def _docker_client_ctx() -> Generator[docker.DockerClient | None, None, None]:
 # ---------------------------------------------------------------------------
 
 
+def _docker_check_awaiting_code(
+    container_name: str, client: docker.DockerClient | None = None
+) -> bool | None:
+    """Check whether *container_name* is currently waiting for a 2FA code.
+
+    Runs ``python -m app check-pending`` inside the container via the Docker SDK.
+
+    Returns:
+        True   — the container has an active pending-login marker (exit code 0).
+        False  — no pending login (exit code 1).
+        None   — container unreachable or exec failed unexpectedly.
+    """
+    try:
+        client = client or docker.from_env()
+        container = client.containers.get(container_name)
+        exit_code, _ = container.exec_run(["python", "-m", "app", "check-pending"])
+        if exit_code == 0:
+            return True
+        if exit_code == 1:
+            return False
+        log.warning(
+            "check-pending exited with unexpected code %s for %s",
+            exit_code,
+            container_name,
+        )
+        return None
+    except Exception as exc:
+        log.debug("check-pending exec failed for %s: %s", container_name, exc)
+        return None
+
+
 def _docker_check_session(
     container_name: str, client: docker.DockerClient | None = None
 ) -> bool | None:
