@@ -173,6 +173,7 @@ _EVENT_TITLES: dict[str, str] = {
     "SELL_ORDER": "Sell Order",
     "SAVINGS_PLAN": "Savings Plan",
     "TRADING_SAVINGSPLAN_EXECUTED": "Savings Plan",
+    "TRADING_SAVINGSPLAN_EXECUTION_PENDING": "Savings Plan Pending",
     "CARD_TRANSACTION": "Card Transaction",
     "CARD_VERIFICATION": "Card Verification",
     "PAYMENT_INBOUND": "Payment Inbound",
@@ -187,6 +188,7 @@ _PREFIXED_TYPES: frozenset[str] = frozenset(
         "SAVEBACK_AGGREGATE",
         "SPARE_CHANGE_AGGREGATE",
         "TRADING_SAVINGSPLAN_EXECUTED",
+        "TRADING_SAVINGSPLAN_EXECUTION_PENDING",
     }
 )
 
@@ -229,7 +231,11 @@ def _note_extras(event: dict[str, Any], event_type: str) -> list[str]:
     """
     details = event.get("details") or {}
 
-    if event_type in ("TRADING_SAVINGSPLAN_EXECUTED", "SPARE_CHANGE_AGGREGATE"):
+    if event_type in (
+        "TRADING_SAVINGSPLAN_EXECUTED",
+        "TRADING_SAVINGSPLAN_EXECUTION_PENDING",
+        "SPARE_CHANGE_AGGREGATE",
+    ):
         txn = _extract_detail_row(details, _DETAIL_TRANSACTION)
         return [txn] if txn else []
 
@@ -419,6 +425,7 @@ _HANDLERS: dict[str, _EventHandler] = {
     "SELL_ORDER": _handle_transfer_to_portfolio,
     "SAVINGS_PLAN": _handle_transfer_to_portfolio,
     "TRADING_SAVINGSPLAN_EXECUTED": _handle_transfer_to_portfolio,
+    "TRADING_SAVINGSPLAN_EXECUTION_PENDING": _handle_transfer_to_portfolio,
     "SAVEBACK_AGGREGATE": _handle_transfer_to_portfolio,
     "SPARE_CHANGE_AGGREGATE": _handle_transfer_to_portfolio,
     "SAVEBACK": _handle_saveback,
