@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [6.7.0] - 2026-08-17
+
+### What's Changed
+* Plain-digit 2FA reply not recognized when login is triggered by sync (not by /login command) — [#144](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/144)
+* 🧪 Nightly: improve test coverage (2026-08-16) — [#142](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/142)
+* fix: bump-version workflow triggers incorrectly on requirements-dev.txt changes — [#141](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/141)
+* Handle TRADING_SAVINGSPLAN_EXECUTION_PENDING event type — [#138](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/138)
+* deps: bump ruff from 0.16.2 to 0.16.3 in the pip-dependencies group — [#135](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/135)
+* nightly: run daily at 4am and add AI-powered suggestion job — [#133](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/133)
+* refactor: break up run() orchestration function in main.py — [#131](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/131)
+* refactor: split bot.py god class into focused collaborators — [#130](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/130)
+**Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v6.6.0...v6.7.0
+
+
 ## [6.6.0] - 2026-08-15
 
 ### What's Changed
