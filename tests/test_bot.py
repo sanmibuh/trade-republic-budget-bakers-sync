@@ -1074,7 +1074,7 @@ def test_maybe_submit_pending_code_docker_single_awaiting_submits_directly():
     bot = _bot()  # david + eli
     david = bot._cfg.instances["david"]
 
-    def docker_check(container_name: str) -> bool:
+    def docker_check(container_name: str, client=None) -> bool:
         return container_name == david.container_name
 
     with (
@@ -1114,7 +1114,7 @@ def test_handle_message_digit_docker_single_awaiting_submits_and_deletes():
     bot = _bot()  # david + eli
     david = bot._cfg.instances["david"]
 
-    def docker_check(container_name: str) -> bool:
+    def docker_check(container_name: str, client=None) -> bool:
         return container_name == david.container_name
 
     with (

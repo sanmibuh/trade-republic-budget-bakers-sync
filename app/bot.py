@@ -663,11 +663,13 @@ class TelegramBot:
                 )
                 return True
             # Multi-instance: probe Docker to find which containers are awaiting a code.
-            docker_pending = {
-                name: inst
-                for name, inst in instances.items()
-                if _docker_check_awaiting_code(inst.container_name) is True
-            }
+            with _docker_client_ctx() as docker_client:
+                docker_pending = {
+                    name: inst
+                    for name, inst in instances.items()
+                    if _docker_check_awaiting_code(inst.container_name, docker_client)
+                    is True
+                }
             if len(docker_pending) == 1:
                 inst = next(iter(docker_pending.values()))
                 self._exec_in_thread(
