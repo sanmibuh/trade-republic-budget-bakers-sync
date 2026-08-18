@@ -1449,6 +1449,30 @@ def test_handle_message_dispatches_logs(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# TelegramBot callback logs: legacy backward compat
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_callback_logs_dispatches_fetch_and_send_logs(tmp_path):
+    """A legacy logs:<instance> callback must trigger _fetch_and_send_logs (shared log)."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch("app.bot.threading.Thread") as mock_thread,
+    ):
+        mock_thread.return_value.start = MagicMock()
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "logs:user1",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["target"] == bot._fetch_and_send_logs
+
+
+# ---------------------------------------------------------------------------
 # TelegramBot._fetch_and_send_logs (shared log — no instance argument)
 # ---------------------------------------------------------------------------
 

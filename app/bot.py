@@ -486,7 +486,12 @@ class TelegramBot:
         self._launch_resync(inst, date_str)
 
     def _on_cb_instance_cmd(self, cmd: str, parts: list[str]) -> None:
-        """Handle instance-routed callbacks: sync, login, logs."""
+        """Handle instance-routed callbacks: sync, login.
+
+        Also accepts legacy ``logs:<instance>`` callbacks (from chat history
+        buttons created before the shared-log migration) and routes them to
+        the current shared-log implementation — the instance name is ignored.
+        """
         instance_key = parts[-1].lower()
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
@@ -497,6 +502,12 @@ class TelegramBot:
             self._launch_sync(inst)
         elif cmd == "login":
             self._launch_login(inst)
+        elif cmd == "logs":
+            # Legacy callback — instance picker was removed; use shared log.
+            threading.Thread(
+                target=self._fetch_and_send_logs,
+                daemon=True,
+            ).start()
         else:
             log.warning("Unknown callback cmd: %r", cmd)
 
