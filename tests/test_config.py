@@ -574,8 +574,9 @@ def test_instances_config_load_file_not_found():
 
     from app.config import InstancesConfig
 
+    missing = Path("/nonexistent/path/instances.yml")
     with pytest.raises(FileNotFoundError):
-        InstancesConfig.load(Path("/nonexistent/path/instances.yml"))
+        InstancesConfig.load(missing)
 
 
 def test_instances_config_load_missing_required_instance_field(tmp_path):
@@ -693,8 +694,9 @@ def test_instances_config_get_instance_not_found(tmp_path):
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(_MINIMAL_YAML)
 
+    cfg = InstancesConfig.load(cfg_file)
     with pytest.raises(ValueError, match="unknown"):
-        InstancesConfig.load(cfg_file).get_instance("unknown")
+        cfg.get_instance("unknown")
 
 
 def test_instances_config_to_config_data_dir_is_subdirectory(tmp_path):

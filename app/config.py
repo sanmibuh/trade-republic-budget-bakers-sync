@@ -23,6 +23,9 @@ def _positive_int_env(name: str, default: int) -> int:
     return value
 
 
+# Default data directory when DATA_DIR env var is not set.
+_DEFAULT_DATA_DIR = "/app/data"
+
 # Default owner name used when OWNER_NAME env var is not set.
 # The backup service intentionally omits OWNER_NAME; sync services set it explicitly.
 _DEFAULT_OWNER_NAME = "Backup"
@@ -85,14 +88,14 @@ def _read_notifier_env() -> dict[str, object]:
         "owner_name": os.getenv("OWNER_NAME", _DEFAULT_OWNER_NAME),
         "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
         "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID"),
-        "data_dir": Path(os.getenv("DATA_DIR", "/app/data")),
+        "data_dir": Path(os.getenv("DATA_DIR", _DEFAULT_DATA_DIR)),
         "allow_insecure_ssl": _bool_env("ALLOW_INSECURE_SSL", default=False),
     }
 
 
 def read_data_dir() -> Path:
     """Return the data directory path from the DATA_DIR environment variable."""
-    return Path(os.getenv("DATA_DIR", "/app/data"))
+    return Path(os.getenv("DATA_DIR", _DEFAULT_DATA_DIR))
 
 
 def read_instance() -> str:
@@ -245,6 +248,39 @@ class InstanceConfig:
     category_strategy: str = "none"
 
 
+def _parse_instance(raw_inst: dict, idx: int) -> InstanceConfig:
+    """Parse and validate a single instance dict from the YAML file."""
+    name = raw_inst.get("name") or ""
+    if not name:
+        raise ValueError(f"instance at index {idx} is missing 'name'")
+    for required in _REQUIRED_INSTANCE_FIELDS:
+        if not raw_inst.get(required):
+            raise ValueError(
+                f"instance '{name}' is missing required field '{required}'"
+            )
+
+    category_strategy = str(raw_inst.get("category_strategy", "none")).strip().lower()
+    if category_strategy not in _VALID_CATEGORY_STRATEGIES:
+        raise ValueError(
+            f"instance '{name}': category_strategy must be one of "
+            f"{sorted(_VALID_CATEGORY_STRATEGIES)}, got: {category_strategy!r}"
+        )
+
+    return InstanceConfig(
+        name=name,
+        phone=str(raw_inst["phone"]),
+        pin=str(raw_inst["pin"]),
+        wallet_api_key=str(raw_inst["wallet_api_key"]),
+        wallet_cash_account_id=str(raw_inst["wallet_cash_account_id"]),
+        wallet_portfolio_account_id=str(raw_inst["wallet_portfolio_account_id"]),
+        owner_name=raw_inst.get("owner_name") or None,
+        lookback_days=int(raw_inst.get("lookback_days", 7)),
+        dedup_ttl_days=int(raw_inst.get("dedup_ttl_days", 60)),
+        label_ids=dict(raw_inst.get("labels") or {}),
+        category_strategy=category_strategy,
+    )
+
+
 @dataclass(frozen=True)
 class InstancesConfig:
     """Configuration for all sync instances, loaded from a YAML file.
@@ -255,7 +291,7 @@ class InstancesConfig:
     """
 
     instances: list[InstanceConfig]
-    data_dir: Path = field(default_factory=lambda: Path("/app/data"))
+    data_dir: Path = field(default_factory=lambda: Path(_DEFAULT_DATA_DIR))
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     allow_insecure_ssl: bool = False
@@ -275,50 +311,15 @@ class InstancesConfig:
         instances: list[InstanceConfig] = []
         seen_names: set[str] = set()
         for idx, raw_inst in enumerate(raw_instances):
-            name = raw_inst.get("name") or ""
-            if not name:
-                raise ValueError(f"instance at index {idx} is missing 'name'")
-            for required in _REQUIRED_INSTANCE_FIELDS:
-                if not raw_inst.get(required):
-                    raise ValueError(
-                        f"instance '{name}' is missing required field '{required}'"
-                    )
-            if name in seen_names:
-                raise ValueError(f"duplicate instance name: '{name}'")
-            seen_names.add(name)
+            inst = _parse_instance(raw_inst, idx)
+            if inst.name in seen_names:
+                raise ValueError(f"duplicate instance name: '{inst.name}'")
+            seen_names.add(inst.name)
+            instances.append(inst)
 
-            raw_labels: dict[str, str] = raw_inst.get("labels") or {}
-            category_strategy = (
-                str(raw_inst.get("category_strategy", "none")).strip().lower()
-            )
-            if category_strategy not in _VALID_CATEGORY_STRATEGIES:
-                raise ValueError(
-                    f"instance '{name}': category_strategy must be one of "
-                    f"{sorted(_VALID_CATEGORY_STRATEGIES)}, got: {category_strategy!r}"
-                )
-
-            instances.append(
-                InstanceConfig(
-                    name=name,
-                    phone=str(raw_inst["phone"]),
-                    pin=str(raw_inst["pin"]),
-                    wallet_api_key=str(raw_inst["wallet_api_key"]),
-                    wallet_cash_account_id=str(raw_inst["wallet_cash_account_id"]),
-                    wallet_portfolio_account_id=str(
-                        raw_inst["wallet_portfolio_account_id"]
-                    ),
-                    owner_name=raw_inst.get("owner_name") or None,
-                    lookback_days=int(raw_inst.get("lookback_days", 7)),
-                    dedup_ttl_days=int(raw_inst.get("dedup_ttl_days", 60)),
-                    label_ids=dict(raw_labels),
-                    category_strategy=category_strategy,
-                )
-            )
-
-        data_dir = Path(data.get("data_dir", "/app/data"))
         return cls(
             instances=instances,
-            data_dir=data_dir,
+            data_dir=Path(data.get("data_dir", _DEFAULT_DATA_DIR)),
             telegram_bot_token=data.get("telegram_bot_token") or None,
             telegram_chat_id=data.get("telegram_chat_id") or None,
             allow_insecure_ssl=bool(data.get("allow_insecure_ssl", False)),
