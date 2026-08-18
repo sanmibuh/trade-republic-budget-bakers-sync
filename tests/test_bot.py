@@ -999,9 +999,7 @@ def test_handle_message_digit_string_submitted_to_pending_instance(tmp_path):
         patch.object(bot, "_send_message"),
         patch.object(bot, "_delete_message") as mock_delete,
     ):
-        bot._handle_message(
-            {"chat": {"id": 42}, "text": "123456", "message_id": 77}
-        )
+        bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
 
     assert (inst.config.data_dir / ".tr_2fa_code").read_text() == "123456"
     mock_delete.assert_called_once_with(77)
@@ -1531,7 +1529,6 @@ def test_fetch_and_send_logs_filters_non_today_lines(tmp_path):
 
 def test_fetch_and_send_logs_truncates_long_output(tmp_path):
     import datetime as dt
-
 
     bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
