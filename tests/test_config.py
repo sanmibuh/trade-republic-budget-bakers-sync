@@ -961,8 +961,67 @@ instances:
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
 
-    with pytest.raises(ValueError, match="path separator"):
+    with pytest.raises(ValueError, match=r"invalid characters|path separator"):
         InstancesConfig.load(cfg_file)
+
+
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "david'",  # single quote — shell injection
+        "eli;drop",  # semicolon — command separator
+        "name`cmd`",  # backtick — command substitution
+        "name*x",  # glob metachar
+        "na me",  # space — splits shell tokens
+        "name:colon",  # colon — not in allowlist (was accepted by old denylist)
+        "name,comma",  # comma — not in allowlist (was accepted by old denylist)
+        "na\\tme",  # literal backslash+t written to YAML (avoids embedded tab)
+        "na\\nme",  # literal backslash+n written to YAML (avoids embedded newline)
+    ],
+)
+def test_instances_config_load_name_with_invalid_chars_raises(tmp_path, bad_name):
+    """ValueError when instance name contains characters outside the allowlist
+    [A-Za-z0-9._-].  Covers both injection vectors and chars the old denylist missed."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"""\
+instances:
+  - name: "{bad_name}"
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="invalid characters"):
+        InstancesConfig.load(cfg_file)
+
+
+@pytest.mark.parametrize(
+    "good_name",
+    ["david", "eli", "user1", "my-account", "my_account", "my.account", "User1.2"],
+)
+def test_instances_config_load_valid_names_accepted(tmp_path, good_name):
+    """Instance names composed of [A-Za-z0-9._-] are accepted."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"""\
+instances:
+  - name: "{good_name}"
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    cfg = InstancesConfig.load(cfg_file)
+    assert cfg.instances[0].name == good_name
 
 
 def test_instances_config_load_zero_lookback_days_raises(tmp_path):

@@ -191,6 +191,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 ### CLI entry point (`app/__main__.py`)
 - Single entry point via `python -m app` using **click** with subcommands:
   - `python -m app sync` — runs `main.run()`
+  - `python -m app sync --instance <name>` — resolves config from `INSTANCES_CONFIG` YAML and runs sync for that instance
   - `python -m app backup <mode> [param]` — dispatches to `backup.run_auto/run_monthly/run_yearly`
   - `python -m app bot` — starts the Telegram bot
   - `python -m app login` — runs `main.run_login()`, an on-demand 2FA session renewal
@@ -200,12 +201,24 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   - `python -m app check-session` — exits 0 if a valid session exists (non-expired cookie) **and** `auth_state`
     for this instance in `sync.db` is not `failed`/`expired`; exits 1 otherwise. Used by the bot's `/status`
     command to report per-instance auth state without network calls.
+  - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG`, one per line.
+    Used by `entrypoint.sh` in multi-instance mode to enumerate instances for cron registration.
 - All imports inside command functions are deferred — startup is fast and dependencies are only loaded when needed.
 - `click.Choice(["auto", "monthly", "yearly"])` provides free input validation and help text.
 - `entrypoint.sh` and `tr-sync.sh` both use `python -m app <subcommand>` — single consistent interface.
 
 ### Scheduled daemon
-- `docker/app/entrypoint.sh`: behaviour controlled by `MODE` env var:
+- `docker/app/entrypoint.sh`: behaviour controlled by `MODE` env var (legacy) or `INSTANCES_CONFIG` (multi-instance):
+
+  **Multi-instance mode** (activated when `INSTANCES_CONFIG` is set — Phase 2 of #145):
+  - Calls `python -m app list-instances` to enumerate instance names from the YAML file.
+  - Registers one `SYNC_SCHEDULE` cron job per instance: `python -m app sync --instance <name>`.
+  - Optionally registers `BACKUP_SCHEDULE` cron job for `python -m app backup auto` when `BACKUP_SCHEDULE` is set.
+  - `MODE` env var is ignored in this mode.
+  - Each instance logs to its own `data_dir/<name>/sync.log` (handled by the app's `setup_logging`).
+  - Requires `SYNC_SCHEDULE` to be set; exits with an error if missing.
+
+  **Legacy single-instance mode** (when `INSTANCES_CONFIG` is not set — fully backwards-compatible):
   - `MODE=sync` — registers `SYNC_SCHEDULE` cron job (`python -m app sync`). One-shot if `SYNC_SCHEDULE` not set.
   - `MODE=backup` — registers `BACKUP_SCHEDULE` cron job (`python -m app backup auto`). One-shot if not set.
   - `MODE=bot` — starts the Telegram bot (`python -m app bot`).
@@ -272,10 +285,11 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   back to `OWNER_NAME` lowercased); used by `check-session` to look up `auth_state` in `sync.db`.
 - All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
-### Multi-instance YAML config (WIP — Phase 1 of #145)
+### Multi-instance YAML config (Phase 1 + Phase 2 of #145)
 
-> **Status:** implemented but not yet used in production. The env-var mode above remains the current
-> deployment mechanism. The YAML config will replace it once all four phases of #145 are complete.
+> **Status:** Phase 1 (config loading) and Phase 2 (single-container cron) are implemented.
+> The env-var mode above remains the current deployment mechanism; the YAML config will replace it
+> once all four phases of #145 are complete.
 > Do not deprecate env vars until Phase 4 is merged.
 
 `InstancesConfig` (`app/config.py`) supports loading N sync instances from a single YAML file,

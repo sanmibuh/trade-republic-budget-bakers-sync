@@ -281,15 +281,26 @@ def _parse_yaml_bool(field_name: str, value: object) -> bool:
 
 
 def _validate_instance_name(raw_inst: dict, idx: int) -> str:
-    """Extract, coerce, strip, and validate the instance name from a raw dict."""
+    """Extract, coerce, strip, and validate the instance name from a raw dict.
+
+    Allowed characters: ASCII alphanumerics, hyphens, underscores, and dots
+    ``[A-Za-z0-9._-]``.  This allowlist ensures names are safe for:
+    - filesystem paths (no separators or control chars)
+    - shell arguments in cron job lines (no metacharacters)
+    """
+    import re
+
     raw_name = raw_inst.get("name")
     name = str(raw_name).strip() if raw_name is not None else ""
     if not name:
         raise ValueError(f"instance at index {idx} is missing 'name'")
     if name in (".", ".."):
         raise ValueError(f"instance name '{name}' must not be '.' or '..'")
-    if "/" in name or "\\" in name:
-        raise ValueError(f"instance name '{name}' must not contain a path separator")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        raise ValueError(
+            f"instance name '{name}' contains invalid characters — only ASCII "
+            f"alphanumerics, hyphens, underscores, and dots are allowed"
+        )
     return name
 
 
