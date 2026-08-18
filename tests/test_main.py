@@ -442,16 +442,15 @@ def test_prepare_configures_environment_and_returns_notifier(tmp_path):
 
     with (
         patch("app.main.http_client.configure") as mock_configure,
-        patch("app.main.setup_logging") as mock_setup,
+        patch("app.main.setup_logging", return_value=[]) as mock_setup,
         patch("app.main.Notifier") as mock_notifier_cls,
+        _prepare(cfg) as notifier,
     ):
-        notifier = _prepare(cfg)
-
-    assert cfg.data_dir.is_dir()
-    mock_configure.assert_called_once_with(allow_insecure_ssl=True)
-    mock_setup.assert_called_once_with(cfg.data_dir)
-    mock_notifier_cls.assert_called_once_with("tok", "chat", "David")
-    assert notifier is mock_notifier_cls.return_value
+        assert cfg.data_dir.is_dir()
+        mock_configure.assert_called_once_with(allow_insecure_ssl=True)
+        mock_setup.assert_called_once_with(cfg.data_dir)
+        mock_notifier_cls.assert_called_once_with("tok", "chat", "David")
+        assert notifier is mock_notifier_cls.return_value
 
 
 # ---------------------------------------------------------------------------
@@ -557,3 +556,99 @@ def test_run_resync_rejects_datetime_string():
     result = run_resync("2026-07-15T12:00:00")
 
     assert result == 1
+
+
+# ---------------------------------------------------------------------------
+# Handler lifecycle — _prepare must clean up logging handlers after each run
+# ---------------------------------------------------------------------------
+
+
+def test_run_removes_logging_handlers_after_completion(tmp_path):
+    """Handlers added by _prepare must be removed once run() finishes.
+
+    Ensures that repeated calls (as in the bot) do not accumulate file handlers
+    on the root logger, preventing cross-instance log contamination.
+    """
+    import logging
+    from unittest.mock import patch
+
+    from app.main import run
+
+    root = logging.getLogger()
+    handlers_before = set(root.handlers)
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.Notifier"),
+        patch("app.main.SyncRunner") as mock_runner_cls,
+        patch("app.main.filter_by_lookback", return_value=[]),
+        patch("app.main.http_client"),
+    ):
+        cfg = mock_cfg_cls.return_value
+        cfg.data_dir = tmp_path
+        cfg.lookback_days = 7
+        cfg.dedup_ttl_days = 60
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = []
+        runner._notify_fetch_summary.return_value = 0
+        runner.build_batch.return_value = MagicMock(excluded_count=0)
+        runner._submit_batch.return_value = MagicMock(synced=0, excluded=0, failed=0)
+
+        run()
+
+    assert set(root.handlers) == handlers_before, (
+        "root logger must have the same handlers after run() as before"
+    )
+
+
+def test_run_removes_logging_handlers_on_exception(tmp_path):
+    """Handlers added by _prepare must be removed even when run() raises."""
+    import logging
+    from unittest.mock import patch
+
+    from app.main import run
+
+    root = logging.getLogger()
+    handlers_before = set(root.handlers)
+
+    with (
+        patch("app.main.Config.from_env") as mock_cfg_cls,
+        patch("app.main.Notifier"),
+        patch("app.main.SyncRunner") as mock_runner_cls,
+        patch("app.main.filter_by_lookback", return_value=[]),
+        patch("app.main.http_client"),
+    ):
+        cfg = mock_cfg_cls.return_value
+        cfg.data_dir = tmp_path
+        cfg.lookback_days = 7
+        cfg.dedup_ttl_days = 60
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError):
+            run()
+
+    assert set(root.handlers) == handlers_before, (
+        "root logger must have the same handlers after run() raises"
+    )
+
+
+def test_setup_logging_returns_added_handlers(tmp_path):
+    """setup_logging must return the list of handlers it registered."""
+    import logging
+
+    from app.logging_setup import setup_logging
+
+    root = logging.getLogger()
+    before = set(root.handlers)
+    try:
+        added = setup_logging(tmp_path)
+        assert isinstance(added, list)
+        assert len(added) >= 1
+        for h in added:
+            assert h in root.handlers
+    finally:
+        for h in root.handlers[:]:
+            if h not in before:
+                root.removeHandler(h)
+                h.close()

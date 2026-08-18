@@ -12,10 +12,9 @@ def test_setup_logging_creates_log_file(tmp_path):
     root = logging.getLogger()
     original_handlers = root.handlers[:]
     try:
-        logger = setup_logging(tmp_path)
+        setup_logging(tmp_path)
         log_file = tmp_path / "sync.log"
         assert log_file.exists()
-        assert logger.name == "sync"
     finally:
         # Remove handlers added by this call to avoid polluting other tests
         for h in root.handlers[:]:
