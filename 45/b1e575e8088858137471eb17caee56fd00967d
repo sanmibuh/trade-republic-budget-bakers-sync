@@ -1,0 +1,22 @@
+app/bot.py
+  h_97a91c9e567f87 127,678-682,866-871
+app/config.py
+  h_97a91c9e567f87 210-222
+deploy/DEPLOY.md
+  h_97a91c9e567f87 185-186
+deploy/example/docker-compose.yml
+  h_97a91c9e567f87 35-37,53
+tests/test_bot.py
+  h_97a91c9e567f87 126-132,1560
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "45b1e575e8088858137471eb17caee56fd00967d",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
