@@ -1560,6 +1560,45 @@ def test_fetch_and_send_logs_truncates_long_output(tmp_path):
     assert "truncated" in sent_text
 
 
+def test_fetch_and_send_logs_truncation_preserves_tail_drops_head(tmp_path):
+    """When logs are truncated, the *last* lines must be kept and the *first* dropped.
+
+    The streaming bounded-deque approach drops whole head lines to stay within
+    _MAX_LOG_CHARS, so the text after the truncation marker always starts at a
+    line boundary — unlike a character-level slice which can split mid-line.
+    """
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    # 80 lines of ~140 chars each ≈ 11 200 chars > _MAX_LOG_CHARS (3 800)
+    lines = [
+        f"{today} 10:{i // 60:02d}:{i % 60:02d} INFO sync_runner: line-{i:03d} {'x' * 80}"
+        for i in range(80)
+    ]
+    (inst.config.data_dir / "sync.log").write_text("\n".join(lines))
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(inst)
+    sent_text = mock_send.call_args.args[0]
+
+    assert "truncated" in sent_text
+    assert "line-079" in sent_text, "last line must be preserved"
+    assert "line-000" not in sent_text, "first line must be dropped when truncating"
+    # After the truncation marker the first line of log content must start at a
+    # line boundary (i.e. it begins with today's date), not mid-line.
+    marker = "[... truncated ...]"
+    marker_pos = sent_text.find(marker)
+    assert marker_pos >= 0
+    after_marker = sent_text[marker_pos + len(marker) :].lstrip("\n")
+    assert after_marker.startswith(today), (
+        "text after truncation marker must start at a line boundary, not mid-line"
+    )
+
+
 def test_fetch_and_send_logs_sends_error_on_read_exception(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]

@@ -31,6 +31,7 @@ Interaction flow for /backup (no args):
 
 from __future__ import annotations
 
+import collections
 import datetime
 import logging
 import threading
@@ -878,12 +879,23 @@ class TelegramBot:
             if not log_file.exists():
                 text = ""
             else:
-                matching: list[str] = []
+                lines: collections.deque[str] = collections.deque()
+                total_chars = 0
+                truncated = False
                 with log_file.open(errors="replace") as fh:
                     for line in fh:
-                        if line.startswith(today_str):
-                            matching.append(line.rstrip())
-                text = "\n".join(matching)
+                        if not line.startswith(today_str):
+                            continue
+                        stripped = line.rstrip()
+                        lines.append(stripped)
+                        total_chars += len(stripped) + 1  # +1 for the joining newline
+                        while total_chars > _MAX_LOG_CHARS and len(lines) > 1:
+                            removed = lines.popleft()
+                            total_chars -= len(removed) + 1
+                            truncated = True
+                text = "\n".join(lines)
+                if truncated:
+                    text = "[... truncated ...]\n" + text
         except Exception as exc:
             self._send_message(
                 f"❌ Could not read logs for `{_esc(inst.name)}`: {_esc(str(exc))}"
@@ -893,9 +905,6 @@ class TelegramBot:
         if not text.strip():
             self._send_message(header_md + "_No logs today\\._")
             return
-
-        if len(text) > _MAX_LOG_CHARS:
-            text = "[... truncated ...]\n" + text[-_MAX_LOG_CHARS:]
 
         self._send_message(header_plain + text, parse_mode=None)
 

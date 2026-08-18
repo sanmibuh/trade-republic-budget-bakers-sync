@@ -240,7 +240,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 - Backup command (`/backup [monthly|yearly] [period]`) uses a two-step inline keyboard: first choose type
   (Monthly / Yearly), then choose the period. Direct args (`/backup monthly 2026-07`) skip the keyboards.
 - Sync/login/resync commands (`/sync`, `/login`, `/resync`) show an inline instance picker.
-- `/status` reports auth state per instance — ✅ session valid, ⚠️ needs login — by reading `sync.db` directly
+- `/status` reports auth state per instance — ✅ session valid, ⚠️ needs login, ❓ DB unreadable (corrupted/locked) — by reading `sync.db` directly
   via `EventRepository` and checking cookie expiry via `has_valid_session` (`_check_session_direct`).
 - `/login` renews an expired 2FA session on demand (instance picker); a 6-digit code sent as a plain message is
   forwarded to the target instance's `data_dir/.tr_2fa_code` file (see *2FA via Telegram*).
