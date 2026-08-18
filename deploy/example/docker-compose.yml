@@ -32,6 +32,9 @@ services:
     environment:
       <<: *sync-env
       OWNER_NAME: "Account 1"
+      # INSTANCE must match the name used in instances.yml so that sync.db entries
+      # written by this container can be read by the bot under the same key.
+      INSTANCE: "1"
       WALLET_CASH_ACCOUNT_ID: "<cash_account_uuid>"
       WALLET_PORTFOLIO_ACCOUNT_ID: "<portfolio_account_uuid>"
       SYNC_SCHEDULE: "0 8,14,21 * * *"
@@ -47,6 +50,7 @@ services:
     environment:
       <<: *sync-env
       OWNER_NAME: "Account 2"
+      INSTANCE: "2"   # must match the name used in instances.yml
       WALLET_CASH_ACCOUNT_ID: "<cash_account_uuid>"
       WALLET_PORTFOLIO_ACCOUNT_ID: "<portfolio_account_uuid>"
       SYNC_SCHEDULE: "5 8,14,21 * * *"   # 5-minute offset to avoid API collision

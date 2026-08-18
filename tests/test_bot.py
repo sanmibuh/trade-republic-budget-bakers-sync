@@ -123,10 +123,13 @@ def _mock_instances_load(yaml_text: str = _YAML_CONTENT):
     _real_load = InstancesConfig.load.__func__  # type: ignore[attr-defined]
 
     def _load(path):
-        tmp = Path(tempfile.mktemp(suffix=".yml"))
-        tmp.write_text(yaml_text)
-        result = _real_load(InstancesConfig, tmp)
-        tmp.unlink(missing_ok=True)
+        with tempfile.NamedTemporaryFile(suffix=".yml", mode="w", delete=False) as fh:
+            fh.write(yaml_text)
+            tmp = Path(fh.name)
+        try:
+            result = _real_load(InstancesConfig, tmp)
+        finally:
+            tmp.unlink(missing_ok=True)
         return result
 
     return patch("app.bot.InstancesConfig.load", side_effect=_load)
@@ -1554,7 +1557,7 @@ def test_fetch_and_send_logs_sends_error_on_read_exception(tmp_path):
     (inst.config.data_dir / "sync.log").write_text("dummy")
 
     with (
-        patch("pathlib.Path.read_text", side_effect=OSError("permission denied")),
+        patch("pathlib.Path.open", side_effect=OSError("permission denied")),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._fetch_and_send_logs(inst)

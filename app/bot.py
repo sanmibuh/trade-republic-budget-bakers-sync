@@ -124,7 +124,7 @@ class BotConfig:
             )
 
         try:
-            backup_cfg: BackupConfig | None = BackupConfig.from_env()
+            backup_cfg: BackupConfig | None = BackupConfig.from_env_optional()
         except ValueError:
             backup_cfg = None
 
@@ -675,6 +675,11 @@ class TelegramBot:
             elif mode == "yearly":
                 year = backup_module._parse_yearly_param(period)
                 backup_module.run_yearly(client, notifier, cfg.data_dir, year)
+            else:
+                log.warning("Unknown backup mode %r — ignoring", mode)
+                self._send_message(
+                    f"⚠️ Unknown backup mode: `{_esc(mode)}`\\. Expected `monthly` or `yearly`\\."
+                )
         except Exception as exc:
             log.exception("Backup failed (mode=%s period=%s): %s", mode, period, exc)
             self._send_message(
@@ -858,8 +863,12 @@ class TelegramBot:
             if not log_file.exists():
                 text = ""
             else:
-                lines = log_file.read_text(errors="replace").splitlines()
-                text = "\n".join(line for line in lines if line.startswith(today_str))
+                matching: list[str] = []
+                with log_file.open(errors="replace") as fh:
+                    for line in fh:
+                        if line.startswith(today_str):
+                            matching.append(line.rstrip())
+                text = "\n".join(matching)
         except Exception as exc:
             self._send_message(
                 f"❌ Could not read logs for `{_esc(inst.name)}`: {_esc(str(exc))}"

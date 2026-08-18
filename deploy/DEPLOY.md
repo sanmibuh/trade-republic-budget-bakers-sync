@@ -182,6 +182,8 @@ Trade Republic sessions expire on a hard 24h cap, so a scheduled sync will event
 1. Send `/login` to the bot and pick the instance (or wait for the automatic prompt when a cron sync bails out).
 2. The bot replies asking for the authenticator code. Reply with the 6-digit code as a plain message.
    Push-approval accounts (no authenticator) just approve in the app — no code needed.
+3. If multiple logins are pending simultaneously (unlikely), the bot will ask you to disambiguate.
+   In that case use the explicit form: `/code <instance> <code>` — e.g. `/code david 123456`.
 
 **From the NAS (interactive bootstrap):**
 

@@ -207,6 +207,19 @@ class BackupConfig:
             wallet_api_key=_required_env("WALLET_API_KEY"),
         )
 
+    @classmethod
+    def from_env_optional(cls) -> BackupConfig | None:
+        """Return a ``BackupConfig`` from env, or ``None`` if ``WALLET_API_KEY`` is absent.
+
+        Unlike ``from_env()``, this method treats a missing ``WALLET_API_KEY`` as
+        "backup not configured" and returns ``None``.  Any other ``ValueError``
+        (e.g. an invalid ``ALLOW_INSECURE_SSL`` value) is re-raised so that genuine
+        misconfiguration is not silently swallowed.
+        """
+        if not os.getenv("WALLET_API_KEY", "").strip():
+            return None
+        return cls.from_env()
+
 
 @dataclass(frozen=True)
 class BotEnv:
