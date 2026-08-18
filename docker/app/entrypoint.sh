@@ -61,6 +61,10 @@ if [ -n "$INSTANCES_CONFIG" ]; then
 
     ENV_FILE=/etc/cron_env
     printenv | while IFS='=' read -r key value; do
+        # Skip keys that are not valid shell identifiers to prevent sourcing errors.
+        case "$key" in
+            *[!A-Za-z0-9_]*|[0-9]*|"") continue ;;
+        esac
         printf 'export %s=%s\n' "$key" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g;s/.*/'&'/")"
     done > "$ENV_FILE"
     chmod 600 "$ENV_FILE"
@@ -112,6 +116,10 @@ _start_cron() {
     # special characters in values).
     ENV_FILE=/etc/cron_env
     printenv | while IFS='=' read -r key value; do
+        # Skip keys that are not valid shell identifiers to prevent sourcing errors.
+        case "$key" in
+            *[!A-Za-z0-9_]*|[0-9]*|"") continue ;;
+        esac
         printf 'export %s=%s\n' "$key" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g;s/.*/'&'/")"
     done > "$ENV_FILE"
     chmod 600 "$ENV_FILE"
