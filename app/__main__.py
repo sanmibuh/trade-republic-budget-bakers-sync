@@ -2,7 +2,8 @@
 
 Usage:
     python -m app                          # shows help
-    python -m app sync                     # one-shot TR → Wallet sync
+    python -m app sync                     # one-shot TR → Wallet sync (env vars)
+    python -m app sync --instance david    # one-shot sync for a named instance (YAML config)
     python -m app backup auto              # smart daily backup
     python -m app backup monthly           # backup previous month
     python -m app backup monthly 2026-07   # backup specific month
@@ -19,21 +20,53 @@ import click
 from app.logging_setup import configure_logging, setup_logging
 
 
+def _resolve_instance_cfg(instance: str) -> object:
+    """Load ``InstancesConfig`` from ``INSTANCES_CONFIG`` env var and return the
+    ``Config`` for *instance*.  Raises ``SystemExit`` with a clear error message
+    when ``INSTANCES_CONFIG`` is not set or the file cannot be loaded.
+    """
+    import os
+    from pathlib import Path
+
+    from app.config import InstancesConfig
+
+    config_path = os.getenv("INSTANCES_CONFIG", "").strip()
+    if not config_path:
+        raise click.UsageError(
+            "--instance requires the INSTANCES_CONFIG environment variable to be set"
+        )
+    return InstancesConfig.load(Path(config_path)).to_config(instance)
+
+
 @click.group()
 def cli() -> None:
     """Trade Republic → BudgetBakers Wallet sync and backup tool."""
 
 
 @cli.command()
-def sync() -> None:
+@click.option(
+    "--instance",
+    default=None,
+    metavar="NAME",
+    help="Instance name from the INSTANCES_CONFIG YAML file. "
+    "When set, credentials are loaded from the file instead of env vars.",
+)
+def sync(instance: str | None) -> None:
     """Run a one-shot Trade Republic → Wallet sync."""
     from app.main import run
 
-    sys.exit(run())
+    cfg = _resolve_instance_cfg(instance) if instance else None
+    sys.exit(run(cfg=cfg))
 
 
 @cli.command()
-def login() -> None:
+@click.option(
+    "--instance",
+    default=None,
+    metavar="NAME",
+    help="Instance name from the INSTANCES_CONFIG YAML file.",
+)
+def login(instance: str | None) -> None:
     """Re-authenticate with Trade Republic on demand (renew the 2FA session).
 
     Resumes the saved session if still valid; otherwise runs the full login.
@@ -42,7 +75,8 @@ def login() -> None:
     """
     from app.main import run_login
 
-    sys.exit(run_login())
+    cfg = _resolve_instance_cfg(instance) if instance else None
+    sys.exit(run_login(cfg=cfg))
 
 
 @cli.command(name="submit-code")

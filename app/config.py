@@ -213,3 +213,142 @@ class BotEnv:
             backup_service=os.getenv("BACKUP_SERVICE", "backup").strip(),
             telegram_verify_ssl=_bool_env("TELEGRAM_VERIFY_SSL", default=True),
         )
+
+
+# ---------------------------------------------------------------------------
+# Multi-instance config (YAML file — Phase 1 of single-container migration)
+# ---------------------------------------------------------------------------
+
+_REQUIRED_INSTANCE_FIELDS: tuple[str, ...] = (
+    "phone",
+    "pin",
+    "wallet_api_key",
+    "wallet_cash_account_id",
+    "wallet_portfolio_account_id",
+)
+
+
+@dataclass(frozen=True)
+class InstanceConfig:
+    """Per-instance configuration loaded from the instances YAML file."""
+
+    name: str
+    phone: str
+    pin: str
+    wallet_api_key: str
+    wallet_cash_account_id: str
+    wallet_portfolio_account_id: str
+    owner_name: str | None = None
+    lookback_days: int = 7
+    dedup_ttl_days: int = 60
+    label_ids: dict[str, str] = field(default_factory=dict)
+    category_strategy: str = "none"
+
+
+@dataclass(frozen=True)
+class InstancesConfig:
+    """Configuration for all sync instances, loaded from a YAML file.
+
+    The file path is read from the ``INSTANCES_CONFIG`` environment variable.
+    Each instance gets its own ``data_dir`` subdirectory:
+    ``{root_data_dir}/{instance.name}/``.
+    """
+
+    instances: list[InstanceConfig]
+    data_dir: Path = field(default_factory=lambda: Path("/app/data"))
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+    allow_insecure_ssl: bool = False
+
+    @classmethod
+    def load(cls, path: Path) -> InstancesConfig:
+        """Load and validate an instances YAML config file."""
+        import yaml  # deferred — only needed when INSTANCES_CONFIG is used
+
+        raw = path.read_text()  # raises FileNotFoundError if absent
+        data = yaml.safe_load(raw) or {}
+
+        raw_instances = data.get("instances") or []
+        if not raw_instances:
+            raise ValueError("instances config must define at least one instance")
+
+        instances: list[InstanceConfig] = []
+        seen_names: set[str] = set()
+        for idx, raw_inst in enumerate(raw_instances):
+            name = raw_inst.get("name") or ""
+            if not name:
+                raise ValueError(f"instance at index {idx} is missing 'name'")
+            for required in _REQUIRED_INSTANCE_FIELDS:
+                if not raw_inst.get(required):
+                    raise ValueError(
+                        f"instance '{name}' is missing required field '{required}'"
+                    )
+            if name in seen_names:
+                raise ValueError(f"duplicate instance name: '{name}'")
+            seen_names.add(name)
+
+            raw_labels: dict[str, str] = raw_inst.get("labels") or {}
+            category_strategy = (
+                str(raw_inst.get("category_strategy", "none")).strip().lower()
+            )
+            if category_strategy not in _VALID_CATEGORY_STRATEGIES:
+                raise ValueError(
+                    f"instance '{name}': category_strategy must be one of "
+                    f"{sorted(_VALID_CATEGORY_STRATEGIES)}, got: {category_strategy!r}"
+                )
+
+            instances.append(
+                InstanceConfig(
+                    name=name,
+                    phone=str(raw_inst["phone"]),
+                    pin=str(raw_inst["pin"]),
+                    wallet_api_key=str(raw_inst["wallet_api_key"]),
+                    wallet_cash_account_id=str(raw_inst["wallet_cash_account_id"]),
+                    wallet_portfolio_account_id=str(
+                        raw_inst["wallet_portfolio_account_id"]
+                    ),
+                    owner_name=raw_inst.get("owner_name") or None,
+                    lookback_days=int(raw_inst.get("lookback_days", 7)),
+                    dedup_ttl_days=int(raw_inst.get("dedup_ttl_days", 60)),
+                    label_ids=dict(raw_labels),
+                    category_strategy=category_strategy,
+                )
+            )
+
+        data_dir = Path(data.get("data_dir", "/app/data"))
+        return cls(
+            instances=instances,
+            data_dir=data_dir,
+            telegram_bot_token=data.get("telegram_bot_token") or None,
+            telegram_chat_id=data.get("telegram_chat_id") or None,
+            allow_insecure_ssl=bool(data.get("allow_insecure_ssl", False)),
+        )
+
+    def get_instance(self, name: str) -> InstanceConfig:
+        """Return the ``InstanceConfig`` for *name*, or raise ``ValueError``."""
+        for inst in self.instances:
+            if inst.name == name:
+                return inst
+        raise ValueError(f"instance '{name}' not found in instances config")
+
+    def to_config(self, name: str) -> Config:
+        """Build a full :class:`Config` for the named instance."""
+        inst = self.get_instance(name)
+        owner_name = inst.owner_name if inst.owner_name else inst.name.capitalize()
+        return Config(
+            owner_name=owner_name,
+            phone_number=inst.phone,
+            pin=inst.pin,
+            wallet_api_key=inst.wallet_api_key,
+            wallet_cash_account_id=inst.wallet_cash_account_id,
+            wallet_portfolio_account_id=inst.wallet_portfolio_account_id,
+            telegram_bot_token=self.telegram_bot_token,
+            telegram_chat_id=self.telegram_chat_id,
+            lookback_days=inst.lookback_days,
+            dedup_ttl_days=inst.dedup_ttl_days,
+            data_dir=self.data_dir / inst.name,
+            instance=inst.name,
+            allow_insecure_ssl=self.allow_insecure_ssl,
+            label_ids=dict(inst.label_ids),
+            category_strategy=inst.category_strategy,
+        )

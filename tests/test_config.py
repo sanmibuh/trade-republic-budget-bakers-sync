@@ -447,3 +447,341 @@ def test_read_instance_uses_instance_env_var_when_set(monkeypatch):
     monkeypatch.setenv("OWNER_NAME", "David")
 
     assert read_instance() == "my-account"
+
+
+# ---------------------------------------------------------------------------
+# InstancesConfig — YAML config file loader
+# ---------------------------------------------------------------------------
+
+_MINIMAL_YAML = """\
+instances:
+  - name: david
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key-david"
+    wallet_cash_account_id: "cash-david"
+    wallet_portfolio_account_id: "portfolio-david"
+"""
+
+_FULL_YAML = """\
+data_dir: /custom/data
+telegram_bot_token: "bot-token"
+telegram_chat_id: "chat-id"
+allow_insecure_ssl: true
+
+instances:
+  - name: david
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key-david"
+    wallet_cash_account_id: "cash-david"
+    wallet_portfolio_account_id: "portfolio-david"
+    owner_name: "David"
+    lookback_days: 14
+    dedup_ttl_days: 90
+    category_strategy: history
+    labels:
+      BANK_TRANSACTION_INCOMING: label-abc
+  - name: eli
+    phone: "+34611111111"
+    pin: "5678"
+    wallet_api_key: "key-eli"
+    wallet_cash_account_id: "cash-eli"
+    wallet_portfolio_account_id: "portfolio-eli"
+"""
+
+
+def test_instances_config_load_minimal(tmp_path):
+    """Load a minimal YAML with one instance and only required fields."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_MINIMAL_YAML)
+
+    cfg = InstancesConfig.load(cfg_file)
+
+    assert len(cfg.instances) == 1
+    inst = cfg.instances[0]
+    assert inst.name == "david"
+    assert inst.phone == "+34600000000"
+    assert inst.pin == "1234"
+    assert inst.wallet_api_key == "key-david"
+    assert inst.wallet_cash_account_id == "cash-david"
+    assert inst.wallet_portfolio_account_id == "portfolio-david"
+
+
+def test_instances_config_load_global_defaults(tmp_path):
+    """Global fields default to safe values when not set."""
+    from pathlib import Path
+
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_MINIMAL_YAML)
+
+    cfg = InstancesConfig.load(cfg_file)
+
+    assert cfg.data_dir == Path("/app/data")
+    assert cfg.telegram_bot_token is None
+    assert cfg.telegram_chat_id is None
+    assert cfg.allow_insecure_ssl is False
+
+
+def test_instances_config_load_full_yaml(tmp_path):
+    """All global and per-instance fields are parsed correctly."""
+    from pathlib import Path
+
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_FULL_YAML)
+
+    cfg = InstancesConfig.load(cfg_file)
+
+    assert cfg.data_dir == Path("/custom/data")
+    assert cfg.telegram_bot_token == "bot-token"
+    assert cfg.telegram_chat_id == "chat-id"
+    assert cfg.allow_insecure_ssl is True
+    assert len(cfg.instances) == 2
+
+    david = cfg.instances[0]
+    assert david.owner_name == "David"
+    assert david.lookback_days == 14
+    assert david.dedup_ttl_days == 90
+    assert david.category_strategy == "history"
+    assert david.label_ids == {"BANK_TRANSACTION_INCOMING": "label-abc"}
+
+
+def test_instances_config_load_instance_defaults(tmp_path):
+    """Per-instance optional fields fall back to sensible defaults."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_MINIMAL_YAML)
+
+    inst = InstancesConfig.load(cfg_file).instances[0]
+
+    assert inst.owner_name is None  # resolved later via to_config
+    assert inst.lookback_days == 7
+    assert inst.dedup_ttl_days == 60
+    assert inst.category_strategy == "none"
+    assert inst.label_ids == {}
+
+
+def test_instances_config_load_file_not_found():
+    """FileNotFoundError is raised when the config file does not exist."""
+    from pathlib import Path
+
+    from app.config import InstancesConfig
+
+    with pytest.raises(FileNotFoundError):
+        InstancesConfig.load(Path("/nonexistent/path/instances.yml"))
+
+
+def test_instances_config_load_missing_required_instance_field(tmp_path):
+    """ValueError is raised when a required instance field is missing."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: david
+    phone: "+34600000000"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="pin"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_missing_name_raises(tmp_path):
+    """ValueError is raised when an instance has no name."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="name"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_invalid_category_strategy_raises(tmp_path):
+    """ValueError is raised when category_strategy has an unsupported value."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: david
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+    category_strategy: invalid_strategy
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="category_strategy"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_no_instances(tmp_path):
+    """ValueError is raised when the instances list is empty."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("instances: []\n")
+
+    with pytest.raises(ValueError, match="instances"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_duplicate_instance_names(tmp_path):
+    """ValueError is raised when two instances share the same name."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: david
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "k1"
+    wallet_cash_account_id: "c1"
+    wallet_portfolio_account_id: "p1"
+  - name: david
+    phone: "+34611111111"
+    pin: "5678"
+    wallet_api_key: "k2"
+    wallet_cash_account_id: "c2"
+    wallet_portfolio_account_id: "p2"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="david"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_get_instance_found(tmp_path):
+    """get_instance returns the correct InstanceConfig by name."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_FULL_YAML)
+
+    cfg = InstancesConfig.load(cfg_file)
+
+    assert cfg.get_instance("eli").wallet_api_key == "key-eli"
+
+
+def test_instances_config_get_instance_not_found(tmp_path):
+    """get_instance raises ValueError for an unknown instance name."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_MINIMAL_YAML)
+
+    with pytest.raises(ValueError, match="unknown"):
+        InstancesConfig.load(cfg_file).get_instance("unknown")
+
+
+def test_instances_config_to_config_data_dir_is_subdirectory(tmp_path):
+    """to_config() sets data_dir to {root_data_dir}/{instance_name}/."""
+    from pathlib import Path
+
+    from app.config import InstancesConfig
+
+    yaml_content = f"""\
+data_dir: {tmp_path}
+instances:
+  - name: david
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    cfg = InstancesConfig.load(cfg_file).to_config("david")
+
+    assert cfg.data_dir == Path(tmp_path) / "david"
+
+
+def test_instances_config_to_config_inherits_global_telegram(tmp_path):
+    """to_config() copies global telegram credentials into Config."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_FULL_YAML)
+
+    cfg = InstancesConfig.load(cfg_file).to_config("david")
+
+    assert cfg.telegram_bot_token == "bot-token"
+    assert cfg.telegram_chat_id == "chat-id"
+    assert cfg.allow_insecure_ssl is True
+
+
+def test_instances_config_to_config_instance_name_used_as_instance_field(tmp_path):
+    """to_config() sets Config.instance to the instance name."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_MINIMAL_YAML)
+
+    cfg = InstancesConfig.load(cfg_file).to_config("david")
+
+    assert cfg.instance == "david"
+
+
+def test_instances_config_to_config_owner_name_defaults_to_capitalized_name(tmp_path):
+    """When owner_name is not set, to_config() defaults to name.capitalize()."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_MINIMAL_YAML)
+
+    cfg = InstancesConfig.load(cfg_file).to_config("david")
+
+    assert cfg.owner_name == "David"
+
+
+def test_instances_config_to_config_explicit_owner_name(tmp_path):
+    """When owner_name is set explicitly, to_config() uses it as-is."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_FULL_YAML)
+
+    cfg = InstancesConfig.load(cfg_file).to_config("david")
+
+    assert cfg.owner_name == "David"
+
+
+def test_instances_config_to_config_credentials(tmp_path):
+    """to_config() propagates all TR and Wallet credentials correctly."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_MINIMAL_YAML)
+
+    cfg = InstancesConfig.load(cfg_file).to_config("david")
+
+    assert cfg.phone_number == "+34600000000"
+    assert cfg.pin == "1234"
+    assert cfg.wallet_api_key == "key-david"
+    assert cfg.wallet_cash_account_id == "cash-david"
+    assert cfg.wallet_portfolio_account_id == "portfolio-david"
