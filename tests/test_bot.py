@@ -1574,9 +1574,6 @@ def test_fetch_and_send_logs_sends_error_on_read_exception(tmp_path):
     mock_send.assert_called_once()
     assert "permission denied" in mock_send.call_args.args[0]
 
-    mock_send.assert_called_once()
-    assert "permission denied" in mock_send.call_args.args[0]
-
 
 def test_fetch_and_send_logs_header_has_no_markdown_chars_when_logs_present(tmp_path):
     """When log content is sent with parse_mode=None, the header must be plain text.
@@ -2328,3 +2325,64 @@ def test_run_backup_sends_error_on_exception(tmp_path):
         bot._run_backup("monthly", "2026-07")
     mock_send.assert_called_once()
     assert "boom" in mock_send.call_args.args[0]
+
+
+def test_run_backup_http_configure_serialized_by_run_lock(tmp_path):
+    """http_client.configure() in _run_backup must be called while _RUN_LOCK is held.
+
+    Holds the lock externally, starts _run_backup in a thread, and asserts that
+    configure() is not called until the lock is released — proving it runs inside
+    the lock rather than before it.
+    """
+    import threading
+    import time
+
+    from app.main import _RUN_LOCK
+
+    configure_called = threading.Event()
+    bot = _bot(tmp_path=tmp_path)
+
+    def recording_configure(**_kwargs: object) -> None:
+        configure_called.set()
+
+    with (
+        patch("app.bot.http_client") as mock_http,
+        patch("app.bot.backup_module.run_monthly"),
+        patch("app.bot.WalletClient"),
+        patch("app.bot.Notifier"),
+        patch("app.logging_setup.setup_logging", return_value=[]),
+    ):
+        mock_http.configure.side_effect = recording_configure
+
+        with _RUN_LOCK:
+            t = threading.Thread(target=bot._run_backup, args=("monthly", "2026-07"))
+            t.start()
+            time.sleep(0.05)
+            assert not configure_called.is_set(), (
+                "http_client.configure() was called before _RUN_LOCK was released"
+            )
+
+        t.join(timeout=5)
+
+    assert configure_called.is_set(), "http_client.configure() was never called"
+
+
+def test_run_backup_removes_logging_handlers_after_completion(tmp_path):
+    """Logging handlers added by _run_backup must be removed when it completes."""
+    import logging
+
+    root = logging.getLogger()
+    handlers_before = set(root.handlers)
+
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch("app.bot.backup_module.run_monthly"),
+        patch("app.bot.WalletClient"),
+        patch("app.bot.Notifier"),
+        patch("app.bot.http_client"),
+    ):
+        bot._run_backup("monthly", "2026-07")
+
+    assert set(root.handlers) == handlers_before, (
+        "root logger must have the same handlers after _run_backup() as before"
+    )

@@ -80,7 +80,7 @@ cp sync-2.env.example       sync-2.env
 cp instances.yml.example    instances.yml
 ```
 
-- `wallet.env` — BudgetBakers Wallet API key (backup service)
+- `wallet.env` — BudgetBakers Wallet API key (backup service and Telegram bot when backup commands are enabled)
 - `telegram.env` — Telegram bot token and chat ID (all services)
 - `sync-1.env` — Trade Republic phone and PIN for account 1
 - `sync-2.env` — Trade Republic phone and PIN for account 2

@@ -61,7 +61,9 @@ from app.config import (
     has_valid_session,
     read_instances_config_path,
 )
+from app.logging_setup import setup_logging
 from app.main import (
+    _RUN_LOCK,
     run as _main_run,
     run_login as _main_run_login,
     run_resync as _main_run_resync,
@@ -658,30 +660,42 @@ class TelegramBot:
         cfg = self._cfg.backup_cfg
         if cfg is None:
             return
-        http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
-        client = WalletClient(api_key=cfg.wallet_api_key)
-        notifier = Notifier(
-            cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name
-        )
-        try:
-            if mode == "auto":
-                backup_module.run_auto(client, notifier, cfg.data_dir)
-            elif mode == "monthly":
-                year, month = backup_module._parse_monthly_param(period)
-                backup_module.run_monthly(client, notifier, cfg.data_dir, year, month)
-            elif mode == "yearly":
-                year = backup_module._parse_yearly_param(period)
-                backup_module.run_yearly(client, notifier, cfg.data_dir, year)
-            else:
-                log.warning("Unknown backup mode %r — ignoring", mode)
-                self._send_message(
-                    f"⚠️ Unknown backup mode: `{_esc(mode)}`\\. Expected `monthly` or `yearly`\\."
-                )
-        except Exception as exc:
-            log.exception("Backup failed (mode=%s period=%s): %s", mode, period, exc)
-            self._send_message(
-                f"❌ Backup \\({_esc(mode)} {_esc(period)}\\) failed: {_esc(str(exc))}"
+        cfg.data_dir.mkdir(parents=True, exist_ok=True)
+        with _RUN_LOCK:
+            http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
+            handlers = setup_logging(cfg.data_dir)
+            root = logging.getLogger()
+            client = WalletClient(api_key=cfg.wallet_api_key)
+            notifier = Notifier(
+                cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name
             )
+            try:
+                if mode == "auto":
+                    backup_module.run_auto(client, notifier, cfg.data_dir)
+                elif mode == "monthly":
+                    year, month = backup_module._parse_monthly_param(period)
+                    backup_module.run_monthly(
+                        client, notifier, cfg.data_dir, year, month
+                    )
+                elif mode == "yearly":
+                    year = backup_module._parse_yearly_param(period)
+                    backup_module.run_yearly(client, notifier, cfg.data_dir, year)
+                else:
+                    log.warning("Unknown backup mode %r — ignoring", mode)
+                    self._send_message(
+                        f"⚠️ Unknown backup mode: `{_esc(mode)}`\\. Expected `monthly` or `yearly`\\."
+                    )
+            except Exception as exc:
+                log.exception(
+                    "Backup failed (mode=%s period=%s): %s", mode, period, exc
+                )
+                self._send_message(
+                    f"❌ Backup \\({_esc(mode)} {_esc(period)}\\) failed: {_esc(str(exc))}"
+                )
+            finally:
+                for h in handlers:
+                    root.removeHandler(h)
+                    h.close()
 
     # ------------------------------------------------------------------
     # Execution — direct in-process calls
