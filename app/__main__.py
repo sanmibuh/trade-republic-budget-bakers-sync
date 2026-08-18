@@ -275,7 +275,7 @@ def list_instances() -> None:
     try:
         path = read_instances_config_path()
         cfg = InstancesConfig.load(path)
-    except (ValueError, FileNotFoundError) as exc:
+    except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
 
     for inst in cfg.instances:

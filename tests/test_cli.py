@@ -632,7 +632,7 @@ def test_list_instances_outputs_names_one_per_line(tmp_path):
 
 
 def test_list_instances_missing_instances_config_env_exits_with_error():
-    """list-instances without INSTANCES_CONFIG env var exits with an error."""
+    """list-instances with INSTANCES_CONFIG set to blank string exits with an error."""
     result = _runner().invoke(cli, ["list-instances"], env={"INSTANCES_CONFIG": ""})
     assert result.exit_code != 0
 
@@ -661,3 +661,21 @@ def test_list_instances_load_error_shown_as_click_error(tmp_path):
 
     assert result.exit_code != 0
     assert "bad yaml" in result.output
+
+
+def test_list_instances_permission_error_shown_as_click_error(tmp_path):
+    """OSError (e.g. PermissionError) from reading the file is shown as UsageError."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with patch(
+        "app.config.InstancesConfig.load", side_effect=PermissionError("denied")
+    ):
+        result = _runner().invoke(
+            cli,
+            ["list-instances"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code != 0
+    assert "denied" in result.output
