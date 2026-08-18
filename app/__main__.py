@@ -262,6 +262,26 @@ def resync(date: str) -> None:
     sys.exit(run_resync(date))
 
 
+@cli.command(name="list-instances")
+def list_instances() -> None:
+    """List all instance names from the INSTANCES_CONFIG YAML file, one per line.
+
+    Used by entrypoint.sh to register one cron job per instance in
+    multi-instance mode.  Exits with an error when INSTANCES_CONFIG is not
+    set or the file cannot be loaded.
+    """
+    from app.config import InstancesConfig, read_instances_config_path
+
+    try:
+        path = read_instances_config_path()
+        cfg = InstancesConfig.load(path)
+    except (ValueError, FileNotFoundError) as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    for inst in cfg.instances:
+        click.echo(inst.name)
+
+
 @cli.command()
 def bot() -> None:
     """Start the Telegram bot for remote command execution.

@@ -598,3 +598,66 @@ def test_login_with_blank_instance_flag_exits_with_error():
     """login --instance '' (blank string) must error out, not silently use env vars."""
     result = _runner().invoke(cli, ["login", "--instance", ""])
     assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# list-instances command
+# ---------------------------------------------------------------------------
+
+
+def test_list_instances_outputs_names_one_per_line(tmp_path):
+    """list-instances prints each instance name on its own line and exits 0."""
+    from app.config import InstanceConfig, InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.instances = [
+        MagicMock(spec=InstanceConfig, name_attr=None),
+        MagicMock(spec=InstanceConfig, name_attr=None),
+    ]
+    mock_instances.instances[0].name = "david"
+    mock_instances.instances[1].name = "eli"
+
+    with patch("app.config.InstancesConfig.load", return_value=mock_instances):
+        result = _runner().invoke(
+            cli,
+            ["list-instances"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code == 0
+    assert result.output.strip().splitlines() == ["david", "eli"]
+
+
+def test_list_instances_missing_instances_config_env_exits_with_error():
+    """list-instances without INSTANCES_CONFIG env var exits with an error."""
+    result = _runner().invoke(cli, ["list-instances"], env={"INSTANCES_CONFIG": ""})
+    assert result.exit_code != 0
+
+
+def test_list_instances_file_not_found_exits_with_error(tmp_path):
+    """list-instances with a missing YAML file exits with an error."""
+    result = _runner().invoke(
+        cli,
+        ["list-instances"],
+        env={"INSTANCES_CONFIG": str(tmp_path / "missing.yml")},
+    )
+    assert result.exit_code != 0
+
+
+def test_list_instances_load_error_shown_as_click_error(tmp_path):
+    """Errors from InstancesConfig.load() are shown as UsageError, not traceback."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with patch("app.config.InstancesConfig.load", side_effect=ValueError("bad yaml")):
+        result = _runner().invoke(
+            cli,
+            ["list-instances"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code != 0
+    assert "bad yaml" in result.output

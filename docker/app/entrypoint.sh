@@ -13,10 +13,144 @@
 #
 #   MODE=bot      Start the Telegram bot for remote command execution.
 #
+# Multi-instance mode (activated when INSTANCES_CONFIG is set):
+#   Reads instance names from the YAML config file and registers one cron job
+#   per instance (python -m app sync --instance <name>) using SYNC_SCHEDULE.
+#   Optionally registers the backup job when BACKUP_SCHEDULE is also set.
+#   The MODE env var is ignored in this mode.
+#   Each instance logs to its own data_dir/<name>/sync.log (handled by the app).
+#
 # CMD override: if set, run a one-shot command and exit regardless of MODE.
 #   CMD="sync"
 #   CMD="backup auto"
 #   CMD="backup monthly 2026-07"
+
+set -e
+
+log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+
+# ------------------------------------------------------------------
+# One-shot via CMD (override for all modes)
+# ------------------------------------------------------------------
+if [ -n "$CMD" ]; then
+    log "Running: python -m app $CMD"
+    # shellcheck disable=SC2086
+    exec python -m app $CMD
+fi
+
+# ------------------------------------------------------------------
+# Multi-instance mode (INSTANCES_CONFIG is set)
+# ------------------------------------------------------------------
+if [ -n "$INSTANCES_CONFIG" ]; then
+    if [ -z "$SYNC_SCHEDULE" ]; then
+        log "ERROR: INSTANCES_CONFIG is set but SYNC_SCHEDULE is empty. Cannot register cron jobs."
+        exit 1
+    fi
+
+    log "Multi-instance mode: loading instances from $INSTANCES_CONFIG"
+
+    INSTANCES=$(python -m app list-instances) || {
+        log "ERROR: failed to load instances from $INSTANCES_CONFIG"
+        exit 1
+    }
+
+    if [ -z "$INSTANCES" ]; then
+        log "ERROR: no instances found in $INSTANCES_CONFIG"
+        exit 1
+    fi
+
+    ENV_FILE=/etc/cron_env
+    printenv | while IFS='=' read -r key value; do
+        printf 'export %s=%s\n' "$key" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g;s/.*/'&'/")"
+    done > "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+
+    CRONTAB_FILE=/etc/cron.d/tr-sync
+    printf 'SHELL=/bin/sh\n' > "$CRONTAB_FILE"
+
+    for INSTANCE_NAME in $INSTANCES; do
+        log "Registering sync cron for instance '$INSTANCE_NAME': $SYNC_SCHEDULE"
+        printf '%s root . %s; cd /app && python -m app sync --instance %s > /proc/1/fd/1 2>/proc/1/fd/2\n' \
+            "$SYNC_SCHEDULE" "$ENV_FILE" "$INSTANCE_NAME" >> "$CRONTAB_FILE"
+    done
+
+    if [ -n "$BACKUP_SCHEDULE" ]; then
+        log "Registering backup cron: $BACKUP_SCHEDULE"
+        printf '%s root . %s; cd /app && python -m app backup auto > /proc/1/fd/1 2>/proc/1/fd/2\n' \
+            "$BACKUP_SCHEDULE" "$ENV_FILE" >> "$CRONTAB_FILE"
+    fi
+
+    printf '\n' >> "$CRONTAB_FILE"
+    chmod 0644 "$CRONTAB_FILE"
+
+    log "Crontab registered:"
+    cat "$CRONTAB_FILE"
+
+    exec cron -f
+fi
+
+# ------------------------------------------------------------------
+# Bot mode
+# ------------------------------------------------------------------
+if [ "$MODE" = "bot" ]; then
+    log "Starting Telegram bot"
+    exec python -m app bot
+fi
+
+# ------------------------------------------------------------------
+# Helpers: write env file + crontab and start cron daemon
+# ------------------------------------------------------------------
+_start_cron() {
+    SCHEDULE="$1"
+    COMMAND="$2"
+    LABEL="$3"
+
+    log "Starting in scheduled mode: $LABEL='$SCHEDULE'"
+
+    # Export environment variables as a sourceable shell script so cron jobs
+    # inherit them reliably (avoids /etc/environment parsing issues with
+    # special characters in values).
+    ENV_FILE=/etc/cron_env
+    printenv | while IFS='=' read -r key value; do
+        printf 'export %s=%s\n' "$key" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g;s/.*/'&'/")"
+    done > "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+
+    CRONTAB_FILE=/etc/cron.d/tr-sync
+    printf 'SHELL=/bin/sh\n' > "$CRONTAB_FILE"
+    printf '%s root . %s; cd /app && python -m app %s > /proc/1/fd/1 2>/proc/1/fd/2\n' \
+        "$SCHEDULE" "$ENV_FILE" "$COMMAND" >> "$CRONTAB_FILE"
+    printf '\n' >> "$CRONTAB_FILE"
+    chmod 0644 "$CRONTAB_FILE"
+
+    log "Crontab registered:"
+    cat "$CRONTAB_FILE"
+
+    exec cron -f
+}
+
+# ------------------------------------------------------------------
+# Sync mode
+# ------------------------------------------------------------------
+if [ "$MODE" = "sync" ]; then
+    if [ -z "$SYNC_SCHEDULE" ]; then
+        exec python -m app sync
+    fi
+    _start_cron "$SYNC_SCHEDULE" "sync" "SYNC_SCHEDULE"
+fi
+
+# ------------------------------------------------------------------
+# Backup mode
+# ------------------------------------------------------------------
+if [ "$MODE" = "backup" ]; then
+    if [ -z "$BACKUP_SCHEDULE" ]; then
+        exec python -m app backup auto
+    fi
+    _start_cron "$BACKUP_SCHEDULE" "backup auto" "BACKUP_SCHEDULE"
+fi
+
+log "ERROR: MODE='$MODE' is not set or not recognised. Valid values: sync, backup, bot"
+exit 1
 
 set -e
 
