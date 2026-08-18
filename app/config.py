@@ -93,6 +93,19 @@ def _read_notifier_env() -> dict[str, object]:
     }
 
 
+def read_instances_config_path() -> Path:
+    """Return the path to the instances YAML config file from ``INSTANCES_CONFIG`` env var.
+
+    Raises ``ValueError`` when the variable is unset or blank.  All env var reads
+    for ``INSTANCES_CONFIG`` must go through this helper — never call ``os.getenv``
+    for this variable outside ``config.py``.
+    """
+    raw = os.getenv("INSTANCES_CONFIG", "").strip()
+    if not raw:
+        raise ValueError("Missing required environment variable: INSTANCES_CONFIG")
+    return Path(raw)
+
+
 def read_data_dir() -> Path:
     """Return the data directory path from the DATA_DIR environment variable."""
     return Path(os.getenv("DATA_DIR", _DEFAULT_DATA_DIR))
@@ -248,16 +261,71 @@ class InstanceConfig:
     category_strategy: str = "none"
 
 
-def _parse_instance(raw_inst: dict, idx: int) -> InstanceConfig:
-    """Parse and validate a single instance dict from the YAML file."""
+def _parse_yaml_bool(field_name: str, value: object) -> bool:
+    """Parse a YAML boolean field that may arrive as a native bool or a string.
+
+    YAML natively parses unquoted ``true``/``false`` as booleans.  Quoted values
+    (e.g. ``"false"``) arrive as strings.  Both forms are accepted; anything else
+    raises ``ValueError``.
+    """
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in ("true", "1", "yes"):
+        return True
+    if normalized in ("false", "0", "no"):
+        return False
+    raise ValueError(
+        f"{field_name} must be a boolean (true/false/1/0/yes/no), got: {value!r}"
+    )
+
+
+def _validate_instance_name(raw_inst: dict, idx: int) -> str:
+    """Extract and validate the instance name from a raw dict."""
     name = raw_inst.get("name") or ""
     if not name:
         raise ValueError(f"instance at index {idx} is missing 'name'")
+    if "/" in name or "\\" in name:
+        raise ValueError(f"instance name '{name}' must not contain a path separator")
+    return name
+
+
+def _parse_instance_numerics(name: str, raw_inst: dict) -> tuple[int, int]:
+    """Parse and validate lookback_days and dedup_ttl_days for an instance."""
+    lookback_days = int(raw_inst.get("lookback_days", 7))
+    if lookback_days <= 0:
+        raise ValueError(f"instance '{name}': lookback_days must be a positive integer")
+    dedup_ttl_days = int(raw_inst.get("dedup_ttl_days", 60))
+    if dedup_ttl_days <= 0:
+        raise ValueError(
+            f"instance '{name}': dedup_ttl_days must be a positive integer"
+        )
+    return lookback_days, dedup_ttl_days
+
+
+def _parse_instance_labels(name: str, raw_inst: dict) -> dict[str, str]:
+    """Parse and validate the labels mapping for an instance."""
+    raw_labels = raw_inst.get("labels")
+    if raw_labels is not None and not isinstance(raw_labels, dict):
+        raise ValueError(f"instance '{name}': labels must be a mapping")
+    return dict(raw_labels) if raw_labels else {}
+
+
+def _parse_instance(raw_inst: object, idx: int) -> InstanceConfig:
+    """Parse and validate a single instance entry from the YAML file."""
+    if not isinstance(raw_inst, dict):
+        raise ValueError(
+            f"instance at index {idx} must be a mapping, got {type(raw_inst).__name__}"
+        )
+    name = _validate_instance_name(raw_inst, idx)
     for required in _REQUIRED_INSTANCE_FIELDS:
         if not raw_inst.get(required):
             raise ValueError(
                 f"instance '{name}' is missing required field '{required}'"
             )
+
+    lookback_days, dedup_ttl_days = _parse_instance_numerics(name, raw_inst)
+    label_ids = _parse_instance_labels(name, raw_inst)
 
     category_strategy = str(raw_inst.get("category_strategy", "none")).strip().lower()
     if category_strategy not in _VALID_CATEGORY_STRATEGIES:
@@ -274,9 +342,9 @@ def _parse_instance(raw_inst: dict, idx: int) -> InstanceConfig:
         wallet_cash_account_id=str(raw_inst["wallet_cash_account_id"]),
         wallet_portfolio_account_id=str(raw_inst["wallet_portfolio_account_id"]),
         owner_name=raw_inst.get("owner_name") or None,
-        lookback_days=int(raw_inst.get("lookback_days", 7)),
-        dedup_ttl_days=int(raw_inst.get("dedup_ttl_days", 60)),
-        label_ids=dict(raw_inst.get("labels") or {}),
+        lookback_days=lookback_days,
+        dedup_ttl_days=dedup_ttl_days,
+        label_ids=label_ids,
         category_strategy=category_strategy,
     )
 
@@ -302,7 +370,12 @@ class InstancesConfig:
         import yaml  # deferred — only needed when INSTANCES_CONFIG is used
 
         raw = path.read_text()  # raises FileNotFoundError if absent
-        data = yaml.safe_load(raw) or {}
+        data = yaml.safe_load(raw)
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"instances config must be a YAML mapping, got "
+                f"{type(data).__name__ if data is not None else 'empty file'}"
+            )
 
         raw_instances = data.get("instances") or []
         if not raw_instances:
@@ -317,12 +390,15 @@ class InstancesConfig:
             seen_names.add(inst.name)
             instances.append(inst)
 
+        allow_insecure_ssl = _parse_yaml_bool(
+            "allow_insecure_ssl", data.get("allow_insecure_ssl", False)
+        )
         return cls(
             instances=instances,
             data_dir=Path(data.get("data_dir", _DEFAULT_DATA_DIR)),
             telegram_bot_token=data.get("telegram_bot_token") or None,
             telegram_chat_id=data.get("telegram_chat_id") or None,
-            allow_insecure_ssl=bool(data.get("allow_insecure_ssl", False)),
+            allow_insecure_ssl=allow_insecure_ssl,
         )
 
     def get_instance(self, name: str) -> InstanceConfig:

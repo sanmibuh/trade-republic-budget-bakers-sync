@@ -787,3 +787,224 @@ def test_instances_config_to_config_credentials(tmp_path):
     assert cfg.wallet_api_key == "key-user1"
     assert cfg.wallet_cash_account_id == "cash-user1"
     assert cfg.wallet_portfolio_account_id == "portfolio-user1"
+
+
+# ---------------------------------------------------------------------------
+# InstancesConfig.load() — robustness and validation (PR review comments)
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_yaml_root_is_list_raises(tmp_path):
+    """ValueError when the YAML root is a list instead of a mapping."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("- foo\n- bar\n")
+
+    with pytest.raises(ValueError, match="mapping"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_yaml_root_is_scalar_raises(tmp_path):
+    """ValueError when the YAML root is a scalar instead of a mapping."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("just a string\n")
+
+    with pytest.raises(ValueError, match="mapping"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_instance_entry_is_not_mapping_raises(tmp_path):
+    """ValueError when an instance entry is a scalar instead of a mapping."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("instances:\n  - just_a_string\n")
+
+    with pytest.raises(ValueError, match="mapping"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_name_with_path_separator_raises(tmp_path):
+    """ValueError when instance name contains a path separator (path traversal guard)."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: "../tmp"
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="path separator"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_zero_lookback_days_raises(tmp_path):
+    """ValueError when lookback_days is zero."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+    lookback_days: 0
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="lookback_days"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_negative_dedup_ttl_days_raises(tmp_path):
+    """ValueError when dedup_ttl_days is negative."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+    dedup_ttl_days: -1
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="dedup_ttl_days"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_labels_not_mapping_raises(tmp_path):
+    """ValueError when labels is not a mapping."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+    labels: "not-a-mapping"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="labels"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_allow_insecure_ssl_string_false(tmp_path):
+    """allow_insecure_ssl: 'false' (quoted string) must be parsed as False, not True."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+allow_insecure_ssl: "false"
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    cfg = InstancesConfig.load(cfg_file)
+
+    assert cfg.allow_insecure_ssl is False
+
+
+def test_instances_config_load_allow_insecure_ssl_string_true(tmp_path):
+    """allow_insecure_ssl: 'true' (quoted string) must be parsed as True."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+allow_insecure_ssl: "true"
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    cfg = InstancesConfig.load(cfg_file)
+
+    assert cfg.allow_insecure_ssl is True
+
+
+def test_instances_config_load_allow_insecure_ssl_invalid_string_raises(tmp_path):
+    """allow_insecure_ssl with an unrecognised string value raises ValueError."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+allow_insecure_ssl: "maybe"
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="allow_insecure_ssl"):
+        InstancesConfig.load(cfg_file)
+
+
+# ---------------------------------------------------------------------------
+# read_instances_config_path — INSTANCES_CONFIG env var (read in config.py)
+# ---------------------------------------------------------------------------
+
+
+def test_read_instances_config_path_returns_path(monkeypatch, tmp_path):
+    """Returns a Path when INSTANCES_CONFIG is set."""
+    from app.config import read_instances_config_path
+
+    cfg_file = tmp_path / "instances.yml"
+    monkeypatch.setenv("INSTANCES_CONFIG", str(cfg_file))
+
+    assert read_instances_config_path() == cfg_file
+
+
+def test_read_instances_config_path_missing_raises(monkeypatch):
+    """ValueError when INSTANCES_CONFIG is not set."""
+    from app.config import read_instances_config_path
+
+    monkeypatch.delenv("INSTANCES_CONFIG", raising=False)
+
+    with pytest.raises(ValueError, match="INSTANCES_CONFIG"):
+        read_instances_config_path()
+
+
+def test_read_instances_config_path_blank_raises(monkeypatch):
+    """ValueError when INSTANCES_CONFIG is blank."""
+    from app.config import read_instances_config_path
+
+    monkeypatch.setenv("INSTANCES_CONFIG", "   ")
+
+    with pytest.raises(ValueError, match="INSTANCES_CONFIG"):
+        read_instances_config_path()

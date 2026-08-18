@@ -21,21 +21,21 @@ from app.logging_setup import configure_logging, setup_logging
 
 
 def _resolve_instance_cfg(instance: str) -> object:
-    """Load ``InstancesConfig`` from ``INSTANCES_CONFIG`` env var and return the
-    ``Config`` for *instance*.  Raises ``SystemExit`` with a clear error message
-    when ``INSTANCES_CONFIG`` is not set or the file cannot be loaded.
+    """Load ``InstancesConfig`` via ``INSTANCES_CONFIG`` env var and return the
+    ``Config`` for *instance*.
+
+    ``INSTANCES_CONFIG`` is read through :func:`app.config.read_instances_config_path`
+    so that all env var access stays in ``config.py``.  Any ``ValueError`` or
+    ``FileNotFoundError`` is re-raised as a :class:`click.UsageError` so the user
+    sees a clean error message instead of a traceback.
     """
-    import os
-    from pathlib import Path
+    from app.config import InstancesConfig, read_instances_config_path
 
-    from app.config import InstancesConfig
-
-    config_path = os.getenv("INSTANCES_CONFIG", "").strip()
-    if not config_path:
-        raise click.UsageError(
-            "--instance requires the INSTANCES_CONFIG environment variable to be set"
-        )
-    return InstancesConfig.load(Path(config_path)).to_config(instance)
+    try:
+        path = read_instances_config_path()
+        return InstancesConfig.load(path).to_config(instance)
+    except (ValueError, FileNotFoundError) as exc:
+        raise click.UsageError(str(exc)) from exc
 
 
 @click.group()

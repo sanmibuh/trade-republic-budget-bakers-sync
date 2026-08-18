@@ -570,3 +570,19 @@ def test_login_without_instance_flag_uses_env():
         result = _runner().invoke(cli, ["login"])
     assert result.exit_code == 0
     mock_run.assert_called_once_with(cfg=None)
+
+
+def test_sync_with_instance_flag_load_error_shown_as_click_error(tmp_path):
+    """Errors from InstancesConfig.load() are shown as a Click UsageError, not a traceback."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with patch("app.config.InstancesConfig.load", side_effect=ValueError("bad config")):
+        result = _runner().invoke(
+            cli,
+            ["sync", "--instance", "user1"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code != 0
+    assert "bad config" in result.output
