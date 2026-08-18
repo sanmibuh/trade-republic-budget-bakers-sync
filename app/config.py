@@ -286,6 +286,8 @@ def _validate_instance_name(raw_inst: dict, idx: int) -> str:
     name = str(raw_name).strip() if raw_name is not None else ""
     if not name:
         raise ValueError(f"instance at index {idx} is missing 'name'")
+    if name in (".", ".."):
+        raise ValueError(f"instance name '{name}' must not be '.' or '..'")
     if "/" in name or "\\" in name:
         raise ValueError(f"instance name '{name}' must not contain a path separator")
     return name
@@ -316,11 +318,28 @@ def _parse_instance_numerics(name: str, raw_inst: dict) -> tuple[int, int]:
 
 
 def _parse_instance_labels(name: str, raw_inst: dict) -> dict[str, str]:
-    """Parse and validate the labels mapping for an instance."""
+    """Parse and validate the labels mapping for an instance.
+
+    Keys and values are coerced to ``str``; null or blank values are rejected.
+    """
     raw_labels = raw_inst.get("labels")
     if raw_labels is not None and not isinstance(raw_labels, dict):
         raise ValueError(f"instance '{name}': labels must be a mapping")
-    return dict(raw_labels) if raw_labels else {}
+    if not raw_labels:
+        return {}
+    result: dict[str, str] = {}
+    for k, v in raw_labels.items():
+        if v is None:
+            raise ValueError(
+                f"instance '{name}': label '{k}' has a null value — provide a non-blank string ID"
+            )
+        str_v = str(v).strip()
+        if not str_v:
+            raise ValueError(
+                f"instance '{name}': label '{k}' has a blank value — provide a non-blank string ID"
+            )
+        result[str(k)] = str_v
+    return result
 
 
 def _parse_instance(raw_inst: object, idx: int) -> InstanceConfig:
@@ -382,7 +401,10 @@ class InstancesConfig:
         import yaml  # deferred — only needed when INSTANCES_CONFIG is used
 
         raw = path.read_text()  # raises FileNotFoundError if absent
-        data = yaml.safe_load(raw)
+        try:
+            data = yaml.safe_load(raw)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"Invalid YAML in {path}: {exc}") from exc
         if not isinstance(data, dict):
             raise ValueError(
                 f"instances config must be a YAML mapping, got "

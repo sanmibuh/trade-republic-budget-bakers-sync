@@ -40,6 +40,7 @@ def _resolve_instance_cfg(instance: str) -> Config:
 
     if not instance.strip():
         raise click.UsageError("--instance value must not be blank")
+    instance = instance.strip()
     try:
         path = read_instances_config_path()
         return InstancesConfig.load(path).to_config(instance)
@@ -64,7 +65,7 @@ def sync(instance: str | None) -> None:
     """Run a one-shot Trade Republic → Wallet sync."""
     from app.main import run
 
-    cfg = _resolve_instance_cfg(instance) if instance else None
+    cfg = _resolve_instance_cfg(instance) if instance is not None else None
     sys.exit(run(cfg=cfg))
 
 
@@ -84,7 +85,7 @@ def login(instance: str | None) -> None:
     """
     from app.main import run_login
 
-    cfg = _resolve_instance_cfg(instance) if instance else None
+    cfg = _resolve_instance_cfg(instance) if instance is not None else None
     sys.exit(run_login(cfg=cfg))
 
 

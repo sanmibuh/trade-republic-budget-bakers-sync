@@ -598,6 +598,124 @@ instances:
         InstancesConfig.load(cfg_file)
 
 
+def test_instances_config_load_invalid_yaml_syntax_raises_value_error(tmp_path):
+    """Malformed YAML raises ValueError with a clear message, not a yaml.YAMLError traceback."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("key: [unclosed\n")
+
+    with pytest.raises(ValueError, match=r"[Ii]nvalid YAML"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_name_dot_raises(tmp_path):
+    """Instance name '.' is rejected to prevent path traversal via normalization."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: "."
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match=r"\.\.|\."):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_name_dotdot_raises(tmp_path):
+    """Instance name '..' is rejected to prevent path traversal via normalization."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: ".."
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match=r"\.\.|\."):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_labels_numeric_keys_coerced_to_strings(tmp_path):
+    """YAML integer label keys/values are coerced to strings."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+    labels:
+      BANK_TRANSACTION_INCOMING: 12345
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    cfg = InstancesConfig.load(cfg_file)
+
+    assert cfg.instances[0].label_ids == {"BANK_TRANSACTION_INCOMING": "12345"}
+
+
+def test_instances_config_load_labels_blank_value_raises(tmp_path):
+    """Blank label ID values are rejected."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+    labels:
+      BANK_TRANSACTION_INCOMING: ""
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="label"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_labels_null_value_raises(tmp_path):
+    """Null label ID values are rejected."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+    labels:
+      BANK_TRANSACTION_INCOMING: ~
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="label"):
+        InstancesConfig.load(cfg_file)
+
+
 def test_instances_config_load_missing_name_raises(tmp_path):
     """ValueError is raised when an instance has no name."""
     from app.config import InstancesConfig
