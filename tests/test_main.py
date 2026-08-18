@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -652,3 +653,70 @@ def test_setup_logging_returns_added_handlers(tmp_path):
             if h not in before:
                 root.removeHandler(h)
                 h.close()
+
+
+# ---------------------------------------------------------------------------
+# _prepare — serializes concurrent in-process runs
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_serializes_concurrent_runs(tmp_path):
+    """Two concurrent _prepare calls must be serialized so handlers never overlap.
+
+    The test verifies that the second call only enters _prepare after the first
+    has fully exited.  Without a lock, the order would be
+    [run1_start, run2_start, run1_end]; with a lock it must be
+    [run1_start, run1_end, run2_start].
+    """
+    import time
+    from unittest.mock import patch
+
+    from app.main import _prepare
+
+    inside_first = threading.Event()
+    second_ready = threading.Event()
+    order: list[str] = []
+
+    def _make_cfg(subdir: str) -> MagicMock:
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path / subdir
+        cfg.allow_insecure_ssl = False
+        cfg.telegram_bot_token = None
+        cfg.telegram_chat_id = None
+        cfg.owner_name = subdir
+        return cfg
+
+    def run1() -> None:
+        with (
+            patch("app.main.setup_logging", return_value=[]),
+            patch("app.main.http_client"),
+            patch("app.main.Notifier"),
+            _prepare(_make_cfg("a")),
+        ):
+            order.append("run1_start")
+            inside_first.set()  # signal: run1 is inside _prepare holding the lock
+            second_ready.wait()  # wait until run2 is about to call _prepare
+            time.sleep(0.05)  # stay inside a bit so run2 is definitely waiting
+            order.append("run1_end")
+
+    def run2() -> None:
+        inside_first.wait()  # wait until run1 holds the lock
+        second_ready.set()
+        with (
+            patch("app.main.setup_logging", return_value=[]),
+            patch("app.main.http_client"),
+            patch("app.main.Notifier"),
+            _prepare(_make_cfg("b")),
+        ):
+            order.append("run2_start")
+
+    t1 = threading.Thread(target=run1)
+    t2 = threading.Thread(target=run2)
+    t1.start()
+    t2.start()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert order == ["run1_start", "run1_end", "run2_start"], (
+        f"runs were not serialized; got order {order}"
+    )

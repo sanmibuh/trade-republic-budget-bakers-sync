@@ -448,8 +448,12 @@ class InstancesConfig:
         return cls(
             instances=instances,
             data_dir=Path(data.get("data_dir", _DEFAULT_DATA_DIR)),
-            telegram_bot_token=data.get("telegram_bot_token") or None,
-            telegram_chat_id=data.get("telegram_chat_id") or None,
+            telegram_bot_token=data.get("telegram_bot_token")
+            or os.getenv("TELEGRAM_BOT_TOKEN")
+            or None,
+            telegram_chat_id=data.get("telegram_chat_id")
+            or os.getenv("TELEGRAM_CHAT_ID")
+            or None,
             allow_insecure_ssl=allow_insecure_ssl,
         )
 

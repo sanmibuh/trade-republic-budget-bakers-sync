@@ -123,10 +123,7 @@ class BotConfig:
                 config=full_cfg,
             )
 
-        try:
-            backup_cfg: BackupConfig | None = BackupConfig.from_env_optional()
-        except ValueError:
-            backup_cfg = None
+        backup_cfg: BackupConfig | None = BackupConfig.from_env_optional()
 
         return cls(
             bot_token=env.bot_token,
@@ -515,7 +512,7 @@ class TelegramBot:
             "/resync `[YYYY\\-MM\\-DD]` — Force re\\-sync of a specific day, bypassing dedup",
             "/login — Renew Trade Republic 2FA session \\(choose instance\\)",
             "/logs — Show today's logs for an instance",
-            "/code `<instance> <code>` — Submit an authenticator code",
+            "/code `<instance> <code>` — Submit an authenticator code \\(or send the 6\\-digit code as a plain message\\)",
         ]
         if self._cfg.backup_cfg:
             lines += [

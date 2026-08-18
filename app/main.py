@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
@@ -23,6 +24,10 @@ from app.wallet_client import WalletClient
 
 log = logging.getLogger(__name__)
 
+# Serializes all in-process sync/login/resync runs so that logging handlers
+# added by _prepare never overlap between concurrent bot-triggered calls.
+_RUN_LOCK = threading.Lock()
+
 
 # ---------------------------------------------------------------------------
 # Bootstrap helpers (shared by run() and run_login())
@@ -40,14 +45,15 @@ def _prepare(cfg: Config) -> Generator[Notifier, None, None]:
     """
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
-    handlers = setup_logging(cfg.data_dir)
-    root = logging.getLogger()
-    try:
-        yield Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)
-    finally:
-        for h in handlers:
-            root.removeHandler(h)
-            h.close()
+    with _RUN_LOCK:
+        handlers = setup_logging(cfg.data_dir)
+        root = logging.getLogger()
+        try:
+            yield Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)
+        finally:
+            for h in handlers:
+                root.removeHandler(h)
+                h.close()
 
 
 def _connect(cfg: Config, notifier: Notifier) -> TRClient:

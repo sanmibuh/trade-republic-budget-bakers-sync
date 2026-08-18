@@ -199,6 +199,16 @@ def test_botconfig_from_env_missing_chat_id(monkeypatch):
         BotConfig.from_env()
 
 
+def test_botconfig_from_env_invalid_allow_insecure_ssl_raises(monkeypatch):
+    """A bad ALLOW_INSECURE_SSL value must propagate as ValueError, not be silently swallowed."""
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("WALLET_API_KEY", "key")
+    monkeypatch.setenv("ALLOW_INSECURE_SSL", "not-a-bool")
+    with _mock_instances_load(), pytest.raises(ValueError, match="ALLOW_INSECURE_SSL"):
+        BotConfig.from_env()
+
+
 def test_botconfig_from_env_missing_instances_config(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
@@ -2186,6 +2196,22 @@ def test_register_commands_includes_resync(tmp_path):
     payload = mock_post.call_args.kwargs["json"]
     commands = [c["command"] for c in payload["commands"]]
     assert "resync" in commands
+
+
+def test_cmd_help_code_mentions_plain_digit_message(tmp_path):
+    """/help /code line must explain that a plain digit message is the default 2FA flow."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_help([])
+    msg = mock_send.call_args.args[0]
+    # Find the /code line specifically and verify it mentions the plain-message alternative
+    code_line = next((line for line in msg.splitlines() if "/code" in line), "")
+    assert code_line, "/code must appear in /help output"
+    assert (
+        "plain" in code_line.lower()
+        or "direct" in code_line.lower()
+        or "message" in code_line.lower()
+    )
 
 
 # ---------------------------------------------------------------------------
