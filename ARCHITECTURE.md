@@ -233,32 +233,20 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 - Yearly cleanup removes the 12 monthly files whose period is covered by the yearly backup.
 
 ### Telegram bot
-- `app/bot.py`: long-polling bot and command handlers; wires `app/bot_docker.py` and `app/bot_keyboards.py`; re-exports all public symbols for backward compatibility.
-- `app/bot_docker.py`: Docker exec helpers (`_docker_exec_silent`, `_docker_check_session`, `_docker_container_status`, `_docker_logs_today`, `_docker_last_sync_summary`, `_docker_client_ctx`); isolated so they can be unit-tested independently.
-- `app/bot_keyboards.py`: stateless inline keyboard builder functions (backup type/period pickers, instance pickers, resync date picker); no dependency on bot state or Docker.
-- `BotConfig` reads `INSTANCES` (sync instances), `CONTAINER_PREFIX`, and `BACKUP_SERVICE` from env.
-- `CONTAINER_PREFIX` must match the Docker Compose project `name:` field (e.g. `tr-sync`) — fixed in
-  `docker-compose.yml` via `name: tr-sync` so it never changes regardless of the directory name.
-- Container naming: sync → `{prefix}-sync-{name}-1`, backup → `{prefix}-{backup_service}-1`.
+- `app/bot.py`: long-polling bot and command handlers; wires `app/bot_keyboards.py`; executes all sync/login/resync/backup operations via direct in-process Python calls (no Docker SDK, no `exec_run`).
+- `app/bot_keyboards.py`: stateless inline keyboard builder functions (backup type/period pickers, instance pickers, resync date picker); no dependency on bot state.
+- `BotConfig` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `INSTANCES_CONFIG` from env. `INSTANCES_CONFIG` is a path to the instances YAML file; backup config is read from `BackupConfig.from_env()`.
+- Each sync instance is represented as `InstanceConfig(name, config: Config)` — the bot calls `main.run()`, `main.run_login()`, and `main.run_resync()` directly with the instance's `Config`.
 - Backup command (`/backup [monthly|yearly] [period]`) uses a two-step inline keyboard: first choose type
   (Monthly / Yearly), then choose the period. Direct args (`/backup monthly 2026-07`) skip the keyboards.
-- Sync/login/logs commands (`/sync`, `/login`, `/logs`) show an inline instance picker.
-- `/status` reports auth state per instance — ✅ session saved, ⚠️ needs login, ❓ container unreachable — by
-  running `python -m app check-session` in each container via `_docker_check_session`. `check-session`
-  combines cookie expiry **and** the persisted `auth_state` in `sync.db` so that a failed login is
-  reported correctly even when the old session file is still present.
-- `/login` renews an expired 2FA session on demand (instance picker); `/code <instance> <code>` forwards an
-  authenticator code to the target container via `submit-code` (see *2FA via Telegram*).
+- Sync/login/resync commands (`/sync`, `/login`, `/resync`) show an inline instance picker.
+- `/status` reports auth state per instance — ✅ session valid, ⚠️ needs login — by reading `sync.db` directly
+  via `EventRepository` and checking cookie expiry via `has_valid_session` (`_check_session_direct`).
+- `/login` renews an expired 2FA session on demand (instance picker); a 6-digit code sent as a plain message is
+  forwarded to the target instance's `data_dir/.tr_2fa_code` file (see *2FA via Telegram*).
 - `/resync [YYYY-MM-DD]` force re-syncs a specific day: instance picker → date picker (last 7 days) → executes
-  `python -m app resync <date>` in the container. With a date arg, jumps straight to the instance picker.
-  Existing records are updated via PUT; new ones are inserted via POST. Callback data format:
-  `resync_pick_date:<instance>` (date picker step) and `resync:<date>:<instance>` (execute step).
-- The Docker socket (`/var/run/docker.sock`) is mounted into the bot container; the Docker SDK communicates with
-  it directly (no docker CLI binary required).
-- `_docker_exec_silent` accepts optional `on_error` / `on_success` callbacks — the bot passes `self._send_message`
-  so the user receives a Telegram notification on failure.
-- `_docker_check_session` runs `python -m app check-session` via `exec_run` and returns `True` / `False` / `None`
-  (unreachable).
+  `main.run_resync()` in a background thread. With a date arg, jumps straight to the instance picker.
+  Callback data format: `resync_pick_date:<instance>` (date picker step) and `resync:<date>:<instance>` (execute step).
 
 ### Config — environment variables
 - `Config.from_env()` — full config for the **sync** command. Requires `PHONE_NUMBER`, `PIN`, `WALLET_API_KEY`,
@@ -278,22 +266,19 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   `INSTANCE`, defaulting to `OWNER_NAME` lowercased (e.g. `david`, `eli`), which already matches the container
   instance name, so it need not be set explicitly in compose.
 - `BotEnv.from_env()` — config for the **bot** command. Reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
-  `INSTANCES`, `CONTAINER_PREFIX`, `BACKUP_SERVICE`.
+  `INSTANCES_CONFIG` (path to the instances YAML file), and `TELEGRAM_VERIFY_SSL`.
 - `read_data_dir()` — standalone helper that returns the `DATA_DIR` path (default `/app/data`); used by
   `check-session` which only needs the data directory, not full credentials.
 - `read_instance()` — standalone helper that returns the logical instance name (`INSTANCE` env var, falling
   back to `OWNER_NAME` lowercased); used by `check-session` to look up `auth_state` in `sync.db`.
 - All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
-### Multi-instance YAML config (Phase 1 + Phase 2 of #145)
-
-> **Status:** Phase 1 (config loading) and Phase 2 (single-container cron) are implemented.
-> The env-var mode above remains the current deployment mechanism; the YAML config will replace it
-> once all four phases of #145 are complete.
-> Do not deprecate env vars until Phase 4 is merged.
+### Multi-instance YAML config (#145)
 
 `InstancesConfig` (`app/config.py`) supports loading N sync instances from a single YAML file,
-enabling a single-container deployment without per-instance Docker services.
+enabling a single-container deployment without per-instance Docker services. The bot (`app/bot.py`)
+reads this file via `INSTANCES_CONFIG` and dispatches all operations (sync, login, resync, backup)
+as direct in-process Python calls.
 
 **File format** (`instances.yml`):
 
@@ -416,7 +401,7 @@ the affected records once without a `categoryId`.
 
 | Image | Base | Published on |
 |---|---|---|
-| `ghcr.io/sanmibuh/python-trade-republic` | `python:3.11-slim` + git + pip deps (incl. docker SDK) | `v5.0.0` |
+| `ghcr.io/sanmibuh/python-trade-republic` | `python:3.11-slim` + git + pip deps | `v5.0.0` |
 | `ghcr.io/sanmibuh/tr-wallet-sync` | `python-trade-republic` + app code + cron | Minor/patch releases |
 
 `cron` is intentionally installed only in the app image (`docker/app/Dockerfile`), not in the base image — it is

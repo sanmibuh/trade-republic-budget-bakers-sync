@@ -44,6 +44,7 @@ deploy/
     telegram.env.example
     sync-1.env.example
     sync-2.env.example
+    instances.yml.example
   nas/
     current/          # next version — rename to vXXX after deploy
       docker-compose.yml
@@ -51,6 +52,7 @@ deploy/
       telegram.env    # real credentials (never committed)
       sync-1.env      # per-account credentials (never committed)
       sync-2.env
+      instances.yml   # multi-instance YAML config (never committed)
       tr-sync.sh      # management script
     v201/             # v2.0.1 — deployed, read-only
       ...
@@ -71,18 +73,18 @@ Copy the contents of `deploy/example/` to a folder on the NAS (e.g. `/share/dock
 Rename the example files and fill in real values:
 
 ```sh
-cp wallet.env.example   wallet.env
-cp telegram.env.example telegram.env
-cp sync-1.env.example   sync-1.env
-cp sync-2.env.example   sync-2.env
+cp wallet.env.example       wallet.env
+cp telegram.env.example     telegram.env
+cp sync-1.env.example       sync-1.env
+cp sync-2.env.example       sync-2.env
+cp instances.yml.example    instances.yml
 ```
 
-- `wallet.env` — BudgetBakers Wallet API key (sync and backup services)
+- `wallet.env` — BudgetBakers Wallet API key (backup service)
 - `telegram.env` — Telegram bot token and chat ID (all services)
 - `sync-1.env` — Trade Republic phone and PIN for account 1
 - `sync-2.env` — Trade Republic phone and PIN for account 2
-
-Also update `docker-compose.yml` with the real `WALLET_CASH_ACCOUNT_ID` and `WALLET_PORTFOLIO_ACCOUNT_ID` for each account.
+- `instances.yml` — All instance credentials for the Telegram bot (phone, PIN, Wallet keys per instance)
 
 ### 3. Bootstrap (one-time interactive 2FA login)
 
@@ -178,11 +180,8 @@ Trade Republic sessions expire on a hard 24h cap, so a scheduled sync will event
 **From Telegram (no SSH needed):**
 
 1. Send `/login` to the bot and pick the instance (or wait for the automatic prompt when a cron sync bails out).
-2. The bot replies asking for the authenticator code. Reply with:
-   ```
-   /code <instance> <code>
-   ```
-   e.g. `/code david 123456`. Push-approval accounts (no authenticator) just approve in the app — no code needed.
+2. The bot replies asking for the authenticator code. Reply with the 6-digit code as a plain message.
+   Push-approval accounts (no authenticator) just approve in the app — no code needed.
 
 **From the NAS (interactive bootstrap):**
 

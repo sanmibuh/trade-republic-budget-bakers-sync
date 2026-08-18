@@ -133,7 +133,7 @@ def run_login(cfg: Config | None = None) -> int:
     return 0
 
 
-def run_resync(date_str: str) -> int:
+def run_resync(date_str: str, cfg: Config | None = None) -> int:
     """Force a re-sync of all TR events for a specific day, bypassing dedup.
 
     Already-synced events are updated via PUT; never-synced events are inserted
@@ -141,6 +141,8 @@ def run_resync(date_str: str) -> int:
 
     Args:
         date_str: ISO date string ``YYYY-MM-DD`` for the day to re-sync.
+        cfg:      Optional pre-built :class:`Config`.  When ``None`` (default),
+                  falls back to ``Config.from_env()`` for backwards compatibility.
 
     Returns:
         0 on success, 1 on invalid date or unrecoverable error.
@@ -151,7 +153,8 @@ def run_resync(date_str: str) -> int:
         log.error("Invalid date for resync: %r (expected YYYY-MM-DD)", date_str)
         return 1
 
-    cfg = Config.from_env()
+    if cfg is None:
+        cfg = Config.from_env()
     notifier = _prepare(cfg)
     log.info("Starting force resync for date=%s owner=%s", date_str, cfg.owner_name)
 

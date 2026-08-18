@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from unittest.mock import ANY, MagicMock, patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -11,36 +12,76 @@ from app.bot import (
     InstanceConfig,
     TelegramBot,
     _auth_icon,
-    _docker_exec_silent,
+    _check_session_direct,
+    _format_sync_timestamp,
+    _last_sync_summary_direct,
 )
+from app.config import BackupConfig, Config
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
+def _make_config(data_dir: Path, instance: str = "user1") -> Config:
+    return Config(
+        owner_name=instance.capitalize(),
+        phone_number="+34600000000",
+        pin="1234",
+        wallet_api_key="key",
+        wallet_cash_account_id="cash",
+        wallet_portfolio_account_id="portfolio",
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        lookback_days=7,
+        dedup_ttl_days=60,
+        data_dir=data_dir,
+        instance=instance,
+    )
+
+
+def _make_backup_config(data_dir: Path) -> BackupConfig:
+    return BackupConfig(
+        owner_name="Backup",
+        wallet_api_key="backup-key",
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        data_dir=data_dir,
+    )
+
+
 def _cfg(
     instances: dict[str, InstanceConfig] | None = None,
-    backup_container: str | None = "proj-backup-1",
+    backup_cfg: BackupConfig | None = ...,  # type: ignore[assignment]
+    tmp_path: Path | None = None,
 ) -> BotConfig:
+    if tmp_path is None:
+        tmp_path = Path("/tmp/bot_test")
     if instances is None:
         instances = {
-            "user1": InstanceConfig(name="User1", container_name="proj-sync-user1-1"),
-            "user2": InstanceConfig(name="User2", container_name="proj-sync-user2-1"),
+            "user1": InstanceConfig(
+                name="User1", config=_make_config(tmp_path / "user1", "user1")
+            ),
+            "user2": InstanceConfig(
+                name="User2", config=_make_config(tmp_path / "user2", "user2")
+            ),
         }
+    if backup_cfg is ...:
+        backup_cfg = _make_backup_config(tmp_path / "backup")
     return BotConfig(
         bot_token="tok",
         chat_id="42",
         instances=instances,
-        backup_container=backup_container,
+        backup_cfg=backup_cfg,
     )
 
 
 def _bot(
     instances: dict[str, InstanceConfig] | None = None,
-    backup_container: str | None = "proj-backup-1",
+    backup_cfg: BackupConfig | None = ...,  # type: ignore[assignment]
+    tmp_path: Path | None = None,
 ) -> TelegramBot:
-    return TelegramBot(_cfg(instances, backup_container))
+    return TelegramBot(_cfg(instances, backup_cfg, tmp_path))
 
 
 # ---------------------------------------------------------------------------
@@ -50,45 +91,93 @@ def _bot(
 _VALID_ENV = {
     "TELEGRAM_BOT_TOKEN": "mytoken",
     "TELEGRAM_CHAT_ID": "123",
-    "INSTANCES": "user1,user2",
-    "CONTAINER_PREFIX": "myproject",
+    "INSTANCES_CONFIG": "/fake/instances.yml",
 }
+
+_YAML_CONTENT = """
+telegram_bot_token: "mytoken"
+telegram_chat_id: "123"
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key1"
+    wallet_cash_account_id: "cash1"
+    wallet_portfolio_account_id: "portfolio1"
+  - name: user2
+    phone: "+34611111111"
+    pin: "5678"
+    wallet_api_key: "key2"
+    wallet_cash_account_id: "cash2"
+    wallet_portfolio_account_id: "portfolio2"
+"""
+
+
+def _mock_instances_load(yaml_text: str = _YAML_CONTENT):
+    """Return a patcher for InstancesConfig.load that parses *yaml_text*."""
+    import tempfile
+    from pathlib import Path
+
+    from app.config import InstancesConfig
+
+    _real_load = InstancesConfig.load.__func__  # type: ignore[attr-defined]
+
+    def _load(path):
+        tmp = Path(tempfile.mktemp(suffix=".yml"))
+        tmp.write_text(yaml_text)
+        result = _real_load(InstancesConfig, tmp)
+        tmp.unlink(missing_ok=True)
+        return result
+
+    return patch("app.bot.InstancesConfig.load", side_effect=_load)
 
 
 def test_botconfig_from_env_valid(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    cfg = BotConfig.from_env()
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
     assert cfg.bot_token == "mytoken"
     assert cfg.chat_id == "123"
     assert "user1" in cfg.instances
     assert "user2" in cfg.instances
-    # Sync containers include "sync-" prefix
-    assert cfg.instances["user1"].container_name == "myproject-sync-user1-1"
-    assert cfg.instances["user2"].container_name == "myproject-sync-user2-1"
 
 
-def test_botconfig_from_env_backup_container_default(monkeypatch):
+def test_botconfig_from_env_instances_have_correct_name(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    cfg = BotConfig.from_env()
-    assert cfg.backup_container == "myproject-backup-1"
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert cfg.instances["user1"].name == "user1"
+    assert cfg.instances["user2"].name == "user2"
 
 
-def test_botconfig_from_env_backup_service_custom(monkeypatch):
+def test_botconfig_from_env_instances_have_config_objects(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.setenv("BACKUP_SERVICE", "wallet-backup")
-    cfg = BotConfig.from_env()
-    assert cfg.backup_container == "myproject-wallet-backup-1"
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert isinstance(cfg.instances["user1"].config, Config)
+    assert cfg.instances["user1"].config.phone_number == "+34600000000"
 
 
-def test_botconfig_from_env_backup_service_empty_disables_backup(monkeypatch):
+def test_botconfig_from_env_backup_disabled_when_wallet_key_absent(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.setenv("BACKUP_SERVICE", "")
-    cfg = BotConfig.from_env()
-    assert cfg.backup_container is None
+    monkeypatch.delenv("WALLET_API_KEY", raising=False)
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert cfg.backup_cfg is None
+
+
+def test_botconfig_from_env_backup_enabled_when_wallet_key_present(monkeypatch):
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("WALLET_API_KEY", "mykey")
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert cfg.backup_cfg is not None
+    assert cfg.backup_cfg.wallet_api_key == "mykey"
 
 
 def test_botconfig_from_env_missing_token(monkeypatch):
@@ -107,35 +196,19 @@ def test_botconfig_from_env_missing_chat_id(monkeypatch):
         BotConfig.from_env()
 
 
-def test_botconfig_from_env_missing_instances(monkeypatch):
+def test_botconfig_from_env_missing_instances_config(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.delenv("INSTANCES")
-    with pytest.raises(ValueError, match="INSTANCES"):
+    monkeypatch.delenv("INSTANCES_CONFIG")
+    with pytest.raises(ValueError, match="INSTANCES_CONFIG"):
         BotConfig.from_env()
-
-
-def test_botconfig_from_env_missing_prefix(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.delenv("CONTAINER_PREFIX")
-    with pytest.raises(ValueError, match="CONTAINER_PREFIX"):
-        BotConfig.from_env()
-
-
-def test_botconfig_from_env_instance_names_normalised(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.setenv("INSTANCES", " User1 , User2 ")  # extra spaces
-    cfg = BotConfig.from_env()
-    assert "user1" in cfg.instances
-    assert "user2" in cfg.instances
 
 
 def test_botconfig_telegram_verify_ssl_default_true(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    cfg = BotConfig.from_env()
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
     assert cfg.telegram_verify_ssl is True
 
 
@@ -143,7 +216,8 @@ def test_botconfig_telegram_verify_ssl_false(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
     monkeypatch.setenv("TELEGRAM_VERIFY_SSL", "false")
-    cfg = BotConfig.from_env()
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
     assert cfg.telegram_verify_ssl is False
 
 
@@ -160,8 +234,8 @@ def test_botconfig_telegram_verify_ssl_invalid(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_register_commands_includes_backup_when_configured():
-    bot = _bot(backup_container="proj-backup-1")
+def test_register_commands_includes_backup_when_configured(tmp_path):
+    bot = _bot(backup_cfg=_make_backup_config(tmp_path), tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
@@ -170,15 +244,13 @@ def test_register_commands_includes_backup_when_configured():
     cmd_names = [c["command"] for c in commands]
     assert "sync" in cmd_names
     assert "backup" in cmd_names
-    assert "backup_monthly" not in cmd_names
-    assert "backup_yearly" not in cmd_names
     assert "status" in cmd_names
     assert "help" in cmd_names
     assert "login" in cmd_names
 
 
-def test_register_commands_excludes_backup_when_not_configured():
-    bot = _bot(backup_container=None)
+def test_register_commands_excludes_backup_when_not_configured(tmp_path):
+    bot = _bot(backup_cfg=None, tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
@@ -189,8 +261,8 @@ def test_register_commands_excludes_backup_when_not_configured():
     assert "sync" in cmd_names
 
 
-def test_register_commands_does_not_raise_on_failure():
-    bot = _bot()
+def test_register_commands_does_not_raise_on_failure(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch("app.bot.requests.post", side_effect=requests.RequestException("fail")):
         bot._register_commands()  # must not raise
 
@@ -200,48 +272,48 @@ def test_register_commands_does_not_raise_on_failure():
 # ---------------------------------------------------------------------------
 
 
-def test_handle_message_ignores_unauthorized_chat():
-    bot = _bot()
+def test_handle_message_ignores_unauthorized_chat(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._handle_message({"chat": {"id": 9999}, "text": "/help"})
     mock_send.assert_not_called()
 
 
-def test_handle_message_non_command_replies_commands_only():
+def test_handle_message_non_command_replies_commands_only(tmp_path):
     """Non-command plain text receives a 'commands only' reply (not silently ignored)."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._handle_message({"chat": {"id": 42}, "text": "hello"})
     mock_send.assert_called_once()
     assert "command" in mock_send.call_args.args[0].lower()
 
 
-def test_handle_message_unknown_command_replies():
-    bot = _bot()
+def test_handle_message_unknown_command_replies(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._handle_message({"chat": {"id": 42}, "text": "/unknown"})
     mock_send.assert_called_once()
     assert "Unknown" in mock_send.call_args.args[0]
 
 
-def test_handle_message_dispatches_help():
-    bot = _bot()
+def test_handle_message_dispatches_help(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_cmd_help") as mock_help:
         bot._handle_message({"chat": {"id": 42}, "text": "/help"})
     mock_help.assert_called_once()
 
 
-def test_handle_message_strips_bot_name_suffix():
+def test_handle_message_strips_bot_name_suffix(tmp_path):
     """Commands like /sync@MyBot should be treated as /sync."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_cmd_sync") as mock_sync:
         bot._handle_message({"chat": {"id": 42}, "text": "/sync@MyBot"})
     mock_sync.assert_called_once()
 
 
-def test_handle_message_deletes_code_message_for_privacy():
+def test_handle_message_deletes_code_message_for_privacy(tmp_path):
     """The /code message carries a sensitive 2FA code and must be deleted."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_cmd_code"),
         patch.object(bot, "_delete_message") as mock_delete,
@@ -252,8 +324,8 @@ def test_handle_message_deletes_code_message_for_privacy():
     mock_delete.assert_called_once_with(555)
 
 
-def test_handle_message_does_not_delete_non_code_commands():
-    bot = _bot()
+def test_handle_message_does_not_delete_non_code_commands(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_cmd_sync"),
         patch.object(bot, "_delete_message") as mock_delete,
@@ -267,8 +339,8 @@ def test_handle_message_does_not_delete_non_code_commands():
 # ---------------------------------------------------------------------------
 
 
-def test_delete_message_calls_telegram_api():
-    bot = _bot()
+def test_delete_message_calls_telegram_api(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch("app.bot.requests.post") as mock_post:
         bot._delete_message(555)
     mock_post.assert_called_once()
@@ -277,14 +349,14 @@ def test_delete_message_calls_telegram_api():
     assert str(payload["chat_id"]) == bot._cfg.chat_id
 
 
-def test_delete_message_does_not_raise_on_failure():
-    bot = _bot()
+def test_delete_message_does_not_raise_on_failure(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch("app.bot.requests.post", side_effect=requests.RequestException("fail")):
         bot._delete_message(555)  # must not raise
 
 
-def test_delete_message_ignores_missing_id():
-    bot = _bot()
+def test_delete_message_ignores_missing_id(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch("app.bot.requests.post") as mock_post:
         bot._delete_message(None)
     mock_post.assert_not_called()
@@ -295,8 +367,8 @@ def test_delete_message_ignores_missing_id():
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_help_includes_backup_when_configured():
-    bot = _bot(backup_container="proj-backup-1")
+def test_cmd_help_includes_backup_when_configured(tmp_path):
+    bot = _bot(backup_cfg=_make_backup_config(tmp_path), tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_help([])
     msg = mock_send.call_args.args[0]
@@ -304,8 +376,8 @@ def test_cmd_help_includes_backup_when_configured():
     assert "backup" in msg.lower()
 
 
-def test_cmd_help_excludes_backup_when_not_configured():
-    bot = _bot(backup_container=None)
+def test_cmd_help_excludes_backup_when_not_configured(tmp_path):
+    bot = _bot(backup_cfg=None, tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_help([])
     msg = mock_send.call_args.args[0]
@@ -318,17 +390,17 @@ def test_cmd_help_excludes_backup_when_not_configured():
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_backup_no_backup_container_sends_error():
-    bot = _bot(backup_container=None)
+def test_cmd_backup_no_backup_cfg_sends_error(tmp_path):
+    bot = _bot(backup_cfg=None, tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_backup([])
     mock_send.assert_called_once()
     assert "not configured" in mock_send.call_args.args[0]
 
 
-def test_cmd_backup_without_args_shows_type_keyboard():
+def test_cmd_backup_without_args_shows_type_keyboard(tmp_path):
     """Without args /backup should show a Monthly / Yearly type-selection keyboard."""
-    bot = _bot(backup_container="proj-backup-1")
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_backup([])
     mock_send.assert_called_once()
@@ -340,9 +412,9 @@ def test_cmd_backup_without_args_shows_type_keyboard():
     assert any("backup_type:yearly" in d for d in cb_data)
 
 
-def test_cmd_backup_monthly_arg_shows_month_keyboard():
+def test_cmd_backup_monthly_arg_shows_month_keyboard(tmp_path):
     """'/backup monthly' (no period) → show month selection keyboard."""
-    bot = _bot(backup_container="proj-backup-1")
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_backup(["monthly"])
     keyboard = mock_send.call_args.kwargs.get("keyboard")
@@ -352,9 +424,9 @@ def test_cmd_backup_monthly_arg_shows_month_keyboard():
     assert all(d.startswith("backup_monthly:") for d in cb_data)
 
 
-def test_cmd_backup_yearly_arg_shows_year_keyboard():
+def test_cmd_backup_yearly_arg_shows_year_keyboard(tmp_path):
     """'/backup yearly' (no year) → show year selection keyboard."""
-    bot = _bot(backup_container="proj-backup-1")
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_backup(["yearly"])
     keyboard = mock_send.call_args.kwargs.get("keyboard")
@@ -364,39 +436,37 @@ def test_cmd_backup_yearly_arg_shows_year_keyboard():
     assert all(d.startswith("backup_yearly:") for d in cb_data)
 
 
-def test_cmd_backup_monthly_with_period_executes_directly():
+def test_cmd_backup_monthly_with_period_executes_directly(tmp_path):
     """/backup monthly YYYY-MM executes without showing a keyboard."""
-    bot = _bot(backup_container="proj-backup-1")
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_launch_backup") as mock_launch,
     ):
         bot._cmd_backup(["monthly", "2026-07"])
-    _, kwargs = mock_send.call_args
-    assert kwargs.get("keyboard") is None
-    mock_exec.assert_called_once_with(
-        "proj-backup-1", ["backup", "monthly", "2026-07"], on_error=ANY
-    )
+    mock_launch.assert_called_once_with("monthly", "2026-07")
+    # _send_message should not have been called with a keyboard
+    for call in mock_send.call_args_list:
+        assert call.kwargs.get("keyboard") is None
 
 
-def test_cmd_backup_yearly_with_year_executes_directly():
+def test_cmd_backup_yearly_with_year_executes_directly(tmp_path):
     """/backup yearly YYYY executes without showing a keyboard."""
-    bot = _bot(backup_container="proj-backup-1")
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_launch_backup") as mock_launch,
     ):
         bot._cmd_backup(["yearly", "2025"])
-    _, kwargs = mock_send.call_args
-    assert kwargs.get("keyboard") is None
-    mock_exec.assert_called_once_with(
-        "proj-backup-1", ["backup", "yearly", "2025"], on_error=ANY
-    )
+    mock_launch.assert_called_once_with("yearly", "2025")
+    # _send_message should not have been called with a keyboard
+    for call in mock_send.call_args_list:
+        assert call.kwargs.get("keyboard") is None
 
 
-def test_cmd_backup_unknown_type_sends_error():
+def test_cmd_backup_unknown_type_sends_error(tmp_path):
     """/backup weekly → error message, no keyboard."""
-    bot = _bot(backup_container="proj-backup-1")
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_backup(["weekly"])
     msg = mock_send.call_args.args[0]
@@ -404,15 +474,15 @@ def test_cmd_backup_unknown_type_sends_error():
     assert mock_send.call_args.kwargs.get("keyboard") is None
 
 
-def test_handle_message_dispatches_backup():
-    bot = _bot(backup_container="proj-backup-1")
+def test_handle_message_dispatches_backup(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_cmd_backup") as mock_backup:
         bot._handle_message({"chat": {"id": 42}, "text": "/backup"})
     mock_backup.assert_called_once_with([])
 
 
-def test_handle_message_dispatches_backup_with_args():
-    bot = _bot(backup_container="proj-backup-1")
+def test_handle_message_dispatches_backup_with_args(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_cmd_backup") as mock_backup:
         bot._handle_message({"chat": {"id": 42}, "text": "/backup monthly 2026-07"})
     mock_backup.assert_called_once_with(["monthly", "2026-07"])
@@ -423,9 +493,9 @@ def test_handle_message_dispatches_backup_with_args():
 # ---------------------------------------------------------------------------
 
 
-def test_callback_query_backup_type_monthly_shows_month_keyboard():
+def test_callback_query_backup_type_monthly_shows_month_keyboard(tmp_path):
     """`backup_type:monthly` callback → show month selection keyboard."""
-    bot = _bot(backup_container="proj-backup-1")
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
@@ -443,9 +513,9 @@ def test_callback_query_backup_type_monthly_shows_month_keyboard():
     assert all(b["callback_data"].startswith("backup_monthly:") for b in all_buttons)
 
 
-def test_callback_query_backup_type_yearly_shows_year_keyboard():
+def test_callback_query_backup_type_yearly_shows_year_keyboard(tmp_path):
     """`backup_type:yearly` callback → show year selection keyboard."""
-    bot = _bot(backup_container="proj-backup-1")
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
@@ -463,29 +533,30 @@ def test_callback_query_backup_type_yearly_shows_year_keyboard():
     assert all(b["callback_data"].startswith("backup_yearly:") for b in all_buttons)
 
 
-def test_launch_backup_monthly_sends_ack_and_starts_thread():
-    bot = _bot(backup_container="proj-backup-1")
+def test_launch_backup_monthly_sends_ack_and_starts_thread(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch.object(bot, "_exec_in_thread"),
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_backup("monthly", "2026-07")
     mock_send.assert_called_once()
     assert "2026" in mock_send.call_args.args[0]
 
 
-def test_launch_backup_sends_error_when_backup_not_configured():
-    """Guard: _launch_backup with no backup container → clear error, no crash."""
-    bot = _bot(backup_container=None)
+def test_launch_backup_sends_error_when_backup_not_configured(tmp_path):
+    """Guard: _launch_backup with no backup cfg → clear error, no crash."""
+    bot = _bot(backup_cfg=None, tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._launch_backup("monthly", "2026-07")
     mock_send.assert_called_once()
     assert "not configured" in mock_send.call_args.args[0].lower()
 
 
-def test_callback_backup_monthly_with_no_backup_container_sends_error():
+def test_callback_backup_monthly_with_no_backup_cfg_sends_error(tmp_path):
     """Stale inline keyboard: backup_monthly callback when backup not configured → error message."""
-    bot = _bot(backup_container=None)
+    bot = _bot(backup_cfg=None, tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
@@ -501,9 +572,9 @@ def test_callback_backup_monthly_with_no_backup_container_sends_error():
     assert "not configured" in mock_send.call_args.args[0].lower()
 
 
-def test_callback_backup_yearly_with_no_backup_container_sends_error():
+def test_callback_backup_yearly_with_no_backup_cfg_sends_error(tmp_path):
     """Stale inline keyboard: backup_yearly callback when backup not configured → error message."""
-    bot = _bot(backup_container=None)
+    bot = _bot(backup_cfg=None, tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
@@ -519,9 +590,9 @@ def test_callback_backup_yearly_with_no_backup_container_sends_error():
     assert "not configured" in mock_send.call_args.args[0].lower()
 
 
-def test_callback_query_backup_monthly_dispatches_launch():
+def test_callback_query_backup_monthly_dispatches_launch(tmp_path):
     """backup_monthly:YYYY-MM callback should trigger _launch_backup("monthly", period)."""
-    bot = _bot(backup_container="proj-backup-1")
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_launch_backup") as mock_launch,
@@ -536,21 +607,22 @@ def test_callback_query_backup_monthly_dispatches_launch():
     mock_launch.assert_called_once_with("monthly", "2026-07")
 
 
-def test_launch_backup_monthly_executes_correct_args():
-    bot = _bot(backup_container="proj-backup-1")
+def test_launch_backup_monthly_starts_thread(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_send_message"),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_backup("monthly", "2026-07")
-    mock_exec.assert_called_once_with(
-        "proj-backup-1", ["backup", "monthly", "2026-07"], on_error=ANY
-    )
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["daemon"] is True
+    mock_thread.return_value.start.assert_called_once()
 
 
-def test_callback_query_backup_yearly_dispatches_launch():
+def test_callback_query_backup_yearly_dispatches_launch(tmp_path):
     """backup_yearly:<year> callback should trigger _launch_backup("yearly", year)."""
-    bot = _bot(backup_container="proj-backup-1")
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_launch_backup") as mock_launch,
@@ -565,27 +637,16 @@ def test_callback_query_backup_yearly_dispatches_launch():
     mock_launch.assert_called_once_with("yearly", "2025")
 
 
-def test_launch_backup_yearly_sends_ack_and_starts_thread():
-    bot = _bot(backup_container="proj-backup-1")
+def test_launch_backup_yearly_sends_ack_and_starts_thread(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch.object(bot, "_exec_in_thread"),
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_backup("yearly", "2025")
     mock_send.assert_called_once()
     assert "2025" in mock_send.call_args.args[0]
-
-
-def test_launch_backup_yearly_executes_correct_args():
-    bot = _bot(backup_container="proj-backup-1")
-    with (
-        patch.object(bot, "_send_message"),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
-    ):
-        bot._launch_backup("yearly", "2024")
-    mock_exec.assert_called_once_with(
-        "proj-backup-1", ["backup", "yearly", "2024"], on_error=ANY
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -593,52 +654,26 @@ def test_launch_backup_yearly_executes_correct_args():
 # ---------------------------------------------------------------------------
 
 
-def test_launch_backup_uses_correct_icon_for_monthly():
-    bot = _bot(backup_container="proj-backup-1")
+def test_launch_backup_uses_correct_icon_for_monthly(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch.object(bot, "_exec_in_thread"),
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_backup("monthly", "2026-07")
     assert _BACKUP_ICONS["monthly"] in mock_send.call_args.args[0]
 
 
-def test_launch_backup_uses_correct_icon_for_yearly():
-    bot = _bot(backup_container="proj-backup-1")
+def test_launch_backup_uses_correct_icon_for_yearly(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch.object(bot, "_exec_in_thread"),
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_backup("yearly", "2025")
     assert _BACKUP_ICONS["yearly"] in mock_send.call_args.args[0]
-
-
-# ---------------------------------------------------------------------------
-# TelegramBot._exec_in_thread
-# ---------------------------------------------------------------------------
-
-
-def test_exec_in_thread_starts_daemon_thread():
-    """_exec_in_thread must start a daemon thread targeting _docker_exec_silent."""
-    bot = _bot()
-    with patch("app.bot.threading.Thread") as mock_thread:
-        mock_thread.return_value.start = MagicMock()
-        bot._exec_in_thread("my-container", ["sync"], on_error=None)
-    mock_thread.assert_called_once()
-    assert mock_thread.call_args.kwargs["daemon"] is True
-    mock_thread.return_value.start.assert_called_once()
-
-
-def test_exec_in_thread_passes_on_error_and_on_success():
-    on_error = MagicMock()
-    on_success = MagicMock()
-    bot = _bot()
-    with patch("app.bot.threading.Thread") as mock_thread:
-        mock_thread.return_value.start = MagicMock()
-        bot._exec_in_thread("c", ["login"], on_error=on_error, on_success=on_success)
-    kwargs = mock_thread.call_args.kwargs
-    assert kwargs["kwargs"]["on_error"] is on_error
-    assert kwargs["kwargs"]["on_success"] is on_success
 
 
 # ---------------------------------------------------------------------------
@@ -646,8 +681,8 @@ def test_exec_in_thread_passes_on_error_and_on_success():
 # ---------------------------------------------------------------------------
 
 
-def test_callback_query_noop_is_acknowledged_and_ignored():
-    bot = _bot()
+def test_callback_query_noop_is_acknowledged_and_ignored(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query") as mock_ack,
         patch.object(bot, "_launch_sync") as mock_sync,
@@ -659,8 +694,8 @@ def test_callback_query_noop_is_acknowledged_and_ignored():
     mock_sync.assert_not_called()
 
 
-def test_callback_query_unauthorized_chat_ignored():
-    bot = _bot()
+def test_callback_query_unauthorized_chat_ignored(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_launch_sync") as mock_sync,
@@ -671,8 +706,8 @@ def test_callback_query_unauthorized_chat_ignored():
     mock_sync.assert_not_called()
 
 
-def test_callback_query_sync_dispatches_launch_sync():
-    bot = _bot()
+def test_callback_query_sync_dispatches_launch_sync(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_launch_sync") as mock_sync,
@@ -684,8 +719,8 @@ def test_callback_query_sync_dispatches_launch_sync():
     assert mock_sync.call_args.args[0].name == "User1"
 
 
-def test_callback_query_unknown_instance_replies():
-    bot = _bot()
+def test_callback_query_unknown_instance_replies(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
@@ -697,8 +732,8 @@ def test_callback_query_unknown_instance_replies():
     assert "Unknown" in mock_send.call_args.args[0]
 
 
-def test_callback_query_malformed_data_does_not_raise():
-    bot = _bot()
+def test_callback_query_malformed_data_does_not_raise(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message"),
@@ -709,8 +744,8 @@ def test_callback_query_malformed_data_does_not_raise():
     # must not raise
 
 
-def test_callback_query_unknown_cmd_logs_warning_and_does_not_raise():
-    bot = _bot()
+def test_callback_query_unknown_cmd_logs_warning_and_does_not_raise(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
@@ -726,27 +761,52 @@ def test_callback_query_unknown_cmd_logs_warning_and_does_not_raise():
 # ---------------------------------------------------------------------------
 
 
-def test_launch_sync_sends_ack_and_starts_thread():
-    bot = _bot()
+def test_launch_sync_sends_ack_and_starts_thread(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch.object(bot, "_exec_in_thread"),
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_sync(inst)
     mock_send.assert_called_once()
     assert "User1" in mock_send.call_args.args[0]
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["daemon"] is True
 
 
-def test_launch_sync_passes_correct_args_to_exec():
-    bot = _bot()
+def test_launch_sync_thread_target_is_run_sync_for_instance(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message"),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_sync(inst)
-    mock_exec.assert_called_once_with(inst.container_name, ["sync"], on_error=ANY)
+    assert mock_thread.call_args.kwargs["target"] == bot._run_sync_for_instance
+    assert mock_thread.call_args.kwargs["args"] == (inst,)
+
+
+def test_run_sync_for_instance_calls_main_run(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    with patch("app.bot._main_run") as mock_run:
+        bot._run_sync_for_instance(inst)
+    mock_run.assert_called_once_with(cfg=inst.config)
+
+
+def test_run_sync_for_instance_sends_error_on_exception(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    with (
+        patch("app.bot._main_run", side_effect=RuntimeError("boom")),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._run_sync_for_instance(inst)
+    mock_send.assert_called_once()
+    assert "boom" in mock_send.call_args.args[0]
 
 
 # ---------------------------------------------------------------------------
@@ -754,8 +814,8 @@ def test_launch_sync_passes_correct_args_to_exec():
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_login_sends_keyboard_with_instances():
-    bot = _bot()
+def test_cmd_login_sends_keyboard_with_instances(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_login([])
     mock_send.assert_called_once()
@@ -766,8 +826,8 @@ def test_cmd_login_sends_keyboard_with_instances():
     assert "User2" in labels
 
 
-def test_login_buttons_callback_data_encodes_login_cmd():
-    bot = _bot()
+def test_login_buttons_callback_data_encodes_login_cmd(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_login([])
     keyboard = mock_send.call_args.kwargs["keyboard"]
@@ -775,8 +835,8 @@ def test_login_buttons_callback_data_encodes_login_cmd():
     assert all(d.startswith("login:") for d in cb_data)
 
 
-def test_callback_query_login_dispatches_launch_login():
-    bot = _bot()
+def test_callback_query_login_dispatches_launch_login(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_launch_login") as mock_login,
@@ -788,60 +848,99 @@ def test_callback_query_login_dispatches_launch_login():
     assert mock_login.call_args.args[0].name == "User1"
 
 
-def test_launch_login_sends_ack_and_starts_thread():
-    bot = _bot()
+def test_launch_login_sends_ack_and_starts_thread(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch.object(bot, "_exec_in_thread"),
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_login(inst)
     mock_send.assert_called_once()
     assert "User1" in mock_send.call_args.args[0]
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["daemon"] is True
 
 
-def test_launch_login_passes_correct_args_to_exec():
-    bot = _bot()
+def test_launch_login_thread_target_is_run_login_for_instance(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message"),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_login(inst)
-    call_kwargs = mock_exec.call_args.kwargs
-    assert mock_exec.call_args.args == (inst.container_name, ["login"])
-    assert call_kwargs["on_error"] is not None
-    assert call_kwargs["on_success"] is not None
+    assert mock_thread.call_args.kwargs["target"] == bot._run_login_for_instance
+    assert mock_thread.call_args.kwargs["args"] == (inst,)
 
 
-def test_launch_login_reports_success_via_on_success():
-    bot = _bot()
+def test_run_login_for_instance_calls_main_run_login(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
     with (
-        patch.object(bot, "_send_message") as mock_send,
-        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch("app.bot._main_run_login", return_value=0),
+        patch.object(bot, "_on_login_success") as mock_success,
+    ):
+        bot._run_login_for_instance(inst)
+    mock_success.assert_called_once_with(inst)
+
+
+def test_run_login_for_instance_calls_on_error_when_result_nonzero(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    with (
+        patch("app.bot._main_run_login", return_value=1),
+        patch.object(bot, "_on_login_error") as mock_error,
+    ):
+        bot._run_login_for_instance(inst)
+    mock_error.assert_called_once()
+    assert mock_error.call_args.args[0] is inst
+
+
+def test_run_login_for_instance_calls_on_error_on_exception(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    with (
+        patch("app.bot._main_run_login", side_effect=RuntimeError("boom")),
+        patch.object(bot, "_on_login_error") as mock_error,
+    ):
+        bot._run_login_for_instance(inst)
+    mock_error.assert_called_once()
+    assert "boom" in mock_error.call_args.args[1]
+
+
+def test_launch_login_reports_success_via_on_login_success(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    with (
+        patch.object(bot, "_send_message"),
+        patch("app.bot.threading.Thread") as mock_thread,
         patch.object(bot, "_launch_sync"),
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_login(inst)
-        on_success = mock_exec.call_args.kwargs["on_success"]
-        mock_send.reset_mock()
-        on_success()
-    mock_send.assert_called_once()
-    assert "User1" in mock_send.call_args.args[0]
+
+    # Simulate success callback
+    with (
+        patch.object(bot, "_send_message") as mock_send2,
+        patch.object(bot, "_launch_sync"),
+    ):
+        bot._on_login_success(inst)
+    mock_send2.assert_called_once()
+    assert "User1" in mock_send2.call_args.args[0]
 
 
-def test_launch_login_auto_syncs_on_success():
+def test_launch_login_auto_syncs_on_success(tmp_path):
     """After a successful login, the bot automatically triggers a sync for the same instance."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message"),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_launch_sync") as mock_sync,
     ):
-        bot._launch_login(inst)
-        on_success = mock_exec.call_args.kwargs["on_success"]
-        on_success()
+        bot._on_login_success(inst)
     mock_sync.assert_called_once_with(inst)
 
 
@@ -850,400 +949,368 @@ def test_launch_login_auto_syncs_on_success():
 # ---------------------------------------------------------------------------
 
 
-def test_launch_login_marks_instance_as_pending():
-    """While login exec is running, the instance should be in _pending_login."""
-    bot = _bot()
+def test_launch_login_marks_instance_as_pending(tmp_path):
+    """While login is running, the instance should be in _pending_login."""
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message"),
-        patch.object(bot, "_exec_in_thread"),
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_login(inst)
     assert "user1" in bot._pending_login
 
 
-def test_on_login_success_removes_pending_state():
+def test_on_login_success_removes_pending_state(tmp_path):
     """After success, the instance is removed from _pending_login."""
-    bot = _bot()
-    inst = bot._cfg.instances["user1"]
-    with (
-        patch.object(bot, "_send_message"),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
-        patch.object(bot, "_launch_sync"),
-    ):
-        bot._launch_login(inst)
-        assert "user1" in bot._pending_login
-        on_success = mock_exec.call_args.kwargs["on_success"]
-        on_success()
-    assert "user1" not in bot._pending_login
-
-
-def test_on_login_error_removes_pending_state():
-    """After an error, the instance is also removed from _pending_login."""
-    bot = _bot()
-    inst = bot._cfg.instances["user1"]
-    with (
-        patch.object(bot, "_send_message"),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
-    ):
-        bot._launch_login(inst)
-        assert "user1" in bot._pending_login
-        on_error = mock_exec.call_args.kwargs["on_error"]
-        on_error("❌ failed")
-    assert "user1" not in bot._pending_login
-
-
-def test_handle_message_digit_string_submitted_to_pending_instance():
-    """A digit-only reply is treated as 2FA code when exactly one instance is pending."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
     bot._pending_login["user1"] = inst
     with (
-        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch.object(bot, "_send_message"),
+        patch.object(bot, "_launch_sync"),
+    ):
+        bot._on_login_success(inst)
+    assert "user1" not in bot._pending_login
+
+
+def test_on_login_error_removes_pending_state(tmp_path):
+    """After an error, the instance is also removed from _pending_login."""
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    bot._pending_login["user1"] = inst
+    with patch.object(bot, "_send_message"):
+        bot._on_login_error(inst, "❌ failed")
+    assert "user1" not in bot._pending_login
+
+
+def test_handle_message_digit_string_submitted_to_pending_instance(tmp_path):
+    """A digit-only reply is treated as 2FA code when exactly one instance is pending."""
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    bot._pending_login["user1"] = inst
+
+    # Create pending marker file so submit succeeds
+    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+    (inst.config.data_dir / ".tr_2fa_pending").touch()
+
+    with (
         patch.object(bot, "_send_message"),
         patch.object(bot, "_delete_message") as mock_delete,
     ):
-        bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
-    mock_exec.assert_called_once_with(
-        inst.container_name, ["submit-code", "123456"], on_error=ANY
-    )
+        bot._handle_message(
+            {"chat": {"id": 42}, "text": "123456", "message_id": 77}
+        )
+
+    assert (inst.config.data_dir / ".tr_2fa_code").read_text() == "123456"
     mock_delete.assert_called_once_with(77)
 
 
-def test_handle_message_digit_string_not_deleted_when_no_pending_login_multi_instance():
+def test_handle_message_digit_string_not_deleted_when_no_pending_login_multi_instance(
+    tmp_path,
+):
     """Digit messages with no pending login and multiple instances send a disambiguation
     prompt, but do not submit code or delete the message."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
+    # No pending markers in any data_dir
     with (
-        patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message") as mock_send,
         patch.object(bot, "_delete_message") as mock_delete,
     ):
         bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
-    mock_exec.assert_not_called()
     mock_send.assert_called_once()
     assert "/code" in mock_send.call_args.args[0]
     mock_delete.assert_not_called()
 
 
-def test_handle_message_digit_string_not_deleted_when_multiple_pending():
+def test_handle_message_digit_string_not_deleted_when_multiple_pending(tmp_path):
     """Digit message is not deleted when multiple instances are pending (just a prompt is sent)."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     bot._pending_login["user1"] = bot._cfg.instances["user1"]
     bot._pending_login["user2"] = bot._cfg.instances["user2"]
     with (
-        patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message"),
         patch.object(bot, "_delete_message") as mock_delete,
     ):
         bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
-    mock_exec.assert_not_called()
     mock_delete.assert_not_called()
 
 
-def test_handle_message_digit_string_prompts_disambiguation_when_no_pending_login_multi_instance():
+def test_handle_message_digit_string_prompts_disambiguation_when_no_pending_login_multi_instance(
+    tmp_path,
+):
     """Plain digit messages with no pending login and multiple instances send a
     disambiguation prompt asking the user to specify the instance."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with (
-        patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._handle_message({"chat": {"id": 42}, "text": "123456"})
-    mock_exec.assert_not_called()
     mock_send.assert_called_once()
     assert "/code" in mock_send.call_args.args[0]
 
 
-def test_handle_message_digit_string_sends_prompt_when_multiple_pending():
+def test_handle_message_digit_string_sends_prompt_when_multiple_pending(tmp_path):
     """When multiple instances are pending, ask which one the code is for."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     bot._pending_login["user1"] = bot._cfg.instances["user1"]
     bot._pending_login["user2"] = bot._cfg.instances["user2"]
-    with (
-        patch.object(bot, "_exec_in_thread") as mock_exec,
-        patch.object(bot, "_send_message") as mock_send,
-    ):
+    with patch.object(bot, "_send_message") as mock_send:
         bot._handle_message({"chat": {"id": 42}, "text": "123456"})
-    mock_exec.assert_not_called()
     mock_send.assert_called_once()
     sent_text = mock_send.call_args.args[0]
     assert "user1" in sent_text.lower() or "user2" in sent_text.lower()
 
 
-def test_maybe_submit_pending_code_snapshots_dict_to_avoid_race():
+def test_maybe_submit_pending_code_snapshots_dict_to_avoid_race(tmp_path):
     """_maybe_submit_pending_code must snapshot _pending_login before iterating
     so a concurrent mutation from a worker thread doesn't cause RuntimeError."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
     bot._pending_login["user1"] = inst
 
-    # Simulate the worker thread clearing pending state mid-iteration by
-    # patching _exec_in_thread to mutate _pending_login before returning.
+    # Create pending marker
+    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+    (inst.config.data_dir / ".tr_2fa_pending").touch()
+
     def clear_pending(*_args, **_kwargs):
         bot._pending_login.clear()
+        return True
 
     with (
-        patch.object(bot, "_exec_in_thread", side_effect=clear_pending),
+        patch.object(bot, "_submit_code_to", side_effect=clear_pending),
         patch.object(bot, "_send_message"),
     ):
-        # Must not raise RuntimeError even though the dict is mutated mid-call.
         result = bot._maybe_submit_pending_code("123456")
     assert result is True
 
-    """Non-command, non-digit text receives a 'commands only' reply."""
-    bot = _bot()
-    with patch.object(bot, "_send_message") as mock_send:
-        bot._handle_message({"chat": {"id": 42}, "text": "hello there"})
-    mock_send.assert_called_once()
-    assert "command" in mock_send.call_args.args[0].lower()
 
-
-def test_maybe_submit_pending_code_single_instance_no_pending_submits_directly():
-    """When _pending_login is empty and there is exactly one configured instance,
-    a plain-digit message should be submitted to that instance (cron 2FA fallback)."""
+def test_maybe_submit_pending_code_single_instance_no_pending_marker_warns(tmp_path):
+    """Single instance but no pending marker → submit_code_to sends warning, returns False."""
     single_instance = {
-        "user1": InstanceConfig(name="User1", container_name="proj-sync-user1-1")
+        "user1": InstanceConfig(
+            name="User1", config=_make_config(tmp_path / "user1", "user1")
+        )
     }
-    bot = _bot(instances=single_instance)
-    with (
-        patch.object(bot, "_exec_in_thread") as mock_exec,
-        patch.object(bot, "_send_message"),
-    ):
+    bot = _bot(instances=single_instance, tmp_path=tmp_path)
+    # No pending marker file created
+    with patch.object(bot, "_send_message") as mock_send:
+        result = bot._maybe_submit_pending_code("123456")
+    assert result is False
+    mock_send.assert_called_once()
+    assert "No active login" in mock_send.call_args.args[0]
+
+
+def test_maybe_submit_pending_code_single_instance_with_pending_submits(tmp_path):
+    """Single instance with pending marker → code is written to file."""
+    single_instance = {
+        "user1": InstanceConfig(
+            name="User1", config=_make_config(tmp_path / "user1", "user1")
+        )
+    }
+    bot = _bot(instances=single_instance, tmp_path=tmp_path)
+    data_dir = tmp_path / "user1"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / ".tr_2fa_pending").touch()
+
+    with patch.object(bot, "_send_message"):
         result = bot._maybe_submit_pending_code("123456")
     assert result is True
-    mock_exec.assert_called_once_with(
-        "proj-sync-user1-1", ["submit-code", "123456"], on_error=ANY
-    )
+    assert (data_dir / ".tr_2fa_code").read_text() == "123456"
 
 
-def test_handle_message_digit_cron_single_instance_submits_code():
+def test_handle_message_digit_cron_single_instance_submits_code(tmp_path):
     """Replying with a digit-only code while _pending_login is empty should work
     for single-instance setups (cron-triggered 2FA) and delete the sensitive message."""
     single_instance = {
-        "user1": InstanceConfig(name="User1", container_name="proj-sync-user1-1")
+        "user1": InstanceConfig(
+            name="User1", config=_make_config(tmp_path / "user1", "user1")
+        )
     }
-    bot = _bot(instances=single_instance)
+    bot = _bot(instances=single_instance, tmp_path=tmp_path)
+    data_dir = tmp_path / "user1"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / ".tr_2fa_pending").touch()
+
     with (
-        patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message"),
         patch.object(bot, "_delete_message") as mock_delete,
     ):
         bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
-    mock_exec.assert_called_once_with(
-        "proj-sync-user1-1", ["submit-code", "123456"], on_error=ANY
-    )
+    assert (data_dir / ".tr_2fa_code").read_text() == "123456"
     mock_delete.assert_called_once_with(77)
 
 
-def test_maybe_submit_pending_code_multi_instance_no_pending_sends_disambiguation():
-    """When _pending_login is empty and there are multiple instances,
-    a plain-digit message should prompt the user to use /code <instance> <code>."""
-    bot = _bot()  # default has user1 + user2
+def test_maybe_submit_pending_code_multi_instance_no_pending_sends_disambiguation(
+    tmp_path,
+):
+    """When _pending_login is empty and no pending markers, sends disambiguation prompt."""
+    bot = _bot(tmp_path=tmp_path)  # user1 + user2, no pending markers
     with (
-        patch("app.bot._docker_check_awaiting_code", return_value=False),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message") as mock_send,
     ):
         result = bot._maybe_submit_pending_code("123456")
     assert result is False
-    mock_exec.assert_not_called()
     mock_send.assert_called_once()
     sent = mock_send.call_args.args[0]
     assert "/code" in sent
 
 
-def test_maybe_submit_pending_code_docker_unavailable_skips_probing():
-    """When the Docker daemon is unreachable (_docker_client_ctx yields None),
-    _docker_check_awaiting_code must never be called and the generic
-    disambiguation message must still be sent."""
-    bot = _bot()  # user1 + user2
-
-    import contextlib
-
-    @contextlib.contextmanager
-    def null_ctx():
-        yield None
-
-    with (
-        patch("app.bot._docker_client_ctx", return_value=null_ctx()),
-        patch("app.bot._docker_check_awaiting_code") as mock_check,
-        patch.object(bot, "_exec_in_thread") as mock_exec,
-        patch.object(bot, "_send_message") as mock_send,
-    ):
-        result = bot._maybe_submit_pending_code("123456")
-
-    assert result is False
-    mock_check.assert_not_called()
-    mock_exec.assert_not_called()
-    assert "/code" in mock_send.call_args.args[0]
-
-
-def test_handle_message_digit_cron_multi_instance_sends_disambiguation():
+def test_handle_message_digit_cron_multi_instance_sends_disambiguation(tmp_path):
     """Replying with a digit-only code while _pending_login is empty with multiple
     instances should ask the user to disambiguate."""
-    bot = _bot()  # user1 + user2
-    with (
-        patch("app.bot._docker_check_awaiting_code", return_value=False),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
-        patch.object(bot, "_send_message") as mock_send,
-    ):
+    bot = _bot(tmp_path=tmp_path)  # user1 + user2, no pending markers
+    with patch.object(bot, "_send_message") as mock_send:
         bot._handle_message({"chat": {"id": 42}, "text": "123456"})
-    mock_exec.assert_not_called()
     mock_send.assert_called_once()
     assert "/code" in mock_send.call_args.args[0]
 
 
-def test_maybe_submit_pending_code_docker_single_awaiting_submits_directly():
-    """When _pending_login is empty but exactly one container is awaiting a code
-    (detected via Docker check-pending), the code is submitted to that instance."""
-    bot = _bot()  # user1 + user2
-    user1 = bot._cfg.instances["user1"]
+def test_maybe_submit_pending_code_single_file_pending_submits_directly(tmp_path):
+    """When _pending_login is empty but exactly one instance has a pending marker,
+    the code is submitted to that instance."""
+    bot = _bot(tmp_path=tmp_path)  # user1 + user2
+    user1_dir = tmp_path / "user1"
+    user1_dir.mkdir(parents=True, exist_ok=True)
+    (user1_dir / ".tr_2fa_pending").touch()
 
-    def docker_check(container_name: str, client=None) -> bool:
-        return container_name == user1.container_name
-
-    with (
-        patch("app.bot._docker_check_awaiting_code", side_effect=docker_check),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
-        patch.object(bot, "_send_message"),
-    ):
+    with patch.object(bot, "_send_message"):
         result = bot._maybe_submit_pending_code("123456")
 
     assert result is True
-    mock_exec.assert_called_once_with(
-        user1.container_name, ["submit-code", "123456"], on_error=ANY
-    )
+    assert (user1_dir / ".tr_2fa_code").read_text() == "123456"
 
 
-def test_maybe_submit_pending_code_docker_multiple_awaiting_sends_disambiguation():
-    """When _pending_login is empty but multiple containers are awaiting a code,
+def test_maybe_submit_pending_code_multiple_file_pending_sends_disambiguation(tmp_path):
+    """When _pending_login is empty but multiple instances have pending markers,
     the user is asked to specify with /code <instance> <code>."""
-    bot = _bot()  # user1 + user2
+    bot = _bot(tmp_path=tmp_path)  # user1 + user2
+    for name in ("user1", "user2"):
+        d = tmp_path / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / ".tr_2fa_pending").touch()
 
     with (
-        patch("app.bot._docker_check_awaiting_code", return_value=True),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message") as mock_send,
     ):
         result = bot._maybe_submit_pending_code("123456")
 
     assert result is False
-    mock_exec.assert_not_called()
+    mock_send.assert_called_once()
     sent = mock_send.call_args.args[0]
     assert "/code" in sent
 
 
-def test_handle_message_digit_docker_single_awaiting_submits_and_deletes():
+def test_handle_message_digit_single_file_pending_submits_and_deletes(tmp_path):
     """Plain-digit reply on multi-instance setup is submitted and deleted when
-    exactly one container is awaiting a code via Docker pending check."""
-    bot = _bot()  # user1 + user2
-    user1 = bot._cfg.instances["user1"]
-
-    def docker_check(container_name: str, client=None) -> bool:
-        return container_name == user1.container_name
+    exactly one instance has a pending marker file."""
+    bot = _bot(tmp_path=tmp_path)  # user1 + user2
+    user1_dir = tmp_path / "user1"
+    user1_dir.mkdir(parents=True, exist_ok=True)
+    (user1_dir / ".tr_2fa_pending").touch()
 
     with (
-        patch("app.bot._docker_check_awaiting_code", side_effect=docker_check),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
         patch.object(bot, "_send_message"),
         patch.object(bot, "_delete_message") as mock_delete,
     ):
         bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
 
-    mock_exec.assert_called_once()
+    assert (user1_dir / ".tr_2fa_code").read_text() == "123456"
     mock_delete.assert_called_once_with(77)
 
 
-def test_maybe_submit_pending_code_docker_short_circuits_after_two_pending():
-    """Docker pending check must stop querying containers as soon as two are found —
-    no need to probe the third when the result is already ambiguous."""
+def test_probe_pending_short_circuits_after_two(tmp_path):
+    """_probe_pending must stop after finding two pending instances."""
     three_instances = {
-        "user1": InstanceConfig(name="User1", container_name="proj-sync-user1-1"),
-        "user2": InstanceConfig(name="User2", container_name="proj-sync-user2-1"),
-        "user3": InstanceConfig(name="User3", container_name="proj-sync-user3-1"),
+        "user1": InstanceConfig(
+            name="User1", config=_make_config(tmp_path / "user1", "user1")
+        ),
+        "user2": InstanceConfig(
+            name="User2", config=_make_config(tmp_path / "user2", "user2")
+        ),
+        "user3": InstanceConfig(
+            name="User3", config=_make_config(tmp_path / "user3", "user3")
+        ),
     }
-    bot = _bot(instances=three_instances)
-    call_count = 0
+    bot = _bot(instances=three_instances, tmp_path=tmp_path)
+    # Mark user1 and user2 as pending
+    for name in ("user1", "user2"):
+        d = tmp_path / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / ".tr_2fa_pending").touch()
+    # user3 dir does not exist — probe should short-circuit before reaching it
+    (tmp_path / "user3").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "user3" / ".tr_2fa_pending").touch()
 
-    def docker_check(container_name: str, client=None) -> bool:
-        nonlocal call_count
-        call_count += 1
-        # user1 and user2 are pending; user3 should never be queried
-        return container_name in ("proj-sync-user1-1", "proj-sync-user2-1")
-
-    with (
-        patch("app.bot._docker_check_awaiting_code", side_effect=docker_check),
-        patch.object(bot, "_exec_in_thread"),
-        patch.object(bot, "_send_message"),
-    ):
-        result = bot._maybe_submit_pending_code("123456")
-
-    assert result is False
-    assert call_count == 2  # stopped after finding user1 + user2; user3 never queried
+    result = bot._probe_pending(three_instances)
+    # Only two are returned (short-circuits after 2 found)
+    assert len(result) == 2
 
 
-def test_handle_message_unknown_plain_text_ignored_from_other_chat():
+def test_handle_message_unknown_plain_text_ignored_from_other_chat(tmp_path):
     """Messages from unauthorized chats are never answered."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._handle_message({"chat": {"id": 99}, "text": "hello"})
     mock_send.assert_not_called()
 
 
-def test_cmd_code_executes_submit_code_for_instance():
-    bot = _bot()
-    with (
-        patch.object(bot, "_send_message") as mock_send,
-        patch.object(bot, "_exec_in_thread") as mock_exec,
-    ):
+def test_cmd_code_writes_file_to_data_dir(tmp_path):
+    """_cmd_code writes the authenticator code directly to the instance data_dir."""
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+    (inst.config.data_dir / ".tr_2fa_pending").touch()
+
+    with patch.object(bot, "_send_message"):
         bot._cmd_code(["user1", "123456"])
-    mock_exec.assert_called_once_with(
-        "proj-sync-user1-1", ["submit-code", "123456"], on_error=ANY
-    )
-    mock_send.assert_called_once()
+    assert (inst.config.data_dir / ".tr_2fa_code").read_text() == "123456"
 
 
-def test_cmd_code_missing_args_sends_usage():
-    bot = _bot()
-    with (
-        patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot.threading.Thread") as mock_thread,
-    ):
+def test_cmd_code_missing_args_sends_usage(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_code(["user1"])
-    mock_thread.assert_not_called()
     mock_send.assert_called_once()
     assert "code" in mock_send.call_args.args[0].lower()
 
 
-def test_cmd_code_unknown_instance_sends_error():
-    bot = _bot()
-    with (
-        patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot.threading.Thread") as mock_thread,
-    ):
+def test_cmd_code_unknown_instance_sends_error(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_code(["nobody", "123456"])
-    mock_thread.assert_not_called()
     mock_send.assert_called_once()
     assert "nobody" in mock_send.call_args.args[0]
 
 
-def test_cmd_code_non_digit_code_sends_error():
-    bot = _bot()
-    with (
-        patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot.threading.Thread") as mock_thread,
-    ):
+def test_cmd_code_non_digit_code_sends_error(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_code(["user1", "abc123"])
-    mock_thread.assert_not_called()
     mock_send.assert_called_once()
 
 
-def test_handle_message_dispatches_code():
-    bot = _bot()
+def test_handle_message_dispatches_code(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_cmd_code") as mock_code:
         bot._handle_message({"chat": {"id": 42}, "text": "/code user1 123456"})
     mock_code.assert_called_once_with(["user1", "123456"])
+
+
+def test_cmd_code_no_pending_marker_sends_warning(tmp_path):
+    """When pending marker is absent, _cmd_code sends a warning (no active login)."""
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+    # No pending marker
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_code(["user1", "123456"])
+    # Two messages: the "Sending code..." message and the warning
+    assert mock_send.call_count == 2
+    messages = [call.args[0] for call in mock_send.call_args_list]
+    assert any("No active login" in m for m in messages)
 
 
 # ---------------------------------------------------------------------------
@@ -1251,8 +1318,8 @@ def test_handle_message_dispatches_code():
 # ---------------------------------------------------------------------------
 
 
-def test_send_message_posts_to_telegram():
-    bot = _bot()
+def test_send_message_posts_to_telegram(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
@@ -1265,8 +1332,8 @@ def test_send_message_posts_to_telegram():
     assert payload["parse_mode"] == "MarkdownV2"
 
 
-def test_send_message_with_keyboard_includes_reply_markup():
-    bot = _bot()
+def test_send_message_with_keyboard_includes_reply_markup(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     keyboard = [[{"text": "A", "callback_data": "a"}]]
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
@@ -1277,8 +1344,8 @@ def test_send_message_with_keyboard_includes_reply_markup():
     assert payload["reply_markup"]["inline_keyboard"] == keyboard
 
 
-def test_send_message_does_not_raise_on_request_exception():
-    bot = _bot()
+def test_send_message_does_not_raise_on_request_exception(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch(
         "app.bot.requests.post", side_effect=requests.RequestException("network error")
     ):
@@ -1290,8 +1357,8 @@ def test_send_message_does_not_raise_on_request_exception():
 # ---------------------------------------------------------------------------
 
 
-def test_answer_callback_query_calls_api():
-    bot = _bot()
+def test_answer_callback_query_calls_api(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
         bot._answer_callback_query("cq123")
@@ -1300,8 +1367,8 @@ def test_answer_callback_query_calls_api():
     assert mock_post.call_args.kwargs["json"]["callback_query_id"] == "cq123"
 
 
-def test_answer_callback_query_does_not_raise_on_failure():
-    bot = _bot()
+def test_answer_callback_query_does_not_raise_on_failure(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch("app.bot.requests.post", side_effect=requests.RequestException("fail")):
         bot._answer_callback_query("cq1")  # must not raise
 
@@ -1311,8 +1378,8 @@ def test_answer_callback_query_does_not_raise_on_failure():
 # ---------------------------------------------------------------------------
 
 
-def test_handle_update_routes_message():
-    bot = _bot()
+def test_handle_update_routes_message(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_handle_message") as mock_msg:
         bot._handle_update(
             {"update_id": 1, "message": {"chat": {"id": 42}, "text": "/help"}}
@@ -1320,8 +1387,8 @@ def test_handle_update_routes_message():
     mock_msg.assert_called_once()
 
 
-def test_handle_update_routes_callback_query():
-    bot = _bot()
+def test_handle_update_routes_callback_query(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_handle_callback_query") as mock_cb:
         bot._handle_update(
             {
@@ -1336,8 +1403,8 @@ def test_handle_update_routes_callback_query():
     mock_cb.assert_called_once()
 
 
-def test_handle_update_ignores_unknown_type():
-    bot = _bot()
+def test_handle_update_ignores_unknown_type(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_handle_message") as mock_msg,
         patch.object(bot, "_handle_callback_query") as mock_cb,
@@ -1352,8 +1419,8 @@ def test_handle_update_ignores_unknown_type():
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_logs_sends_keyboard_with_instances():
-    bot = _bot()
+def test_cmd_logs_sends_keyboard_with_instances(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_logs([])
     mock_send.assert_called_once()
@@ -1365,8 +1432,8 @@ def test_cmd_logs_sends_keyboard_with_instances():
     assert "User2" in labels
 
 
-def test_cmd_logs_callback_data_encodes_logs_cmd():
-    bot = _bot()
+def test_cmd_logs_callback_data_encodes_logs_cmd(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_logs([])
     _, kwargs = mock_send.call_args
@@ -1374,8 +1441,8 @@ def test_cmd_logs_callback_data_encodes_logs_cmd():
     assert all(d.startswith("logs:") for d in cb_data)
 
 
-def test_handle_message_dispatches_logs():
-    bot = _bot()
+def test_handle_message_dispatches_logs(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_cmd_logs") as mock_logs:
         bot._handle_message({"chat": {"id": 42}, "text": "/logs"})
     mock_logs.assert_called_once()
@@ -1386,8 +1453,8 @@ def test_handle_message_dispatches_logs():
 # ---------------------------------------------------------------------------
 
 
-def test_callback_query_logs_dispatches_fetch_and_send_logs():
-    bot = _bot()
+def test_callback_query_logs_dispatches_fetch_and_send_logs(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch("app.bot.threading.Thread") as mock_thread,
@@ -1410,65 +1477,92 @@ def test_callback_query_logs_dispatches_fetch_and_send_logs():
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_and_send_logs_sends_todays_logs():
-    bot = _bot()
+def test_fetch_and_send_logs_sends_todays_logs(tmp_path):
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
-    with (
-        patch(
-            "app.bot._docker_logs_today", return_value="INFO sync: all done\n"
-        ) as mock_logs,
-        patch.object(bot, "_send_message") as mock_send,
-    ):
+    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    log_content = f"{today} 10:00:00 INFO sync_runner: all done\n"
+    (inst.config.data_dir / "sync.log").write_text(log_content)
+
+    with patch.object(bot, "_send_message") as mock_send:
         bot._fetch_and_send_logs(inst)
-    mock_logs.assert_called_once()
     mock_send.assert_called_once()
     call_kwargs = mock_send.call_args
-    # parse_mode should be None so log text is sent as plain text
     assert call_kwargs.kwargs.get("parse_mode") is None
     assert "all done" in call_kwargs.args[0]
 
 
-def test_fetch_and_send_logs_empty_logs_sends_notice():
-    bot = _bot()
+def test_fetch_and_send_logs_no_log_file_sends_notice(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
-    with (
-        patch("app.bot._docker_logs_today", return_value=""),
-        patch.object(bot, "_send_message") as mock_send,
-    ):
+    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+    # No sync.log file
+
+    with patch.object(bot, "_send_message") as mock_send:
         bot._fetch_and_send_logs(inst)
     mock_send.assert_called_once()
     assert "No logs" in mock_send.call_args.args[0]
 
 
-def test_fetch_and_send_logs_truncates_long_output():
-    from app.bot import _MAX_LOG_CHARS
+def test_fetch_and_send_logs_filters_non_today_lines(tmp_path):
+    import datetime as dt
 
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
-    long_log = "x" * (_MAX_LOG_CHARS + 500)
-    with (
-        patch("app.bot._docker_logs_today", return_value=long_log),
-        patch.object(bot, "_send_message") as mock_send,
-    ):
+    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    log_content = (
+        f"2000-01-01 10:00:00 INFO sync_runner: old line\n"
+        f"{today} 10:00:00 INFO sync_runner: today line\n"
+    )
+    (inst.config.data_dir / "sync.log").write_text(log_content)
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(inst)
+    sent_text = mock_send.call_args.args[0]
+    assert "today line" in sent_text
+    assert "old line" not in sent_text
+
+
+def test_fetch_and_send_logs_truncates_long_output(tmp_path):
+    import datetime as dt
+
+
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    # Build a long log from today's lines
+    long_log = "\n".join(
+        f"{today} 10:00:00 INFO sync_runner: {'x' * 100}" for _ in range(100)
+    )
+    (inst.config.data_dir / "sync.log").write_text(long_log)
+
+    with patch.object(bot, "_send_message") as mock_send:
         bot._fetch_and_send_logs(inst)
     sent_text = mock_send.call_args.args[0]
     assert "truncated" in sent_text
-    # No MarkdownV2 escape sequences should appear in the truncation marker
-    assert "\\[" not in sent_text
 
 
-def test_fetch_and_send_logs_sends_error_on_exception():
-    bot = _bot()
+def test_fetch_and_send_logs_sends_error_on_read_exception(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
+    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+    (inst.config.data_dir / "sync.log").write_text("dummy")
+
     with (
-        patch(
-            "app.bot._docker_logs_today", side_effect=Exception("container not found")
-        ),
+        patch("pathlib.Path.read_text", side_effect=OSError("permission denied")),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._fetch_and_send_logs(inst)
     mock_send.assert_called_once()
-    assert "container not found" in mock_send.call_args.args[0]
+    assert "permission denied" in mock_send.call_args.args[0]
 
 
 # ---------------------------------------------------------------------------
@@ -1476,8 +1570,8 @@ def test_fetch_and_send_logs_sends_error_on_exception():
 # ---------------------------------------------------------------------------
 
 
-def test_register_commands_includes_logs():
-    bot = _bot()
+def test_register_commands_includes_logs(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
@@ -1492,8 +1586,8 @@ def test_register_commands_includes_logs():
 # ---------------------------------------------------------------------------
 
 
-def test_send_message_default_parse_mode_is_markdownv2():
-    bot = _bot()
+def test_send_message_default_parse_mode_is_markdownv2(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
@@ -1502,8 +1596,8 @@ def test_send_message_default_parse_mode_is_markdownv2():
     assert payload.get("parse_mode") == "MarkdownV2"
 
 
-def test_send_message_no_parse_mode_omits_field():
-    bot = _bot()
+def test_send_message_no_parse_mode_omits_field(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
@@ -1530,19 +1624,126 @@ def test_auth_icon_none():
 
 
 # ---------------------------------------------------------------------------
-# _cmd_status — auth state decoration
+# _format_sync_timestamp
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_status_shows_checkmark_for_authenticated_instance():
+def test_format_sync_timestamp_iso_string():
+    result = _format_sync_timestamp("2026-08-11T10:00:00+00:00")
+    assert result == "2026/08/11 10:00 UTC"
+
+
+def test_format_sync_timestamp_space_separated():
+    result = _format_sync_timestamp("2026-08-11 10:00:00")
+    assert result == "2026/08/11 10:00 UTC"
+
+
+def test_format_sync_timestamp_invalid_returns_raw():
+    result = _format_sync_timestamp("not-a-date")
+    assert result == "not-a-date"
+
+
+# ---------------------------------------------------------------------------
+# _check_session_direct
+# ---------------------------------------------------------------------------
+
+
+def test_check_session_direct_no_cookies_returns_false(tmp_path):
+    result = _check_session_direct(tmp_path, "user1")
+    assert result is False
+
+
+def test_check_session_direct_no_db_returns_true_when_cookie_valid(tmp_path):
+    with patch("app.bot.has_valid_session", return_value=True):
+        result = _check_session_direct(tmp_path, "user1")
+    assert result is True
+
+
+def test_check_session_direct_auth_state_failed_returns_false(tmp_path):
+    from app.persistence import EventRepository
+
+    db_path = tmp_path / "sync.db"
+    with EventRepository(db_path) as repo:
+        repo.set_auth_state("user1", "failed")
+
+    with patch("app.bot.has_valid_session", return_value=True):
+        result = _check_session_direct(tmp_path, "user1")
+    assert result is False
+
+
+def test_check_session_direct_auth_state_ok_returns_true(tmp_path):
+    from app.persistence import EventRepository
+
+    db_path = tmp_path / "sync.db"
+    with EventRepository(db_path) as repo:
+        repo.set_auth_state("user1", "ok")
+
+    with patch("app.bot.has_valid_session", return_value=True):
+        result = _check_session_direct(tmp_path, "user1")
+    assert result is True
+
+
+# ---------------------------------------------------------------------------
+# _last_sync_summary_direct
+# ---------------------------------------------------------------------------
+
+
+def test_last_sync_summary_direct_no_db_returns_none(tmp_path):
+    result = _last_sync_summary_direct(tmp_path, "user1")
+    assert result is None
+
+
+def test_last_sync_summary_direct_success_run(tmp_path):
+    from app.persistence import EventRepository
+
+    db_path = tmp_path / "sync.db"
+    with EventRepository(db_path) as repo:
+        repo.set_sync_run("user1", status="success", saved=5, failed=0, excluded=1)
+
+    result = _last_sync_summary_direct(tmp_path, "user1")
+    assert result is not None
+    assert "✅" in result
+    assert "success" in result
+    assert "saved 5" in result
+    assert "excluded 1" in result
+
+
+def test_last_sync_summary_direct_failed_run(tmp_path):
+    from app.persistence import EventRepository
+
+    db_path = tmp_path / "sync.db"
+    with EventRepository(db_path) as repo:
+        repo.set_sync_run("user1", status="failed", saved=0, failed=2, excluded=0)
+
+    result = _last_sync_summary_direct(tmp_path, "user1")
+    assert result is not None
+    assert "❌" in result
+    assert "failed" in result
+
+
+def test_last_sync_summary_direct_no_run_for_instance_returns_none(tmp_path):
+    from app.persistence import EventRepository
+
+    db_path = tmp_path / "sync.db"
+    with EventRepository(db_path) as repo:
+        repo.set_sync_run("other", status="success", saved=1, failed=0, excluded=0)
+
+    result = _last_sync_summary_direct(tmp_path, "user1")
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _cmd_status — direct checks (no Docker)
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_status_shows_checkmark_for_authenticated_instance(tmp_path):
     """✅ icon when the session check passes for an instance."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with (
-        patch("app.bot.docker.from_env", return_value=MagicMock()),
-        patch("app.bot._docker_container_status", return_value="running"),
-        patch("app.bot._docker_check_session", return_value=True),
+        patch("app.bot._check_session_direct", return_value=True),
         patch(
-            "app.bot._docker_last_sync_summary",
+            "app.bot._last_sync_summary_direct",
             return_value="✅ success at 2026/08/11 10:00 UTC",
         ),
         patch.object(bot, "_send_message") as mock_send,
@@ -1550,18 +1751,14 @@ def test_cmd_status_shows_checkmark_for_authenticated_instance():
         bot._cmd_status([])
     msg = mock_send.call_args.args[0]
     assert "✅" in msg
-    assert "running" in msg
-    assert "last: ✅ success at 2026/08/11 10:00 UTC" in msg
 
 
-def test_cmd_status_shows_warning_for_unauthenticated_instance():
+def test_cmd_status_shows_warning_for_unauthenticated_instance(tmp_path):
     """⚠️ icon when the session check fails for an instance."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with (
-        patch("app.bot.docker.from_env", return_value=MagicMock()),
-        patch("app.bot._docker_container_status", return_value="running"),
-        patch("app.bot._docker_check_session", return_value=False),
-        patch("app.bot._docker_last_sync_summary", return_value=None),
+        patch("app.bot._check_session_direct", return_value=False),
+        patch("app.bot._last_sync_summary_direct", return_value=None),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._cmd_status([])
@@ -1570,36 +1767,25 @@ def test_cmd_status_shows_warning_for_unauthenticated_instance():
     assert "unavailable" in msg
 
 
-def test_cmd_status_shows_question_mark_for_unavailable_instance():
-    """❓ icon when the container is unreachable."""
-    bot = _bot()
+def test_cmd_status_shows_question_mark_for_unknown_state(tmp_path):
+    """❓ icon when the session state is unknown (DB error)."""
+    bot = _bot(tmp_path=tmp_path)
     with (
-        patch("app.bot.docker.from_env", return_value=MagicMock()),
-        patch("app.bot._docker_container_status", return_value=None),
-        patch("app.bot._docker_check_session", return_value=None) as mock_check_session,
-        patch("app.bot._docker_last_sync_summary", return_value=None) as mock_last_sync,
+        patch("app.bot._check_session_direct", return_value=None),
+        patch("app.bot._last_sync_summary_direct", return_value=None),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._cmd_status([])
     msg = mock_send.call_args.args[0]
     assert "❓" in msg
-    assert "unknown" in msg
-    assert "last: unavailable" in msg
-    mock_check_session.assert_not_called()
-    mock_last_sync.assert_not_called()
 
 
-def test_cmd_status_checks_each_instance():
-    """_docker_check_session must be called once per configured instance."""
-    bot = _bot()
+def test_cmd_status_checks_each_instance(tmp_path):
+    """_check_session_direct must be called once per configured instance."""
+    bot = _bot(tmp_path=tmp_path)
     with (
-        patch("app.bot.docker.from_env", return_value=MagicMock()),
-        patch("app.bot._docker_container_status", return_value="running"),
-        patch("app.bot._docker_check_session", return_value=True) as mock_check,
-        patch(
-            "app.bot._docker_last_sync_summary",
-            return_value="✅ success at 2026/08/11 10:00 UTC",
-        ),
+        patch("app.bot._check_session_direct", return_value=True) as mock_check,
+        patch("app.bot._last_sync_summary_direct", return_value=None),
         patch.object(bot, "_send_message"),
     ):
         bot._cmd_status([])
@@ -1632,9 +1818,9 @@ def test_init_disables_urllib3_warnings_when_ssl_verify_false():
 # ---------------------------------------------------------------------------
 
 
-def test_run_stops_on_keyboard_interrupt():
+def test_run_stops_on_keyboard_interrupt(tmp_path):
     """KeyboardInterrupt inside the loop causes run() to exit cleanly."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_register_commands"),
         patch.object(bot, "_send_message"),
@@ -1643,9 +1829,9 @@ def test_run_stops_on_keyboard_interrupt():
         bot.run()  # must not raise
 
 
-def test_run_recovers_from_polling_exception_then_stops():
+def test_run_recovers_from_polling_exception_then_stops(tmp_path):
     """A generic exception is caught; a subsequent KeyboardInterrupt stops the loop."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     call_count = [0]
 
     def flaky_poll():
@@ -1670,9 +1856,9 @@ def test_run_recovers_from_polling_exception_then_stops():
 # ---------------------------------------------------------------------------
 
 
-def test_poll_once_dispatches_update():
+def test_poll_once_dispatches_update(tmp_path):
     """_poll_once fetches updates and routes each one through _handle_update."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     mock_resp.json.return_value = {
@@ -1687,9 +1873,9 @@ def test_poll_once_dispatches_update():
     assert bot._offset == 11
 
 
-def test_poll_once_advances_offset_for_multiple_updates():
+def test_poll_once_advances_offset_for_multiple_updates(tmp_path):
     """Offset is set to last update_id + 1."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     mock_resp.json.return_value = {
@@ -1706,9 +1892,9 @@ def test_poll_once_advances_offset_for_multiple_updates():
     assert bot._offset == 7
 
 
-def test_poll_once_continues_on_handle_update_exception():
+def test_poll_once_continues_on_handle_update_exception(tmp_path):
     """Exception inside _handle_update is caught; remaining updates are still processed."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     mock_resp.json.return_value = {
@@ -1739,9 +1925,9 @@ def test_poll_once_continues_on_handle_update_exception():
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_status_no_instances_sends_warning():
+def test_cmd_status_no_instances_sends_warning(tmp_path):
     """When no instances are configured, _cmd_status sends a clear warning."""
-    bot = _bot(instances={})
+    bot = _bot(instances={}, tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_status([])
     mock_send.assert_called_once()
@@ -1753,14 +1939,12 @@ def test_cmd_status_no_instances_sends_warning():
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_status_mentions_backup_not_configured_when_absent():
-    """When backup_container is None, the status message must say it is not configured."""
-    bot = _bot(backup_container=None)
+def test_cmd_status_mentions_backup_not_configured_when_absent(tmp_path):
+    """When backup_cfg is None, the status message must say it is not configured."""
+    bot = _bot(backup_cfg=None, tmp_path=tmp_path)
     with (
-        patch("app.bot.docker.from_env", return_value=MagicMock()),
-        patch("app.bot._docker_container_status", return_value=None),
-        patch("app.bot._docker_check_session", return_value=None),
-        patch("app.bot._docker_last_sync_summary", return_value=None),
+        patch("app.bot._check_session_direct", return_value=None),
+        patch("app.bot._last_sync_summary_direct", return_value=None),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._cmd_status([])
@@ -1773,9 +1957,9 @@ def test_cmd_status_mentions_backup_not_configured_when_absent():
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_sync_sends_instance_picker_keyboard():
+def test_cmd_sync_sends_instance_picker_keyboard(tmp_path):
     """_cmd_sync must send a prompt with an inline keyboard of instances."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_sync([])
     mock_send.assert_called_once()
@@ -1812,9 +1996,9 @@ def test_run_entry_point_creates_bot_and_calls_run():
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_resync_no_args_sends_instance_picker():
+def test_cmd_resync_no_args_sends_instance_picker(tmp_path):
     """/resync with no args must show an instance picker."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_resync([])
     mock_send.assert_called_once()
@@ -1825,9 +2009,9 @@ def test_cmd_resync_no_args_sends_instance_picker():
     assert any(d.startswith("resync_pick_date:") for d in cb_data)
 
 
-def test_cmd_resync_with_date_sends_instance_picker_for_date():
+def test_cmd_resync_with_date_sends_instance_picker_for_date(tmp_path):
     """/resync 2026-07-15 must show an instance picker with the date encoded."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_resync(["2026-07-15"])
     mock_send.assert_called_once()
@@ -1838,9 +2022,9 @@ def test_cmd_resync_with_date_sends_instance_picker_for_date():
     assert any("2026-07-15" in d for d in cb_data)
 
 
-def test_cmd_resync_invalid_date_sends_error():
+def test_cmd_resync_invalid_date_sends_error(tmp_path):
     """/resync with a non-date arg must send an error message."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_resync(["not-a-date"])
     mock_send.assert_called_once()
@@ -1848,9 +2032,9 @@ def test_cmd_resync_invalid_date_sends_error():
     assert "invalid" in msg.lower() or "YYYY" in msg
 
 
-def test_cmd_resync_datetime_string_sends_error():
+def test_cmd_resync_datetime_string_sends_error(tmp_path):
     """/resync with a full datetime string must send an error — only YYYY-MM-DD is valid."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_resync(["2026-07-15T12:00:00"])
     mock_send.assert_called_once()
@@ -1863,9 +2047,9 @@ def test_cmd_resync_datetime_string_sends_error():
 # ---------------------------------------------------------------------------
 
 
-def test_callback_resync_pick_date_sends_date_keyboard():
+def test_callback_resync_pick_date_sends_date_keyboard(tmp_path):
     """resync_pick_date:<instance> callback must show a date-picker keyboard."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
@@ -1882,9 +2066,9 @@ def test_callback_resync_pick_date_sends_date_keyboard():
     mock_send.assert_called_once()
 
 
-def test_callback_resync_dispatches_launch_resync():
+def test_callback_resync_dispatches_launch_resync(tmp_path):
     """resync:<date>:<instance> callback must call _launch_resync."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_launch_resync") as mock_launch,
@@ -1902,9 +2086,9 @@ def test_callback_resync_dispatches_launch_resync():
     assert inst.name == "User1"
 
 
-def test_callback_resync_unknown_instance_replies():
+def test_callback_resync_unknown_instance_replies(tmp_path):
     """resync:<date>:<unknown> callback must reply with error."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
@@ -1920,9 +2104,9 @@ def test_callback_resync_unknown_instance_replies():
     assert "Unknown" in mock_send.call_args.args[0]
 
 
-def test_callback_resync_pick_date_unknown_instance_replies():
+def test_callback_resync_pick_date_unknown_instance_replies(tmp_path):
     """resync_pick_date:<unknown> callback must reply with error."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
@@ -1938,9 +2122,9 @@ def test_callback_resync_pick_date_unknown_instance_replies():
     assert "Unknown" in mock_send.call_args.args[0]
 
 
-def test_callback_resync_malformed_too_few_parts_does_not_raise():
+def test_callback_resync_malformed_too_few_parts_does_not_raise(tmp_path):
     """resync callback with fewer than 3 parts must log warning and not raise."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
         patch.object(bot, "_send_message") as mock_send,
@@ -1952,35 +2136,41 @@ def test_callback_resync_malformed_too_few_parts_does_not_raise():
                 "message": {"chat": {"id": 42}},
             }
         )
-    # No message sent — silently swallowed with a log warning
     mock_send.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-
-
-def test_launch_resync_sends_ack_and_starts_thread():
-    bot = _bot()
+def test_launch_resync_sends_ack_and_starts_thread(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message") as mock_send,
-        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_resync(inst, "2026-07-15")
     mock_send.assert_called_once()
-    mock_exec.assert_called_once()
+    mock_thread.assert_called_once()
 
 
-def test_launch_resync_passes_correct_args():
-    bot = _bot()
+def test_launch_resync_thread_target_is_run_resync_for_instance(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
     with (
         patch.object(bot, "_send_message"),
-        patch.object(bot, "_exec_in_thread") as mock_exec,
+        patch("app.bot.threading.Thread") as mock_thread,
     ):
+        mock_thread.return_value.start = MagicMock()
         bot._launch_resync(inst, "2026-07-15")
-    _, app_args = mock_exec.call_args.args
-    assert app_args == ["resync", "2026-07-15"]
+    assert mock_thread.call_args.kwargs["target"] == bot._run_resync_for_instance
+    assert mock_thread.call_args.kwargs["args"] == (inst, "2026-07-15")
+
+
+def test_run_resync_for_instance_calls_main_run_resync(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    with patch("app.bot._main_run_resync") as mock_resync:
+        bot._run_resync_for_instance(inst, "2026-07-15")
+    mock_resync.assert_called_once_with("2026-07-15", cfg=inst.config)
 
 
 # ---------------------------------------------------------------------------
@@ -1988,8 +2178,8 @@ def test_launch_resync_passes_correct_args():
 # ---------------------------------------------------------------------------
 
 
-def test_register_commands_includes_resync():
-    bot = _bot()
+def test_register_commands_includes_resync(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch("app.bot.requests.post") as mock_post:
         mock_post.return_value = MagicMock(raise_for_status=MagicMock())
         bot._register_commands()
@@ -2003,8 +2193,8 @@ def test_register_commands_includes_resync():
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_help_mentions_resync():
-    bot = _bot()
+def test_cmd_help_mentions_resync(tmp_path):
+    bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_help([])
     msg = mock_send.call_args.args[0]
@@ -2016,26 +2206,63 @@ def test_cmd_help_mentions_resync():
 # ---------------------------------------------------------------------------
 
 
-def test_instance_buttons_delegates_to_bot_keyboards():
+def test_instance_buttons_delegates_to_bot_keyboards(tmp_path):
     """TelegramBot._instance_buttons must call the standalone function with instance names."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with patch("app.bot._instance_buttons_fn", return_value=[[]]) as mock_fn:
         bot._instance_buttons("sync")
     mock_fn.assert_called_once_with("sync", ["User1", "User2"])
 
 
-def test_month_buttons_delegates_to_bot_keyboards():
+def test_month_buttons_delegates_to_bot_keyboards(tmp_path):
     """TelegramBot._month_buttons must delegate to bot_keyboards.month_buttons."""
-    bot = _bot()
+    bot = _bot(tmp_path=tmp_path)
     with patch("app.bot._month_buttons_fn", return_value=[[]]) as mock_fn:
         bot._month_buttons()
     mock_fn.assert_called_once_with()
 
 
-def test_exec_in_thread_target_is_docker_exec_silent():
-    """TelegramBot._exec_in_thread must use _docker_exec_silent as the thread target."""
-    bot = _bot()
-    with patch("app.bot.threading.Thread") as mock_thread:
-        mock_thread.return_value.start = MagicMock()
-        bot._exec_in_thread("c", ["sync"])
-    assert mock_thread.call_args.kwargs["target"] is _docker_exec_silent
+# ---------------------------------------------------------------------------
+# _run_backup — direct backup calls
+# ---------------------------------------------------------------------------
+
+
+def test_run_backup_monthly_calls_backup_module(tmp_path):
+    """_run_backup('monthly', '2026-07') must call backup.run_monthly directly."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch("app.bot.backup_module.run_monthly") as mock_run_monthly,
+        patch("app.bot.WalletClient"),
+        patch("app.bot.Notifier"),
+        patch("app.bot.http_client"),
+    ):
+        bot._run_backup("monthly", "2026-07")
+    mock_run_monthly.assert_called_once()
+
+
+def test_run_backup_yearly_calls_backup_module(tmp_path):
+    """_run_backup('yearly', '2025') must call backup.run_yearly directly."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch("app.bot.backup_module.run_yearly") as mock_run_yearly,
+        patch("app.bot.WalletClient"),
+        patch("app.bot.Notifier"),
+        patch("app.bot.http_client"),
+    ):
+        bot._run_backup("yearly", "2025")
+    mock_run_yearly.assert_called_once()
+
+
+def test_run_backup_sends_error_on_exception(tmp_path):
+    """_run_backup must catch exceptions and send an error message."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch("app.bot.backup_module.run_monthly", side_effect=RuntimeError("boom")),
+        patch("app.bot.WalletClient"),
+        patch("app.bot.Notifier"),
+        patch("app.bot.http_client"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._run_backup("monthly", "2026-07")
+    mock_send.assert_called_once()
+    assert "boom" in mock_send.call_args.args[0]
