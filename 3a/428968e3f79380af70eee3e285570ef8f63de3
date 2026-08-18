@@ -1,0 +1,20 @@
+app/logging_setup.py
+  h_97a91c9e567f87 15-20,44
+app/main.py
+  h_97a91c9e567f87 4-5,32-33,37-39,43-50,66-67,69,71-74,76-79,81-92,94-114,129-130,132-147,149,175-176,178-200
+tests/test_logging_setup.py
+  h_97a91c9e567f87 15
+tests/test_main.py
+  h_97a91c9e567f87 445,447,449-453,559-654
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "3a428968e3f79380af70eee3e285570ef8f63de3",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
