@@ -1,0 +1,23 @@
+app/bot.py
+  s_952d040fa893cd::t_47ba172123c4f2 63,113,138,587-590,666-680,682,684-688,858-859,861,863,866,889
+app/main.py
+  s_952d040fa893cd::t_a3df449d070a42 24-25,34,37-42,47,63-64,66,68-71,73-75,77-104,120-121,123-138,140,166-167,169-191
+tests/test_bot.py
+  s_952d040fa893cd::t_cb6a75ce875c40 76,1434-1435,1437-1438,1440-1441,1452,1460-1461,1465,1468,1477,1480,1489-1490,1497,1500,1510-1511,1518,1521,1536-1537,1545,1548,1575-1576,1579,1595,1606-1608,1614,1628-1629,1632,1635
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "22e60d0b3b0dd98c92e154b307e0461175eba67d",
+  "prompts": {},
+  "sessions": {
+    "s_952d040fa893cd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_feaf30dcdffePFsUe3B3p0veke",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
