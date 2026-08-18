@@ -281,8 +281,9 @@ def _parse_yaml_bool(field_name: str, value: object) -> bool:
 
 
 def _validate_instance_name(raw_inst: dict, idx: int) -> str:
-    """Extract and validate the instance name from a raw dict."""
-    name = raw_inst.get("name") or ""
+    """Extract, coerce, strip, and validate the instance name from a raw dict."""
+    raw_name = raw_inst.get("name")
+    name = str(raw_name).strip() if raw_name is not None else ""
     if not name:
         raise ValueError(f"instance at index {idx} is missing 'name'")
     if "/" in name or "\\" in name:
@@ -290,16 +291,27 @@ def _validate_instance_name(raw_inst: dict, idx: int) -> str:
     return name
 
 
+def _parse_positive_int(name: str, field: str, raw: object, default: int) -> int:
+    """Parse *raw* as a positive integer, raising a descriptive ``ValueError`` on failure."""
+    try:
+        value = int(raw if raw is not None else default)
+    except (ValueError, TypeError) as err:
+        raise ValueError(
+            f"instance '{name}': {field} must be an integer, got: {raw!r}"
+        ) from err
+    if value <= 0:
+        raise ValueError(f"instance '{name}': {field} must be a positive integer")
+    return value
+
+
 def _parse_instance_numerics(name: str, raw_inst: dict) -> tuple[int, int]:
     """Parse and validate lookback_days and dedup_ttl_days for an instance."""
-    lookback_days = int(raw_inst.get("lookback_days", 7))
-    if lookback_days <= 0:
-        raise ValueError(f"instance '{name}': lookback_days must be a positive integer")
-    dedup_ttl_days = int(raw_inst.get("dedup_ttl_days", 60))
-    if dedup_ttl_days <= 0:
-        raise ValueError(
-            f"instance '{name}': dedup_ttl_days must be a positive integer"
-        )
+    lookback_days = _parse_positive_int(
+        name, "lookback_days", raw_inst.get("lookback_days"), default=7
+    )
+    dedup_ttl_days = _parse_positive_int(
+        name, "dedup_ttl_days", raw_inst.get("dedup_ttl_days"), default=60
+    )
     return lookback_days, dedup_ttl_days
 
 

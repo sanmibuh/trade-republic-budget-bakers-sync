@@ -14,13 +14,17 @@ Usage:
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
 import click
 
 from app.logging_setup import configure_logging, setup_logging
 
+if TYPE_CHECKING:
+    from app.config import Config
 
-def _resolve_instance_cfg(instance: str) -> object:
+
+def _resolve_instance_cfg(instance: str) -> Config:
     """Load ``InstancesConfig`` via ``INSTANCES_CONFIG`` env var and return the
     ``Config`` for *instance*.
 
@@ -28,9 +32,14 @@ def _resolve_instance_cfg(instance: str) -> object:
     so that all env var access stays in ``config.py``.  Any ``ValueError`` or
     ``FileNotFoundError`` is re-raised as a :class:`click.UsageError` so the user
     sees a clean error message instead of a traceback.
+
+    Raises :class:`click.UsageError` immediately when *instance* is blank, so
+    passing ``--instance ""`` never silently falls back to env-var mode.
     """
     from app.config import InstancesConfig, read_instances_config_path
 
+    if not instance.strip():
+        raise click.UsageError("--instance value must not be blank")
     try:
         path = read_instances_config_path()
         return InstancesConfig.load(path).to_config(instance)

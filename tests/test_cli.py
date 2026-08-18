@@ -586,3 +586,15 @@ def test_sync_with_instance_flag_load_error_shown_as_click_error(tmp_path):
 
     assert result.exit_code != 0
     assert "bad config" in result.output
+
+
+def test_sync_with_blank_instance_flag_exits_with_error():
+    """sync --instance '' (blank string) must error out, not silently use env vars."""
+    result = _runner().invoke(cli, ["sync", "--instance", ""])
+    assert result.exit_code != 0
+
+
+def test_login_with_blank_instance_flag_exits_with_error():
+    """login --instance '' (blank string) must error out, not silently use env vars."""
+    result = _runner().invoke(cli, ["login", "--instance", ""])
+    assert result.exit_code != 0

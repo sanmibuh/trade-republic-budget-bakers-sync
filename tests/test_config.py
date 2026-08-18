@@ -1008,3 +1008,87 @@ def test_read_instances_config_path_blank_raises(monkeypatch):
 
     with pytest.raises(ValueError, match="INSTANCES_CONFIG"):
         read_instances_config_path()
+
+
+def test_instances_config_load_name_is_integer_coerced_to_string(tmp_path):
+    """name: 123 (YAML integer) is coerced to the string '123', not a TypeError."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: 123
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    cfg = InstancesConfig.load(cfg_file)
+
+    assert cfg.instances[0].name == "123"
+
+
+def test_instances_config_load_name_with_leading_trailing_whitespace_stripped(tmp_path):
+    """Instance names with surrounding whitespace are stripped to avoid surprising dirs."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: "  user1  "
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    cfg = InstancesConfig.load(cfg_file)
+
+    assert cfg.instances[0].name == "user1"
+
+
+def test_instances_config_load_lookback_days_non_integer_raises(tmp_path):
+    """A non-integer lookback_days value raises ValueError with instance/field context."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+    lookback_days: seven
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="lookback_days"):
+        InstancesConfig.load(cfg_file)
+
+
+def test_instances_config_load_dedup_ttl_days_non_integer_raises(tmp_path):
+    """A non-integer dedup_ttl_days value raises ValueError with instance/field context."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+    dedup_ttl_days: sixty
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="dedup_ttl_days"):
+        InstancesConfig.load(cfg_file)
