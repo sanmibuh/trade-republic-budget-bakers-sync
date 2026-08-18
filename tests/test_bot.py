@@ -73,6 +73,7 @@ def _cfg(
         chat_id="42",
         instances=instances,
         backup_cfg=backup_cfg,
+        log_dir=tmp_path / "logs",
     )
 
 
@@ -1430,26 +1431,14 @@ def test_handle_update_ignores_unknown_type(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_logs_sends_keyboard_with_instances(tmp_path):
+def test_cmd_logs_launches_fetch_in_thread(tmp_path):
+    """_cmd_logs must launch _fetch_and_send_logs in a background thread (no picker)."""
     bot = _bot(tmp_path=tmp_path)
-    with patch.object(bot, "_send_message") as mock_send:
+    with patch("app.bot.threading.Thread") as mock_thread:
+        mock_thread.return_value.start = MagicMock()
         bot._cmd_logs([])
-    mock_send.assert_called_once()
-    _, kwargs = mock_send.call_args
-    assert "keyboard" in kwargs
-    all_buttons = [btn for row in kwargs["keyboard"] for btn in row]
-    labels = [b["text"] for b in all_buttons]
-    assert "User1" in labels
-    assert "User2" in labels
-
-
-def test_cmd_logs_callback_data_encodes_logs_cmd(tmp_path):
-    bot = _bot(tmp_path=tmp_path)
-    with patch.object(bot, "_send_message") as mock_send:
-        bot._cmd_logs([])
-    _, kwargs = mock_send.call_args
-    cb_data = [b["callback_data"] for row in kwargs["keyboard"] for b in row]
-    assert all(d.startswith("logs:") for d in cb_data)
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["target"] == bot._fetch_and_send_logs
 
 
 def test_handle_message_dispatches_logs(tmp_path):
@@ -1460,31 +1449,7 @@ def test_handle_message_dispatches_logs(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# TelegramBot callback logs:
-# ---------------------------------------------------------------------------
-
-
-def test_callback_query_logs_dispatches_fetch_and_send_logs(tmp_path):
-    bot = _bot(tmp_path=tmp_path)
-    with (
-        patch.object(bot, "_answer_callback_query"),
-        patch("app.bot.threading.Thread") as mock_thread,
-    ):
-        mock_thread.return_value.start = MagicMock()
-        bot._handle_callback_query(
-            {
-                "id": "cq1",
-                "data": "logs:user1",
-                "message": {"chat": {"id": 42}},
-            }
-        )
-    mock_thread.assert_called_once()
-    assert mock_thread.call_args.kwargs["target"] == bot._fetch_and_send_logs
-    assert mock_thread.call_args.kwargs["args"][0].name == "User1"
-
-
-# ---------------------------------------------------------------------------
-# TelegramBot._fetch_and_send_logs
+# TelegramBot._fetch_and_send_logs (shared log — no instance argument)
 # ---------------------------------------------------------------------------
 
 
@@ -1492,15 +1457,15 @@ def test_fetch_and_send_logs_sends_todays_logs(tmp_path):
     import datetime as dt
 
     bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
     log_content = f"{today} 10:00:00 INFO sync_runner: all done\n"
-    (inst.config.data_dir / "sync.log").write_text(log_content)
+    (log_dir / "sync.log").write_text(log_content)
 
     with patch.object(bot, "_send_message") as mock_send:
-        bot._fetch_and_send_logs(inst)
+        bot._fetch_and_send_logs()
     mock_send.assert_called_once()
     call_kwargs = mock_send.call_args
     assert call_kwargs.kwargs.get("parse_mode") is None
@@ -1509,12 +1474,10 @@ def test_fetch_and_send_logs_sends_todays_logs(tmp_path):
 
 def test_fetch_and_send_logs_no_log_file_sends_notice(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
-    # No sync.log file
+    # No sync.log file in log_dir
 
     with patch.object(bot, "_send_message") as mock_send:
-        bot._fetch_and_send_logs(inst)
+        bot._fetch_and_send_logs()
     mock_send.assert_called_once()
     assert "No logs" in mock_send.call_args.args[0]
 
@@ -1523,18 +1486,18 @@ def test_fetch_and_send_logs_filters_non_today_lines(tmp_path):
     import datetime as dt
 
     bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
     log_content = (
         f"2000-01-01 10:00:00 INFO sync_runner: old line\n"
         f"{today} 10:00:00 INFO sync_runner: today line\n"
     )
-    (inst.config.data_dir / "sync.log").write_text(log_content)
+    (log_dir / "sync.log").write_text(log_content)
 
     with patch.object(bot, "_send_message") as mock_send:
-        bot._fetch_and_send_logs(inst)
+        bot._fetch_and_send_logs()
     sent_text = mock_send.call_args.args[0]
     assert "today line" in sent_text
     assert "old line" not in sent_text
@@ -1544,18 +1507,18 @@ def test_fetch_and_send_logs_truncates_long_output(tmp_path):
     import datetime as dt
 
     bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
     # Build a long log from today's lines
     long_log = "\n".join(
         f"{today} 10:00:00 INFO sync_runner: {'x' * 100}" for _ in range(100)
     )
-    (inst.config.data_dir / "sync.log").write_text(long_log)
+    (log_dir / "sync.log").write_text(long_log)
 
     with patch.object(bot, "_send_message") as mock_send:
-        bot._fetch_and_send_logs(inst)
+        bot._fetch_and_send_logs()
     sent_text = mock_send.call_args.args[0]
     assert "truncated" in sent_text
 
@@ -1570,8 +1533,8 @@ def test_fetch_and_send_logs_truncation_preserves_tail_drops_head(tmp_path):
     import datetime as dt
 
     bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
     # 80 lines of ~140 chars each ≈ 11 200 chars > _MAX_LOG_CHARS (3 800)
@@ -1579,10 +1542,10 @@ def test_fetch_and_send_logs_truncation_preserves_tail_drops_head(tmp_path):
         f"{today} 10:{i // 60:02d}:{i % 60:02d} INFO sync_runner: line-{i:03d} {'x' * 80}"
         for i in range(80)
     ]
-    (inst.config.data_dir / "sync.log").write_text("\n".join(lines))
+    (log_dir / "sync.log").write_text("\n".join(lines))
 
     with patch.object(bot, "_send_message") as mock_send:
-        bot._fetch_and_send_logs(inst)
+        bot._fetch_and_send_logs()
     sent_text = mock_send.call_args.args[0]
 
     assert "truncated" in sent_text
@@ -1609,11 +1572,11 @@ def test_fetch_and_send_logs_opens_log_file_with_utf8_encoding(tmp_path):
     from pathlib import Path
 
     bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
-    (inst.config.data_dir / "sync.log").write_text(
+    (log_dir / "sync.log").write_text(
         f"{today} 10:00:00 INFO sync_runner: done\n", encoding="utf-8"
     )
 
@@ -1629,7 +1592,7 @@ def test_fetch_and_send_logs_opens_log_file_with_utf8_encoding(tmp_path):
         patch("pathlib.Path.open", recording_open),
         patch.object(bot, "_send_message"),
     ):
-        bot._fetch_and_send_logs(inst)
+        bot._fetch_and_send_logs()
 
     assert open_kwargs, "sync.log was never opened via Path.open()"
     for kwargs in open_kwargs:
@@ -1640,15 +1603,15 @@ def test_fetch_and_send_logs_opens_log_file_with_utf8_encoding(tmp_path):
 
 def test_fetch_and_send_logs_sends_error_on_read_exception(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
-    (inst.config.data_dir / "sync.log").write_text("dummy")
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / "sync.log").write_text("dummy")
 
     with (
         patch("pathlib.Path.open", side_effect=OSError("permission denied")),
         patch.object(bot, "_send_message") as mock_send,
     ):
-        bot._fetch_and_send_logs(inst)
+        bot._fetch_and_send_logs()
     mock_send.assert_called_once()
     assert "permission denied" in mock_send.call_args.args[0]
 
@@ -1662,16 +1625,14 @@ def test_fetch_and_send_logs_header_has_no_markdown_chars_when_logs_present(tmp_
     import datetime as dt
 
     bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
-    (inst.config.data_dir / "sync.log").write_text(
-        f"{today} 10:00:00 INFO sync_runner: done\n"
-    )
+    (log_dir / "sync.log").write_text(f"{today} 10:00:00 INFO sync_runner: done\n")
 
     with patch.object(bot, "_send_message") as mock_send:
-        bot._fetch_and_send_logs(inst)
+        bot._fetch_and_send_logs()
 
     call = mock_send.call_args
     assert call.kwargs.get("parse_mode") is None
@@ -2428,7 +2389,6 @@ def test_run_backup_http_configure_serialized_by_run_lock(tmp_path):
         patch("app.bot.backup_module.run_monthly"),
         patch("app.bot.WalletClient"),
         patch("app.bot.Notifier"),
-        patch("app.logging_setup.setup_logging", return_value=[]),
     ):
         mock_http.configure.side_effect = recording_configure
 
@@ -2443,24 +2403,3 @@ def test_run_backup_http_configure_serialized_by_run_lock(tmp_path):
         t.join(timeout=5)
 
     assert configure_called.is_set(), "http_client.configure() was never called"
-
-
-def test_run_backup_removes_logging_handlers_after_completion(tmp_path):
-    """Logging handlers added by _run_backup must be removed when it completes."""
-    import logging
-
-    root = logging.getLogger()
-    handlers_before = set(root.handlers)
-
-    bot = _bot(tmp_path=tmp_path)
-    with (
-        patch("app.bot.backup_module.run_monthly"),
-        patch("app.bot.WalletClient"),
-        patch("app.bot.Notifier"),
-        patch("app.bot.http_client"),
-    ):
-        bot._run_backup("monthly", "2026-07")
-
-    assert set(root.handlers) == handlers_before, (
-        "root logger must have the same handlers after _run_backup() as before"
-    )

@@ -43,14 +43,22 @@ def test_backup_help():
 
 
 def test_sync_calls_run():
-    with patch("app.main.run", return_value=0) as mock_run:
+    with (
+        patch("app.main.run", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
+        patch("app.__main__.read_data_dir"),
+    ):
         result = _runner().invoke(cli, ["sync"])
     assert result.exit_code == 0
     mock_run.assert_called_once()
 
 
 def test_sync_exits_with_run_return_code():
-    with patch("app.main.run", return_value=1):
+    with (
+        patch("app.main.run", return_value=1),
+        patch("app.__main__.setup_logging"),
+        patch("app.__main__.read_data_dir"),
+    ):
         result = _runner().invoke(cli, ["sync"])
     assert result.exit_code == 1
 
@@ -102,7 +110,7 @@ def test_backup_auto_calls_run_auto(tmp_path):
         result = _runner().invoke(cli, ["backup", "auto"])
     assert result.exit_code == 0
     mock_auto.assert_called_once()
-    mock_setup_log.assert_called_once_with(tmp_path)
+    mock_setup_log.assert_called_once_with(tmp_path / "logs")
 
 
 # ---------------------------------------------------------------------------
@@ -202,14 +210,22 @@ def test_login_help():
 
 
 def test_login_calls_run_login():
-    with patch("app.main.run_login", return_value=0) as mock_run:
+    with (
+        patch("app.main.run_login", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
+        patch("app.__main__.read_data_dir"),
+    ):
         result = _runner().invoke(cli, ["login"])
     assert result.exit_code == 0
     mock_run.assert_called_once()
 
 
 def test_login_exits_with_return_code():
-    with patch("app.main.run_login", return_value=1):
+    with (
+        patch("app.main.run_login", return_value=1),
+        patch("app.__main__.setup_logging"),
+        patch("app.__main__.read_data_dir"),
+    ):
         result = _runner().invoke(cli, ["login"])
     assert result.exit_code == 1
 
@@ -271,7 +287,8 @@ def test_bot_help_lists_logs_and_code_commands():
 def test_bot_calls_run():
     with (
         patch("app.bot.run") as mock_run,
-        patch("app.__main__.configure_logging"),
+        patch("app.__main__.setup_logging"),
+        patch("app.__main__.read_data_dir"),
     ):
         _runner().invoke(cli, ["bot"])
     mock_run.assert_called_once()
@@ -363,14 +380,22 @@ def test_resync_help():
 
 
 def test_resync_calls_run_resync_with_date():
-    with patch("app.main.run_resync", return_value=0) as mock_run:
+    with (
+        patch("app.main.run_resync", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
+        patch("app.__main__.read_data_dir"),
+    ):
         result = _runner().invoke(cli, ["resync", "2026-07-15"])
     assert result.exit_code == 0
     mock_run.assert_called_once_with("2026-07-15")
 
 
 def test_resync_exits_with_run_resync_return_code():
-    with patch("app.main.run_resync", return_value=1):
+    with (
+        patch("app.main.run_resync", return_value=1),
+        patch("app.__main__.setup_logging"),
+        patch("app.__main__.read_data_dir"),
+    ):
         result = _runner().invoke(cli, ["resync", "2026-07-15"])
     assert result.exit_code == 1
 
@@ -512,6 +537,7 @@ def test_sync_with_instance_flag_loads_from_config_file(tmp_path):
     with (
         patch("app.config.InstancesConfig.load", return_value=mock_instances),
         patch("app.main.run", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
     ):
         result = _runner().invoke(
             cli,
@@ -526,7 +552,10 @@ def test_sync_with_instance_flag_loads_from_config_file(tmp_path):
 
 def test_sync_without_instance_flag_uses_env(monkeypatch):
     """sync without --instance falls back to Config.from_env() (backward compat)."""
-    with patch("app.main.run", return_value=0) as mock_run:
+    with (
+        patch("app.main.run", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
+    ):
         result = _runner().invoke(cli, ["sync"])
     assert result.exit_code == 0
     # run() called with no cfg argument (None default)
@@ -560,6 +589,7 @@ def test_login_with_instance_flag_loads_from_config_file(tmp_path):
     with (
         patch("app.config.InstancesConfig.load", return_value=mock_instances),
         patch("app.main.run_login", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
     ):
         result = _runner().invoke(
             cli,
@@ -574,7 +604,10 @@ def test_login_with_instance_flag_loads_from_config_file(tmp_path):
 
 def test_login_without_instance_flag_uses_env():
     """login without --instance falls back to Config.from_env() (backward compat)."""
-    with patch("app.main.run_login", return_value=0) as mock_run:
+    with (
+        patch("app.main.run_login", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
+    ):
         result = _runner().invoke(cli, ["login"])
     assert result.exit_code == 0
     mock_run.assert_called_once_with(cfg=None)
@@ -585,7 +618,10 @@ def test_sync_with_instance_flag_load_error_shown_as_click_error(tmp_path):
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text("")
 
-    with patch("app.config.InstancesConfig.load", side_effect=ValueError("bad config")):
+    with (
+        patch("app.config.InstancesConfig.load", side_effect=ValueError("bad config")),
+        patch("app.__main__.setup_logging"),
+    ):
         result = _runner().invoke(
             cli,
             ["sync", "--instance", "user1"],

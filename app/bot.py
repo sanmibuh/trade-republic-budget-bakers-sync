@@ -60,9 +60,9 @@ from app.config import (
     Config,
     InstancesConfig,
     has_valid_session,
+    read_data_dir,
     read_instances_config_path,
 )
-from app.logging_setup import setup_logging
 from app.main import (
     _RUN_LOCK,
     run as _main_run,
@@ -110,6 +110,7 @@ class BotConfig:
     instances: dict[str, InstanceConfig] = field(default_factory=dict)
     backup_cfg: BackupConfig | None = None  # None means backup commands are disabled
     telegram_verify_ssl: bool = True
+    log_dir: Path = field(default_factory=lambda: Path("/app/data/logs"))
 
     @classmethod
     def from_env(cls) -> BotConfig:
@@ -134,6 +135,7 @@ class BotConfig:
             instances=instances,
             backup_cfg=backup_cfg,
             telegram_verify_ssl=env.telegram_verify_ssl,
+            log_dir=read_data_dir() / "logs",
         )
 
 
@@ -495,12 +497,6 @@ class TelegramBot:
             self._launch_sync(inst)
         elif cmd == "login":
             self._launch_login(inst)
-        elif cmd == "logs":
-            threading.Thread(
-                target=self._fetch_and_send_logs,
-                args=(inst,),
-                daemon=True,
-            ).start()
         else:
             log.warning("Unknown callback cmd: %r", cmd)
 
@@ -588,7 +584,10 @@ class TelegramBot:
         )
 
     def _cmd_logs(self, _args: list[str]) -> None:
-        self._pick_instance("logs", "📋 *Logs* — Choose instance:")
+        threading.Thread(
+            target=self._fetch_and_send_logs,
+            daemon=True,
+        ).start()
 
     def _cmd_code(self, args: list[str]) -> None:
         """Deliver an authenticator code to a waiting login process: /code <instance> <code>."""
@@ -664,39 +663,29 @@ class TelegramBot:
         cfg.data_dir.mkdir(parents=True, exist_ok=True)
         with _RUN_LOCK:
             http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
-            handlers = setup_logging(cfg.data_dir)
-            root = logging.getLogger()
-            client = WalletClient(api_key=cfg.wallet_api_key)
-            notifier = Notifier(
-                cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name
-            )
-            try:
-                if mode == "auto":
-                    backup_module.run_auto(client, notifier, cfg.data_dir)
-                elif mode == "monthly":
-                    year, month = backup_module._parse_monthly_param(period)
-                    backup_module.run_monthly(
-                        client, notifier, cfg.data_dir, year, month
-                    )
-                elif mode == "yearly":
-                    year = backup_module._parse_yearly_param(period)
-                    backup_module.run_yearly(client, notifier, cfg.data_dir, year)
-                else:
-                    log.warning("Unknown backup mode %r — ignoring", mode)
-                    self._send_message(
-                        f"⚠️ Unknown backup mode: `{_esc(mode)}`\\. Expected `monthly` or `yearly`\\."
-                    )
-            except Exception as exc:
-                log.exception(
-                    "Backup failed (mode=%s period=%s): %s", mode, period, exc
-                )
+        client = WalletClient(api_key=cfg.wallet_api_key)
+        notifier = Notifier(
+            cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name
+        )
+        try:
+            if mode == "auto":
+                backup_module.run_auto(client, notifier, cfg.data_dir)
+            elif mode == "monthly":
+                year, month = backup_module._parse_monthly_param(period)
+                backup_module.run_monthly(client, notifier, cfg.data_dir, year, month)
+            elif mode == "yearly":
+                year = backup_module._parse_yearly_param(period)
+                backup_module.run_yearly(client, notifier, cfg.data_dir, year)
+            else:
+                log.warning("Unknown backup mode %r — ignoring", mode)
                 self._send_message(
-                    f"❌ Backup \\({_esc(mode)} {_esc(period)}\\) failed: {_esc(str(exc))}"
+                    f"⚠️ Unknown backup mode: `{_esc(mode)}`\\. Expected `monthly` or `yearly`\\."
                 )
-            finally:
-                for h in handlers:
-                    root.removeHandler(h)
-                    h.close()
+        except Exception as exc:
+            log.exception("Backup failed (mode=%s period=%s): %s", mode, period, exc)
+            self._send_message(
+                f"❌ Backup \\({_esc(mode)} {_esc(period)}\\) failed: {_esc(str(exc))}"
+            )
 
     # ------------------------------------------------------------------
     # Execution — direct in-process calls
@@ -866,15 +855,15 @@ class TelegramBot:
                     break
         return pending
 
-    def _fetch_and_send_logs(self, inst: InstanceConfig) -> None:
-        """Fetch today's logs for *inst* from the log file and send them to Telegram."""
+    def _fetch_and_send_logs(self) -> None:
+        """Fetch today's logs from the shared log file and send them to Telegram."""
         today_str = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
-        log_file = inst.config.data_dir / "sync.log"
+        log_file = self._cfg.log_dir / "sync.log"
         # MarkdownV2 header — used only when there are no logs (plain-text message not needed).
-        header_md = f"📋 Logs for *{_esc(inst.name)}* \\({_esc(today_str)} UTC\\)\n\n"
+        header_md = f"📋 Logs \\({_esc(today_str)} UTC\\)\n\n"
         # Plain-text header — used when the log body is sent with parse_mode=None so that
         # MarkdownV2 escape characters are not displayed literally in Telegram.
-        header_plain = f"📋 Logs for {inst.name} ({today_str} UTC)\n\n"
+        header_plain = f"📋 Logs ({today_str} UTC)\n\n"
         try:
             if not log_file.exists():
                 text = ""
@@ -897,9 +886,7 @@ class TelegramBot:
                 if truncated:
                     text = "[... truncated ...]\n" + text
         except Exception as exc:
-            self._send_message(
-                f"❌ Could not read logs for `{_esc(inst.name)}`: {_esc(str(exc))}"
-            )
+            self._send_message(f"❌ Could not read logs: {_esc(str(exc))}")
             return
 
         if not text.strip():

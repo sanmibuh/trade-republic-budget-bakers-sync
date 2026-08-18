@@ -12,11 +12,13 @@ def _make_formatter() -> logging.Formatter:
     return logging.Formatter(fmt=_LOG_FMT, datefmt=_DATE_FMT)
 
 
-def setup_logging(log_dir: Path) -> list[logging.Handler]:
+def setup_logging(log_dir: Path) -> None:
     """Configure root logger: DEBUG to rotating file, INFO to console.
 
-    Returns the list of handlers added so callers can remove them when done
-    (e.g. after an in-process sync run triggered by the Telegram bot).
+    Called once at process startup — not per-run.  All services (sync, backup,
+    bot) share the same log directory so that ``{DATA_DIR}/logs/sync.log``
+    receives output from every in-process call without handler lifecycle
+    management.
     """
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "sync.log"
@@ -40,8 +42,6 @@ def setup_logging(log_dir: Path) -> list[logging.Handler]:
 
     root.addHandler(fh)
     root.addHandler(ch)
-
-    return [fh, ch]
 
 
 def configure_logging() -> None:

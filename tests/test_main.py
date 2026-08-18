@@ -32,7 +32,6 @@ def test_run_excluded_events_not_reprocessed_on_next_run(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.Notifier"),
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=[excluded_event]),
@@ -97,7 +96,6 @@ def test_run_returns_zero_on_success(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.Notifier"),
         patch("app.main.SyncRunner") as mock_runner_cls,
     ):
@@ -139,7 +137,6 @@ def test_run_returns_zero_when_no_new_events(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.Notifier"),
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=[]),
@@ -199,7 +196,6 @@ def test_run_wallet_error_notifies_and_reraises(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=[]),
@@ -230,7 +226,6 @@ def test_run_logs_warning_when_sync_complete_not_sent(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=[]),
@@ -281,7 +276,6 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=fake_events),
@@ -328,7 +322,6 @@ def test_run_login_connects_and_returns_zero(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.http_client.configure"),
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.sync_runner.TRClient") as MockTR,
@@ -355,7 +348,6 @@ def test_run_login_session_expired_notifies_and_exits(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.http_client.configure"),
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.sync_runner.TRClient") as MockTR,
@@ -381,7 +373,6 @@ def test_run_login_login_failed_notifies_and_exits(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.http_client.configure"),
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.sync_runner.TRClient") as MockTR,
@@ -406,7 +397,6 @@ def test_run_login_unexpected_error_notifies_and_exits(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.http_client.configure"),
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.sync_runner.TRClient") as MockTR,
@@ -425,11 +415,11 @@ def test_run_login_unexpected_error_notifies_and_exits(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _prepare — shared bootstrap
+# _prepare — shared bootstrap (plain function, no context manager)
 # ---------------------------------------------------------------------------
 
 
-def test_prepare_configures_environment_and_returns_notifier(tmp_path):
+def test_prepare_creates_data_dir_and_returns_notifier(tmp_path):
     from unittest.mock import patch
 
     from app.main import _prepare
@@ -443,15 +433,14 @@ def test_prepare_configures_environment_and_returns_notifier(tmp_path):
 
     with (
         patch("app.main.http_client.configure") as mock_configure,
-        patch("app.main.setup_logging", return_value=[]) as mock_setup,
         patch("app.main.Notifier") as mock_notifier_cls,
-        _prepare(cfg) as notifier,
     ):
-        assert cfg.data_dir.is_dir()
-        mock_configure.assert_called_once_with(allow_insecure_ssl=True)
-        mock_setup.assert_called_once_with(cfg.data_dir)
-        mock_notifier_cls.assert_called_once_with("tok", "chat", "David")
-        assert notifier is mock_notifier_cls.return_value
+        notifier = _prepare(cfg)
+
+    assert cfg.data_dir.is_dir()
+    mock_configure.assert_called_once_with(allow_insecure_ssl=True)
+    mock_notifier_cls.assert_called_once_with("tok", "chat", "David")
+    assert notifier is mock_notifier_cls.return_value
 
 
 # ---------------------------------------------------------------------------
@@ -466,7 +455,6 @@ def test_run_resync_returns_zero_on_success(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.Notifier"),
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.WalletClient"),
@@ -502,7 +490,6 @@ def test_run_resync_calls_resync_day_with_date(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.Notifier"),
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.WalletClient"),
@@ -533,7 +520,6 @@ def test_run_resync_exception_returns_one(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.setup_logging"),
         patch("app.main.Notifier"),
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.WalletClient"),
@@ -560,173 +546,15 @@ def test_run_resync_rejects_datetime_string():
 
 
 # ---------------------------------------------------------------------------
-# Handler lifecycle — _prepare must clean up logging handlers after each run
+# _prepare — http_client.configure() must be inside _RUN_LOCK
 # ---------------------------------------------------------------------------
-
-
-def test_run_removes_logging_handlers_after_completion(tmp_path):
-    """Handlers added by _prepare must be removed once run() finishes.
-
-    Ensures that repeated calls (as in the bot) do not accumulate file handlers
-    on the root logger, preventing cross-instance log contamination.
-    """
-    import logging
-    from unittest.mock import patch
-
-    from app.main import run
-
-    root = logging.getLogger()
-    handlers_before = set(root.handlers)
-
-    with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.Notifier"),
-        patch("app.main.SyncRunner") as mock_runner_cls,
-        patch("app.main.filter_by_lookback", return_value=[]),
-        patch("app.main.http_client"),
-    ):
-        cfg = mock_cfg_cls.return_value
-        cfg.data_dir = tmp_path
-        cfg.lookback_days = 7
-        cfg.dedup_ttl_days = 60
-        runner = mock_runner_cls.return_value
-        runner.fetch_events.return_value = []
-        runner._notify_fetch_summary.return_value = 0
-        runner.build_batch.return_value = MagicMock(excluded_count=0)
-        runner._submit_batch.return_value = MagicMock(synced=0, excluded=0, failed=0)
-
-        run()
-
-    assert set(root.handlers) == handlers_before, (
-        "root logger must have the same handlers after run() as before"
-    )
-
-
-def test_run_removes_logging_handlers_on_exception(tmp_path):
-    """Handlers added by _prepare must be removed even when run() raises."""
-    import logging
-    from unittest.mock import patch
-
-    from app.main import run
-
-    root = logging.getLogger()
-    handlers_before = set(root.handlers)
-
-    with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.Notifier"),
-        patch("app.main.SyncRunner") as mock_runner_cls,
-        patch("app.main.filter_by_lookback", return_value=[]),
-        patch("app.main.http_client"),
-    ):
-        cfg = mock_cfg_cls.return_value
-        cfg.data_dir = tmp_path
-        cfg.lookback_days = 7
-        cfg.dedup_ttl_days = 60
-        runner = mock_runner_cls.return_value
-        runner.fetch_events.side_effect = RuntimeError("boom")
-
-        with pytest.raises(RuntimeError):
-            run()
-
-    assert set(root.handlers) == handlers_before, (
-        "root logger must have the same handlers after run() raises"
-    )
-
-
-def test_setup_logging_returns_added_handlers(tmp_path):
-    """setup_logging must return the list of handlers it registered."""
-    import logging
-
-    from app.logging_setup import setup_logging
-
-    root = logging.getLogger()
-    before = set(root.handlers)
-    try:
-        added = setup_logging(tmp_path)
-        assert isinstance(added, list)
-        assert len(added) >= 1
-        for h in added:
-            assert h in root.handlers
-    finally:
-        for h in root.handlers[:]:
-            if h not in before:
-                root.removeHandler(h)
-                h.close()
-
-
-# ---------------------------------------------------------------------------
-# _prepare — serializes concurrent in-process runs
-# ---------------------------------------------------------------------------
-
-
-def test_prepare_serializes_concurrent_runs(tmp_path):
-    """Two concurrent _prepare calls must be serialized so handlers never overlap.
-
-    The test verifies that the second call only enters _prepare after the first
-    has fully exited.  Without a lock, the order would be
-    [run1_start, run2_start, run1_end]; with a lock it must be
-    [run1_start, run1_end, run2_start].
-    """
-    import time
-    from unittest.mock import patch
-
-    from app.main import _prepare
-
-    inside_first = threading.Event()
-    second_ready = threading.Event()
-    order: list[str] = []
-
-    def _make_cfg(subdir: str) -> MagicMock:
-        cfg = MagicMock()
-        cfg.data_dir = tmp_path / subdir
-        cfg.allow_insecure_ssl = False
-        cfg.telegram_bot_token = None
-        cfg.telegram_chat_id = None
-        cfg.owner_name = subdir
-        return cfg
-
-    def run1() -> None:
-        with (
-            patch("app.main.setup_logging", return_value=[]),
-            patch("app.main.http_client"),
-            patch("app.main.Notifier"),
-            _prepare(_make_cfg("a")),
-        ):
-            order.append("run1_start")
-            inside_first.set()  # signal: run1 is inside _prepare holding the lock
-            second_ready.wait()  # wait until run2 is about to call _prepare
-            time.sleep(0.05)  # stay inside a bit so run2 is definitely waiting
-            order.append("run1_end")
-
-    def run2() -> None:
-        inside_first.wait()  # wait until run1 holds the lock
-        second_ready.set()
-        with (
-            patch("app.main.setup_logging", return_value=[]),
-            patch("app.main.http_client"),
-            patch("app.main.Notifier"),
-            _prepare(_make_cfg("b")),
-        ):
-            order.append("run2_start")
-
-    t1 = threading.Thread(target=run1)
-    t2 = threading.Thread(target=run2)
-    t1.start()
-    t2.start()
-    t1.join(timeout=5)
-    t2.join(timeout=5)
-
-    assert order == ["run1_start", "run1_end", "run2_start"], (
-        f"runs were not serialized; got order {order}"
-    )
 
 
 def test_prepare_http_configure_is_inside_lock(tmp_path):
     """http_client.configure() must be called while _RUN_LOCK is held.
 
-    If configure() runs before the lock is acquired, a second concurrent run
-    could overwrite the SSL policy of the first run after the lock is taken.
+    If configure() runs before the lock is acquired, a second concurrent call
+    could overwrite the SSL policy of the first call.
     This test holds the lock externally, starts _prepare in a thread, and
     asserts that configure() is NOT called until the lock is released.
     """
@@ -746,13 +574,11 @@ def test_prepare_http_configure_is_inside_lock(tmp_path):
 
     def _run() -> None:
         with (
-            patch("app.main.setup_logging", return_value=[]),
             patch("app.main.http_client") as mock_http,
             patch("app.main.Notifier"),
         ):
             mock_http.configure.side_effect = lambda **_: configure_called.set()
-            with _prepare(cfg):
-                pass
+            _prepare(cfg)
 
     with _RUN_LOCK:
         t = threading.Thread(target=_run)

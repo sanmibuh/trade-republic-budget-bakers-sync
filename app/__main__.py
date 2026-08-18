@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING
 
 import click
 
-from app.logging_setup import configure_logging, setup_logging
+from app.config import read_data_dir
+from app.logging_setup import setup_logging
 
 if TYPE_CHECKING:
     from app.config import Config
@@ -65,6 +66,7 @@ def sync(instance: str | None) -> None:
     """Run a one-shot Trade Republic → Wallet sync."""
     from app.main import run
 
+    setup_logging(read_data_dir() / "logs")
     cfg = _resolve_instance_cfg(instance) if instance is not None else None
     sys.exit(run(cfg=cfg))
 
@@ -85,6 +87,7 @@ def login(instance: str | None) -> None:
     """
     from app.main import run_login
 
+    setup_logging(read_data_dir() / "logs")
     cfg = _resolve_instance_cfg(instance) if instance is not None else None
     sys.exit(run_login(cfg=cfg))
 
@@ -215,7 +218,7 @@ def backup(mode: str, param: str | None) -> None:
     from app.wallet_client import WalletClient
 
     cfg = BackupConfig.from_env()
-    setup_logging(cfg.data_dir)
+    setup_logging(cfg.data_dir / "logs")
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     client = WalletClient(api_key=cfg.wallet_api_key)
     notifier = Notifier(
@@ -259,6 +262,7 @@ def resync(date: str) -> None:
     """
     from app.main import run_resync
 
+    setup_logging(read_data_dir() / "logs")
     sys.exit(run_resync(date))
 
 
@@ -308,7 +312,7 @@ def bot() -> None:
     """
     from app.bot import run
 
-    configure_logging()
+    setup_logging(read_data_dir() / "logs")
     run()
 
 
