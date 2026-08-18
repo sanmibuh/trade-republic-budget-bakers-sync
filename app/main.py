@@ -44,8 +44,8 @@ def _prepare(cfg: Config) -> Generator[Notifier, None, None]:
     handlers on the root logger.
     """
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
-    http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     with _RUN_LOCK:
+        http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
         handlers = setup_logging(cfg.data_dir)
         root = logging.getLogger()
         try:

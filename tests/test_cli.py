@@ -260,6 +260,14 @@ def test_bot_help():
     assert "bot" in result.output.lower()
 
 
+def test_bot_help_lists_logs_and_code_commands():
+    """`bot --help` must document /logs and /code — both are implemented commands."""
+    result = _runner().invoke(cli, ["bot", "--help"])
+    assert result.exit_code == 0
+    assert "/logs" in result.output
+    assert "/code" in result.output
+
+
 def test_bot_calls_run():
     with (
         patch("app.bot.run") as mock_run,

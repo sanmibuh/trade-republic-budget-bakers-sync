@@ -855,7 +855,11 @@ class TelegramBot:
         """Fetch today's logs for *inst* from the log file and send them to Telegram."""
         today_str = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
         log_file = inst.config.data_dir / "sync.log"
-        header = f"📋 Logs for *{_esc(inst.name)}* \\({_esc(today_str)} UTC\\)\n\n"
+        # MarkdownV2 header — used only when there are no logs (plain-text message not needed).
+        header_md = f"📋 Logs for *{_esc(inst.name)}* \\({_esc(today_str)} UTC\\)\n\n"
+        # Plain-text header — used when the log body is sent with parse_mode=None so that
+        # MarkdownV2 escape characters are not displayed literally in Telegram.
+        header_plain = f"📋 Logs for {inst.name} ({today_str} UTC)\n\n"
         try:
             if not log_file.exists():
                 text = ""
@@ -873,13 +877,13 @@ class TelegramBot:
             return
 
         if not text.strip():
-            self._send_message(header + "_No logs today\\._")
+            self._send_message(header_md + "_No logs today\\._")
             return
 
         if len(text) > _MAX_LOG_CHARS:
             text = "[... truncated ...]\n" + text[-_MAX_LOG_CHARS:]
 
-        self._send_message(header + text, parse_mode=None)
+        self._send_message(header_plain + text, parse_mode=None)
 
     # ------------------------------------------------------------------
     # Keyboard builder wrappers — delegate to app.bot_keyboards

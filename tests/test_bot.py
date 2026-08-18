@@ -1574,6 +1574,42 @@ def test_fetch_and_send_logs_sends_error_on_read_exception(tmp_path):
     mock_send.assert_called_once()
     assert "permission denied" in mock_send.call_args.args[0]
 
+    mock_send.assert_called_once()
+    assert "permission denied" in mock_send.call_args.args[0]
+
+
+def test_fetch_and_send_logs_header_has_no_markdown_chars_when_logs_present(tmp_path):
+    """When log content is sent with parse_mode=None, the header must be plain text.
+
+    MarkdownV2 escape characters (*  \\) must not appear in the header portion of
+    the message, otherwise they will be displayed literally in Telegram.
+    """
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (inst.config.data_dir / "sync.log").write_text(
+        f"{today} 10:00:00 INFO sync_runner: done\n"
+    )
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(inst)
+
+    call = mock_send.call_args
+    assert call.kwargs.get("parse_mode") is None
+    sent_text = call.args[0]
+    # Extract the header (everything before the first log line)
+    header = sent_text.split(today)[0]
+    assert "*" not in header, (
+        f"MarkdownV2 bold markers found in plain-text header: {header!r}"
+    )
+    assert "\\" not in header, (
+        f"MarkdownV2 escapes found in plain-text header: {header!r}"
+    )
+
 
 # ---------------------------------------------------------------------------
 # _register_commands includes /logs

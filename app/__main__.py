@@ -302,6 +302,8 @@ def bot() -> None:
       /sync              (shows an inline keyboard to pick the instance)
       /login             (shows an inline keyboard to pick the instance)
       /resync [YYYY-MM-DD]
+      /logs              (shows today's log lines for an instance)
+      /code <instance> <code>  (or send the 6-digit code as a plain message)
       /backup [monthly|yearly] [period]
     """
     from app.bot import run

@@ -720,3 +720,49 @@ def test_prepare_serializes_concurrent_runs(tmp_path):
     assert order == ["run1_start", "run1_end", "run2_start"], (
         f"runs were not serialized; got order {order}"
     )
+
+
+def test_prepare_http_configure_is_inside_lock(tmp_path):
+    """http_client.configure() must be called while _RUN_LOCK is held.
+
+    If configure() runs before the lock is acquired, a second concurrent run
+    could overwrite the SSL policy of the first run after the lock is taken.
+    This test holds the lock externally, starts _prepare in a thread, and
+    asserts that configure() is NOT called until the lock is released.
+    """
+    import time
+    from unittest.mock import patch
+
+    from app.main import _RUN_LOCK, _prepare
+
+    configure_called = threading.Event()
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path / "inst"
+    cfg.allow_insecure_ssl = False
+    cfg.telegram_bot_token = None
+    cfg.telegram_chat_id = None
+    cfg.owner_name = "test"
+
+    def _run() -> None:
+        with (
+            patch("app.main.setup_logging", return_value=[]),
+            patch("app.main.http_client") as mock_http,
+            patch("app.main.Notifier"),
+        ):
+            mock_http.configure.side_effect = lambda **_: configure_called.set()
+            with _prepare(cfg):
+                pass
+
+    with _RUN_LOCK:
+        t = threading.Thread(target=_run)
+        t.start()
+        time.sleep(
+            0.05
+        )  # give the thread a chance to race if the lock is not respected
+        assert not configure_called.is_set(), (
+            "http_client.configure() was called before _RUN_LOCK was released"
+        )
+
+    t.join(timeout=5)
+    assert configure_called.is_set(), "http_client.configure() was never called"
