@@ -207,6 +207,19 @@ class BackupConfig:
             wallet_api_key=_required_env("WALLET_API_KEY"),
         )
 
+    @classmethod
+    def from_env_optional(cls) -> BackupConfig | None:
+        """Return a ``BackupConfig`` from env, or ``None`` if ``WALLET_API_KEY`` is absent.
+
+        Unlike ``from_env()``, this method treats a missing ``WALLET_API_KEY`` as
+        "backup not configured" and returns ``None``.  Any other ``ValueError``
+        (e.g. an invalid ``ALLOW_INSECURE_SSL`` value) is re-raised so that genuine
+        misconfiguration is not silently swallowed.
+        """
+        if not os.getenv("WALLET_API_KEY", "").strip():
+            return None
+        return cls.from_env()
+
 
 @dataclass(frozen=True)
 class BotEnv:
@@ -214,9 +227,6 @@ class BotEnv:
 
     bot_token: str
     chat_id: str
-    instances_raw: str
-    container_prefix: str
-    backup_service: str
     telegram_verify_ssl: bool = True
 
     @classmethod
@@ -224,9 +234,6 @@ class BotEnv:
         return cls(
             bot_token=_required_env("TELEGRAM_BOT_TOKEN"),
             chat_id=_required_env("TELEGRAM_CHAT_ID"),
-            instances_raw=_required_env("INSTANCES"),
-            container_prefix=_required_env("CONTAINER_PREFIX"),
-            backup_service=os.getenv("BACKUP_SERVICE", "backup").strip(),
             telegram_verify_ssl=_bool_env("TELEGRAM_VERIFY_SSL", default=True),
         )
 
@@ -441,8 +448,12 @@ class InstancesConfig:
         return cls(
             instances=instances,
             data_dir=Path(data.get("data_dir", _DEFAULT_DATA_DIR)),
-            telegram_bot_token=data.get("telegram_bot_token") or None,
-            telegram_chat_id=data.get("telegram_chat_id") or None,
+            telegram_bot_token=data.get("telegram_bot_token")
+            or os.getenv("TELEGRAM_BOT_TOKEN")
+            or None,
+            telegram_chat_id=data.get("telegram_chat_id")
+            or os.getenv("TELEGRAM_CHAT_ID")
+            or None,
             allow_insecure_ssl=allow_insecure_ssl,
         )
 

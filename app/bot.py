@@ -6,66 +6,44 @@ Usage (via CLI):
 Environment variables:
     TELEGRAM_BOT_TOKEN  Required. Bot token from BotFather.
     TELEGRAM_CHAT_ID    Required. Authorized chat ID (only this chat can issue commands).
-    INSTANCES           Required. Comma-separated list of sync instance names (e.g. "david,eli").
-    CONTAINER_PREFIX    Required. Docker container name prefix (e.g. "trade-republic-budget-bakers-sync").
-    BACKUP_SERVICE      Optional. Name of the backup service (default: "backup").
-                        Set to empty string to disable backup commands.
-
-Container naming convention:
-    Sync instances:  {CONTAINER_PREFIX}-sync-{instance}-1   (e.g. "myproject-sync-david-1")
-    Backup service:  {CONTAINER_PREFIX}-{BACKUP_SERVICE}-1  (e.g. "myproject-backup-1")
+    INSTANCES_CONFIG    Required. Path to the instances YAML config file.
 
 Commands (registered via setMyCommands for Telegram autocomplete):
     /sync                              Force a Trade Republic sync — choose instance via inline buttons.
     /backup [monthly|yearly] [period]  Force a Wallet backup — guided by inline buttons if no args given.
-    /status                            Show configured instances and backup service availability.
+    /status                            Show configured instances and backup availability.
     /help                              Show available commands.
 
 Interaction flow for /sync:
     1. User sends /sync.
     2. Bot replies with inline keyboard buttons, one per configured instance.
     3. User taps an instance button.
-    4. Bot sends an ACK ("▶️ Executing sync for David...") and launches docker exec in background.
-    5. The container's own Notifier sends the final Telegram result notification when done.
+    4. Bot sends an ACK ("▶️ Executing sync for David...") and calls main.run() in a background thread.
+    5. The Notifier inside run() sends the final Telegram result notification when done.
 
 Interaction flow for /backup (no args):
     1. User sends /backup.
     2. Bot asks "Monthly or Yearly?" via inline keyboard.
     3. User taps a type button.
     4. Bot shows the period selection keyboard (months or years).
-    5. User taps a period button → bot executes backup and the backup container sends the result.
-
-Interaction flow for /backup with args:
-    /backup monthly          → skips step 2, shows month keyboard directly.
-    /backup monthly YYYY-MM  → executes immediately, no keyboards shown.
-    /backup yearly           → skips step 2, shows year keyboard directly.
-    /backup yearly YYYY      → executes immediately.
+    5. User taps a period button → bot executes backup directly in a background thread.
 """
 
 from __future__ import annotations
 
+import collections
 import datetime
 import logging
 import threading
 import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import requests
 import urllib3
 
-import docker
-from app.bot_docker import (
-    _docker_check_awaiting_code,
-    _docker_check_session,
-    _docker_client_ctx,
-    _docker_container_status,
-    _docker_exec_silent,
-    _docker_last_sync_summary,
-    _docker_logs_today,
-    _format_sync_timestamp,
-)
+from app import backup as backup_module, http_client
 from app.bot_keyboards import (
     _CB_SEP,
     BACKUP_ICONS as _BACKUP_ICONS,
@@ -76,15 +54,29 @@ from app.bot_keyboards import (
     resync_date_buttons as _resync_date_buttons_fn,
     year_buttons as _year_buttons_fn,
 )
-from app.config import BotEnv
-from app.notifier import _escape_markdown as _esc
+from app.config import (
+    BackupConfig,
+    BotEnv,
+    Config,
+    InstancesConfig,
+    has_valid_session,
+    read_instances_config_path,
+)
+from app.logging_setup import setup_logging
+from app.main import (
+    _RUN_LOCK,
+    run as _main_run,
+    run_login as _main_run_login,
+    run_resync as _main_run_resync,
+)
+from app.notifier import Notifier, _escape_markdown as _esc
+from app.wallet_client import WalletClient
 
 log = logging.getLogger(__name__)
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 _MAX_LOG_CHARS = 3800  # safe limit below Telegram's 4096-char message cap
 
-# Re-export docker helpers so existing imports from app.bot keep working.
 __all__ = [
     "_BACKUP_ICONS",
     "_CB_SEP",
@@ -93,13 +85,9 @@ __all__ = [
     "InstanceConfig",
     "TelegramBot",
     "_auth_icon",
-    "_docker_check_session",
-    "_docker_client_ctx",
-    "_docker_container_status",
-    "_docker_exec_silent",
-    "_docker_last_sync_summary",
-    "_docker_logs_today",
+    "_check_session_direct",
     "_format_sync_timestamp",
+    "_last_sync_summary_direct",
     "run",
 ]
 
@@ -112,7 +100,7 @@ __all__ = [
 @dataclass(frozen=True)
 class InstanceConfig:
     name: str  # human-readable, used in commands (e.g. "david")
-    container_name: str  # Docker container name (e.g. "myproject-sync-david-1")
+    config: Config  # full sync config for direct method calls
 
 
 @dataclass(frozen=True)
@@ -120,32 +108,31 @@ class BotConfig:
     bot_token: str
     chat_id: str
     instances: dict[str, InstanceConfig] = field(default_factory=dict)
-    backup_container: str | None = None  # None means backup commands are disabled
+    backup_cfg: BackupConfig | None = None  # None means backup commands are disabled
     telegram_verify_ssl: bool = True
 
     @classmethod
     def from_env(cls) -> BotConfig:
         env = BotEnv.from_env()
 
+        path = read_instances_config_path()
+        instances_yaml = InstancesConfig.load(path)
+
         instances: dict[str, InstanceConfig] = {}
-        for name in [n.strip() for n in env.instances_raw.split(",") if n.strip()]:
-            container_name = f"{env.container_prefix}-sync-{name.lower()}-1"
-            instances[name.lower()] = InstanceConfig(
-                name=name,
-                container_name=container_name,
+        for inst in instances_yaml.instances:
+            full_cfg = instances_yaml.to_config(inst.name)
+            instances[inst.name.lower()] = InstanceConfig(
+                name=inst.name,
+                config=full_cfg,
             )
 
-        backup_container = (
-            f"{env.container_prefix}-{env.backup_service}-1"
-            if env.backup_service
-            else None
-        )
+        backup_cfg: BackupConfig | None = BackupConfig.from_env_optional()
 
         return cls(
             bot_token=env.bot_token,
             chat_id=env.chat_id,
             instances=instances,
-            backup_container=backup_container,
+            backup_cfg=backup_cfg,
             telegram_verify_ssl=env.telegram_verify_ssl,
         )
 
@@ -165,13 +152,94 @@ def _auth_icon(auth: bool | None) -> str:
     return "❓"
 
 
+def _format_sync_timestamp(raw: str) -> str:
+    """Format log/DB timestamps as ``YYYY/MM/DD HH:MM UTC`` for Telegram output."""
+    try:
+        if "T" in raw:
+            parsed = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        else:
+            parsed = datetime.datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=datetime.UTC
+            )
+        return parsed.astimezone(datetime.UTC).strftime("%Y/%m/%d %H:%M UTC")
+    except ValueError:
+        return raw
+
+
+def _check_session_direct(data_dir: Path, instance: str) -> bool | None:
+    """Return True/False/None for the session state of *instance*.
+
+    Reads cookie file expiry and ``auth_state`` from ``sync.db`` directly
+    without any network calls.
+
+    Returns:
+        True  — session valid and ``auth_state`` is ``ok`` (or no state yet).
+        False — session missing/expired or ``auth_state`` is ``failed``/``expired``.
+        None  — DB could not be read (corrupted/locked).
+    """
+    from app.persistence import EventRepository
+
+    if not has_valid_session(data_dir):
+        return False
+
+    db_path = data_dir / "sync.db"
+    if db_path.exists():
+        try:
+            with EventRepository(db_path) as repo:
+                auth_status = repo.get_auth_state(instance)
+        except Exception:
+            return None
+        if auth_status in ("failed", "expired"):
+            return False
+    return True
+
+
+def _last_sync_summary_direct(data_dir: Path, instance: str) -> str | None:
+    """Return a human-readable summary of the most recent sync run from the DB."""
+    from app.persistence import EventRepository
+
+    db_path = data_dir / "sync.db"
+    if not db_path.exists():
+        return None
+
+    try:
+        with EventRepository(db_path) as repo:
+            run_info = repo.get_sync_run(instance)
+    except Exception:
+        return None
+
+    if run_info is None:
+        return None
+
+    status = run_info.get("status")
+    ran_at = run_info.get("ran_at")
+
+    if status not in {"success", "partial", "failed"}:
+        return None
+
+    icon: dict[str, str] = {"success": "✅", "partial": "⚠️", "failed": "❌"}
+    parts = [f"{icon[status]} {status}"]
+    if ran_at:
+        parts[0] = f"{parts[0]} at {_format_sync_timestamp(ran_at)}"
+    saved = run_info.get("saved")
+    failed = run_info.get("failed")
+    excluded = run_info.get("excluded")
+    if saved is not None:
+        parts.append(f"saved {saved}")
+    if failed is not None:
+        parts.append(f"failed {failed}")
+    if excluded is not None:
+        parts.append(f"excluded {excluded}")
+    return " · ".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Bot
 # ---------------------------------------------------------------------------
 
 
 class TelegramBot:
-    """Long-polling Telegram bot that dispatches commands to Docker containers."""
+    """Long-polling Telegram bot that dispatches commands to sync instances in-process."""
 
     def __init__(self, cfg: BotConfig) -> None:
         self._cfg = cfg
@@ -231,7 +299,7 @@ class TelegramBot:
             },
             {"command": "help", "description": "Show available commands"},
         ]
-        if self._cfg.backup_container:
+        if self._cfg.backup_cfg:
             commands[2:2] = [
                 {
                     "command": "backup",
@@ -447,9 +515,9 @@ class TelegramBot:
             "/resync `[YYYY\\-MM\\-DD]` — Force re\\-sync of a specific day, bypassing dedup",
             "/login — Renew Trade Republic 2FA session \\(choose instance\\)",
             "/logs — Show today's logs for an instance",
-            "/code `<instance> <code>` — Submit an authenticator code",
+            "/code `<instance> <code>` — Submit an authenticator code \\(or send the 6\\-digit code as a plain message\\)",
         ]
-        if self._cfg.backup_container:
+        if self._cfg.backup_cfg:
             lines += [
                 "/backup — Force a Wallet backup \\(guided by inline buttons\\)",
                 "/backup `monthly [YYYY\\-MM]` — Monthly backup, optional period",
@@ -467,42 +535,27 @@ class TelegramBot:
             return
 
         lines = ["📋 *Instance status*\n"]
-        with _docker_client_ctx() as client:
-            for inst in self._cfg.instances.values():
-                lines.append(self._instance_status_line(inst, client))
+        for inst in self._cfg.instances.values():
+            lines.append(self._instance_status_line(inst))
 
-        if self._cfg.backup_container:
-            lines.append(f"\n💾 *Backup service*: `{_esc(self._cfg.backup_container)}`")
+        if self._cfg.backup_cfg:
+            lines.append("\n💾 *Backup*: configured")
         else:
-            lines.append("\n💾 *Backup service*: not configured")
+            lines.append("\n💾 *Backup*: not configured")
 
         self._send_message("\n".join(lines))
 
-    def _instance_status_line(
-        self, inst: InstanceConfig, client: docker.DockerClient | None
-    ) -> str:
+    def _instance_status_line(self, inst: InstanceConfig) -> str:
         """Build a Telegram-formatted status line for a single sync instance."""
-        running_state = (
-            _docker_container_status(inst.container_name, client=client)
-            if client
-            else None
+        auth = _check_session_direct(inst.config.data_dir, inst.config.instance)
+        last_sync = _last_sync_summary_direct(
+            inst.config.data_dir, inst.config.instance
         )
-        is_running = client and running_state == "running"
-        auth = (
-            _docker_check_session(inst.container_name, client=client)
-            if is_running
-            else None
-        )
-        last_sync = (
-            _docker_last_sync_summary(inst.container_name, client=client)
-            if is_running
-            else None
-        ) or "unavailable"
         auth_icon = _auth_icon(auth)
         return (
-            f"• *{_esc(inst.name)}* — `{_esc(inst.container_name)}`"
-            f"\n  state: *{_esc(running_state or 'unknown')}* · auth: {auth_icon}"
-            f"\n  last: {_esc(last_sync)}"
+            f"• *{_esc(inst.name)}*"
+            f"\n  auth: {auth_icon}"
+            f"\n  last: {_esc(last_sync or 'unavailable')}"
         )
 
     def _cmd_sync(self, _args: list[str]) -> None:
@@ -555,12 +608,10 @@ class TelegramBot:
             return
 
         self._send_message(f"🔑 Sending code to *{_esc(inst.name)}*\\.\\.\\.")
-        self._exec_in_thread(
-            inst.container_name, ["submit-code", code], on_error=self._send_message
-        )
+        self._submit_code_to(inst, code)
 
     def _cmd_backup(self, args: list[str]) -> None:
-        if not self._cfg.backup_container:
+        if not self._cfg.backup_cfg:
             self._send_message("🚫 Backup service is not configured\\.")
             return
         if not args:
@@ -593,45 +644,126 @@ class TelegramBot:
             )
 
     def _launch_backup(self, mode: str, period: str) -> None:
-        if not self._cfg.backup_container:
+        if not self._cfg.backup_cfg:
             self._send_message("🚫 Backup service is not configured\\.")
             return
         icon = _BACKUP_ICONS.get(mode, "📦")
         label = _esc(f"{mode.capitalize()} backup ({period})")
         self._send_message(f"{icon} *{label}*\\.\\.\\.")
-        self._exec_in_thread(
-            self._cfg.backup_container,
-            ["backup", mode, period],
-            on_error=self._send_message,
-        )
+        threading.Thread(
+            target=self._run_backup,
+            args=(mode, period),
+            daemon=True,
+        ).start()
+
+    def _run_backup(self, mode: str, period: str) -> None:
+        """Run a backup in-process. Called from a daemon thread."""
+        cfg = self._cfg.backup_cfg
+        if cfg is None:
+            return
+        cfg.data_dir.mkdir(parents=True, exist_ok=True)
+        with _RUN_LOCK:
+            http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
+            handlers = setup_logging(cfg.data_dir)
+            root = logging.getLogger()
+            client = WalletClient(api_key=cfg.wallet_api_key)
+            notifier = Notifier(
+                cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name
+            )
+            try:
+                if mode == "auto":
+                    backup_module.run_auto(client, notifier, cfg.data_dir)
+                elif mode == "monthly":
+                    year, month = backup_module._parse_monthly_param(period)
+                    backup_module.run_monthly(
+                        client, notifier, cfg.data_dir, year, month
+                    )
+                elif mode == "yearly":
+                    year = backup_module._parse_yearly_param(period)
+                    backup_module.run_yearly(client, notifier, cfg.data_dir, year)
+                else:
+                    log.warning("Unknown backup mode %r — ignoring", mode)
+                    self._send_message(
+                        f"⚠️ Unknown backup mode: `{_esc(mode)}`\\. Expected `monthly` or `yearly`\\."
+                    )
+            except Exception as exc:
+                log.exception(
+                    "Backup failed (mode=%s period=%s): %s", mode, period, exc
+                )
+                self._send_message(
+                    f"❌ Backup \\({_esc(mode)} {_esc(period)}\\) failed: {_esc(str(exc))}"
+                )
+            finally:
+                for h in handlers:
+                    root.removeHandler(h)
+                    h.close()
 
     # ------------------------------------------------------------------
-    # Execution
+    # Execution — direct in-process calls
     # ------------------------------------------------------------------
 
     def _launch_sync(self, inst: InstanceConfig) -> None:
         self._send_message(f"▶️ Executing *sync* for *{_esc(inst.name)}*\\.\\.\\.")
-        self._exec_in_thread(inst.container_name, ["sync"], on_error=self._send_message)
+        threading.Thread(
+            target=self._run_sync_for_instance,
+            args=(inst,),
+            daemon=True,
+        ).start()
+
+    def _run_sync_for_instance(self, inst: InstanceConfig) -> None:
+        """Run sync for *inst* in-process. Called from a daemon thread."""
+        try:
+            _main_run(cfg=inst.config)
+        except Exception as exc:
+            log.exception("Sync failed for instance %s", inst.name)
+            self._send_message(
+                f"❌ Sync error for *{_esc(inst.name)}*: {_esc(str(exc))}"
+            )
 
     def _launch_resync(self, inst: InstanceConfig, date_str: str) -> None:
         self._send_message(
             f"🔁 Executing *resync {_esc(date_str)}* for *{_esc(inst.name)}*\\.\\.\\."
         )
-        self._exec_in_thread(
-            inst.container_name,
-            ["resync", date_str],
-            on_error=self._send_message,
-        )
+        threading.Thread(
+            target=self._run_resync_for_instance,
+            args=(inst, date_str),
+            daemon=True,
+        ).start()
+
+    def _run_resync_for_instance(self, inst: InstanceConfig, date_str: str) -> None:
+        """Run resync for *inst* in-process. Called from a daemon thread."""
+        try:
+            _main_run_resync(date_str, cfg=inst.config)
+        except Exception as exc:
+            log.exception("Resync failed for instance %s date %s", inst.name, date_str)
+            self._send_message(
+                f"❌ Resync error for *{_esc(inst.name)}* `{_esc(date_str)}`: {_esc(str(exc))}"
+            )
 
     def _launch_login(self, inst: InstanceConfig) -> None:
         self._send_message(f"🔐 Re\\-authenticating *{_esc(inst.name)}*\\.\\.\\.")
         self._pending_login[inst.name.lower()] = inst
-        self._exec_in_thread(
-            inst.container_name,
-            ["login"],
-            on_error=lambda msg: self._on_login_error(inst, msg),
-            on_success=lambda: self._on_login_success(inst),
-        )
+        threading.Thread(
+            target=self._run_login_for_instance,
+            args=(inst,),
+            daemon=True,
+        ).start()
+
+    def _run_login_for_instance(self, inst: InstanceConfig) -> None:
+        """Run login for *inst* in-process. Called from a daemon thread."""
+        try:
+            result = _main_run_login(cfg=inst.config)
+        except Exception as exc:
+            log.exception("Login failed for instance %s", inst.name)
+            self._on_login_error(
+                inst, f"❌ Login error for *{_esc(inst.name)}*: {_esc(str(exc))}"
+            )
+            return
+
+        if result == 0:
+            self._on_login_success(inst)
+        else:
+            self._on_login_error(inst, f"❌ Login failed for *{_esc(inst.name)}*\\.")
 
     def _on_login_success(self, inst: InstanceConfig) -> None:
         """Called when login completes successfully: notify user then auto-sync."""
@@ -648,8 +780,9 @@ class TelegramBot:
         """Submit *code* to the single pending login instance, or prompt if ambiguous.
 
         When ``_pending_login`` is empty (login was triggered by a cron sync rather
-        than the ``/login`` Telegram command), falls back to querying each container
-        via ``check-pending`` to discover which ones are actively waiting for a code.
+        than the ``/login`` Telegram command), falls back to checking each instance's
+        ``data_dir`` for the ``PENDING_FILENAME`` marker to discover which one is
+        actively waiting for a code.
         """
         pending = dict(self._pending_login)  # snapshot before any iteration
         if pending:
@@ -657,11 +790,22 @@ class TelegramBot:
         return self._submit_code_no_pending(code)
 
     def _submit_code_to(self, inst: InstanceConfig, code: str) -> bool:
-        """Dispatch *code* to *inst* and return True."""
-        self._exec_in_thread(
-            inst.container_name, ["submit-code", code], on_error=self._send_message
-        )
-        return True
+        """Write *code* to *inst*'s 2FA code file directly. Returns True on success."""
+        from app.twofa import CODE_FILENAME, PENDING_FILENAME
+
+        data_dir = inst.config.data_dir
+        pending_file = data_dir / PENDING_FILENAME
+        if not pending_file.exists():
+            self._send_message(f"⚠️ No active login request for *{_esc(inst.name)}*\\.")
+            return False
+        try:
+            (data_dir / CODE_FILENAME).write_text(code.strip())
+            return True
+        except Exception as exc:
+            self._send_message(
+                f"❌ Could not submit code for *{_esc(inst.name)}*: {_esc(str(exc))}"
+            )
+            return False
 
     def _submit_code_from_pending(
         self, pending: dict[str, InstanceConfig], code: str
@@ -680,18 +824,18 @@ class TelegramBot:
         """Submit *code* when ``_pending_login`` is empty.
 
         For a single-instance setup submits directly.  For multi-instance setups,
-        probes Docker to discover which containers are awaiting a code and routes
-        accordingly, falling back to a generic disambiguation prompt when the daemon
-        is unreachable or no container is waiting.
+        probes the ``PENDING_FILENAME`` marker in each instance's ``data_dir`` to
+        discover which one is awaiting a code, falling back to a generic
+        disambiguation prompt when no instance is waiting.
         """
         instances = self._cfg.instances
         if len(instances) == 1:
             return self._submit_code_to(next(iter(instances.values())), code)
-        docker_pending = self._probe_docker_pending(instances)
-        if len(docker_pending) == 1:
-            return self._submit_code_to(next(iter(docker_pending.values())), code)
-        if len(docker_pending) > 1:
-            names = ", ".join(f"*{_esc(k)}*" for k in sorted(docker_pending))
+        file_pending = self._probe_pending(instances)
+        if len(file_pending) == 1:
+            return self._submit_code_to(next(iter(file_pending.values())), code)
+        if len(file_pending) > 1:
+            names = ", ".join(f"*{_esc(k)}*" for k in sorted(file_pending))
             self._send_message(
                 f"⚠️ Multiple logins pending: {names}\\. "
                 "Use `/code <instance> <code>` to specify which one\\."
@@ -704,51 +848,65 @@ class TelegramBot:
         )
         return False
 
-    def _probe_docker_pending(
+    def _probe_pending(
         self, instances: dict[str, InstanceConfig]
     ) -> dict[str, InstanceConfig]:
-        """Query each container via ``check-pending`` and return those awaiting a code.
+        """Check each instance's ``data_dir`` for the pending-login marker file.
 
-        Uses a single shared Docker client and short-circuits after finding two
-        pending containers (result is already ambiguous).  Returns an empty dict
-        when the Docker daemon is unreachable.
+        Returns those instances whose ``PENDING_FILENAME`` marker is present.
+        Short-circuits after finding two (result is already ambiguous).
         """
+        from app.twofa import PENDING_FILENAME
+
         pending: dict[str, InstanceConfig] = {}
-        with _docker_client_ctx() as docker_client:
-            if docker_client is None:
-                return pending
-            for name, inst in instances.items():
-                if (
-                    _docker_check_awaiting_code(inst.container_name, docker_client)
-                    is True
-                ):
-                    pending[name] = inst
-                    if len(pending) > 1:
-                        break
+        for name, inst in instances.items():
+            if (inst.config.data_dir / PENDING_FILENAME).exists():
+                pending[name] = inst
+                if len(pending) > 1:
+                    break
         return pending
 
     def _fetch_and_send_logs(self, inst: InstanceConfig) -> None:
-        """Fetch today's logs for *inst* and send them to Telegram."""
-        today_start = datetime.datetime.now(tz=datetime.UTC).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        """Fetch today's logs for *inst* from the log file and send them to Telegram."""
+        today_str = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
+        log_file = inst.config.data_dir / "sync.log"
+        # MarkdownV2 header — used only when there are no logs (plain-text message not needed).
+        header_md = f"📋 Logs for *{_esc(inst.name)}* \\({_esc(today_str)} UTC\\)\n\n"
+        # Plain-text header — used when the log body is sent with parse_mode=None so that
+        # MarkdownV2 escape characters are not displayed literally in Telegram.
+        header_plain = f"📋 Logs for {inst.name} ({today_str} UTC)\n\n"
         try:
-            text = _docker_logs_today(inst.container_name, since=today_start)
+            if not log_file.exists():
+                text = ""
+            else:
+                lines: collections.deque[str] = collections.deque()
+                total_chars = 0
+                truncated = False
+                with log_file.open(encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        if not line.startswith(today_str):
+                            continue
+                        stripped = line.rstrip()
+                        lines.append(stripped)
+                        total_chars += len(stripped) + 1  # +1 for the joining newline
+                        while total_chars > _MAX_LOG_CHARS and len(lines) > 1:
+                            removed = lines.popleft()
+                            total_chars -= len(removed) + 1
+                            truncated = True
+                text = "\n".join(lines)
+                if truncated:
+                    text = "[... truncated ...]\n" + text
         except Exception as exc:
             self._send_message(
-                f"❌ Could not fetch logs for `{_esc(inst.container_name)}`: {_esc(str(exc))}"
+                f"❌ Could not read logs for `{_esc(inst.name)}`: {_esc(str(exc))}"
             )
             return
 
-        header = f"📋 Logs for *{_esc(inst.name)}* \\({_esc(today_start.strftime('%Y-%m-%d'))} UTC\\)\n\n"
         if not text.strip():
-            self._send_message(header + "_No logs today\\._")
+            self._send_message(header_md + "_No logs today\\._")
             return
 
-        if len(text) > _MAX_LOG_CHARS:
-            text = "[... truncated ...]\n" + text[-_MAX_LOG_CHARS:]
-
-        self._send_message(header + text, parse_mode=None)
+        self._send_message(header_plain + text, parse_mode=None)
 
     # ------------------------------------------------------------------
     # Keyboard builder wrappers — delegate to app.bot_keyboards
@@ -781,21 +939,6 @@ class TelegramBot:
     # ------------------------------------------------------------------
     # Telegram API helpers
     # ------------------------------------------------------------------
-
-    def _exec_in_thread(
-        self,
-        container_name: str,
-        app_args: list[str],
-        on_error: Callable[[str], None] | None = None,
-        on_success: Callable[[], None] | None = None,
-    ) -> None:
-        """Launch ``_docker_exec_silent`` for *container_name* in a daemon thread."""
-        threading.Thread(
-            target=_docker_exec_silent,
-            args=(container_name, app_args),
-            kwargs={"on_error": on_error, "on_success": on_success},
-            daemon=True,
-        ).start()
 
     def _send_message(
         self,

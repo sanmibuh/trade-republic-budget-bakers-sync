@@ -1,0 +1,37 @@
+# instances.yml — multi-instance config for the Telegram bot
+# Copy to instances.yml and fill in real values (never commit the real file).
+#
+# The bot reads this file via the INSTANCES_CONFIG env var.
+# Each instance gets its own data subdirectory: {data_dir}/{name}/
+# Mount each subdirectory into the telegram-bot container (see docker-compose.yml).
+
+# Root data directory inside the container (must match the volume mounts in docker-compose.yml)
+data_dir: /app/data
+
+# Optional: Telegram credentials (can also be provided via telegram.env)
+# telegram_bot_token: ""
+# telegram_chat_id: ""
+
+# Optional: set to true only if SSL verification fails in your environment
+allow_insecure_ssl: false
+
+instances:
+  - name: 1                                  # must match the volume mount path (./1:/app/data/1)
+    phone: "+49123456789"                    # Trade Republic phone number
+    pin: "1234"                              # Trade Republic PIN
+    wallet_api_key: "<wallet_api_key>"       # BudgetBakers Wallet API key
+    wallet_cash_account_id: "<uuid>"         # BudgetBakers cash account UUID
+    wallet_portfolio_account_id: "<uuid>"    # BudgetBakers portfolio account UUID
+    owner_name: "Account 1"                  # optional, shown in Telegram messages
+    lookback_days: 7                         # optional, default 7
+    category_strategy: "history"            # optional: none (default) or history
+
+  - name: 2
+    phone: "+49987654321"
+    pin: "5678"
+    wallet_api_key: "<wallet_api_key>"
+    wallet_cash_account_id: "<uuid>"
+    wallet_portfolio_account_id: "<uuid>"
+    owner_name: "Account 2"
+    lookback_days: 7
+    category_strategy: "history"

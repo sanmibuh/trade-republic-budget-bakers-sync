@@ -12,8 +12,12 @@ def _make_formatter() -> logging.Formatter:
     return logging.Formatter(fmt=_LOG_FMT, datefmt=_DATE_FMT)
 
 
-def setup_logging(log_dir: Path) -> logging.Logger:
-    """Configure root logger: DEBUG to rotating file, INFO to console."""
+def setup_logging(log_dir: Path) -> list[logging.Handler]:
+    """Configure root logger: DEBUG to rotating file, INFO to console.
+
+    Returns the list of handlers added so callers can remove them when done
+    (e.g. after an in-process sync run triggered by the Telegram bot).
+    """
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "sync.log"
 
@@ -37,7 +41,7 @@ def setup_logging(log_dir: Path) -> logging.Logger:
     root.addHandler(fh)
     root.addHandler(ch)
 
-    return logging.getLogger("sync")
+    return [fh, ch]
 
 
 def configure_logging() -> None:

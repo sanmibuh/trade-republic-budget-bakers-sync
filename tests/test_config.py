@@ -841,6 +841,40 @@ instances:
     assert cfg.data_dir == Path(tmp_path) / "user1"
 
 
+def test_instances_config_load_falls_back_to_env_telegram_creds(tmp_path, monkeypatch):
+    """When YAML has no telegram creds, load() falls back to env vars."""
+    from app.config import InstancesConfig
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "env-bot-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "env-chat-id")
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_MINIMAL_YAML)  # no telegram creds in YAML
+
+    cfg = InstancesConfig.load(cfg_file)
+
+    assert cfg.telegram_bot_token == "env-bot-token"
+    assert cfg.telegram_chat_id == "env-chat-id"
+
+
+def test_instances_config_load_yaml_telegram_creds_take_precedence(
+    tmp_path, monkeypatch
+):
+    """YAML telegram creds take precedence over env vars."""
+    from app.config import InstancesConfig
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "env-bot-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "env-chat-id")
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(_FULL_YAML)  # _FULL_YAML has telegram_bot_token: "bot-token"
+
+    cfg = InstancesConfig.load(cfg_file)
+
+    assert cfg.telegram_bot_token == "bot-token"
+    assert cfg.telegram_chat_id == "chat-id"
+
+
 def test_instances_config_to_config_inherits_global_telegram(tmp_path):
     """to_config() copies global telegram credentials into Config."""
     from app.config import InstancesConfig
