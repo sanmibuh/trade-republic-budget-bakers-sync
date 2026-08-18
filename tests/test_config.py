@@ -965,6 +965,30 @@ instances:
         InstancesConfig.load(cfg_file)
 
 
+@pytest.mark.parametrize(
+    "bad_name",
+    ["david'", "eli;drop", "name`cmd`", "name*x", "na me", "na\tme", "na\nme"],
+)
+def test_instances_config_load_name_with_shell_metachar_raises(tmp_path, bad_name):
+    """ValueError when instance name contains shell metacharacters (injection guard)."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"""\
+instances:
+  - name: "{bad_name}"
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key"
+    wallet_cash_account_id: "cash"
+    wallet_portfolio_account_id: "portfolio"
+"""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="invalid characters"):
+        InstancesConfig.load(cfg_file)
+
+
 def test_instances_config_load_zero_lookback_days_raises(tmp_path):
     """ValueError when lookback_days is zero."""
     from app.config import InstancesConfig

@@ -290,6 +290,12 @@ def _validate_instance_name(raw_inst: dict, idx: int) -> str:
         raise ValueError(f"instance name '{name}' must not be '.' or '..'")
     if "/" in name or "\\" in name:
         raise ValueError(f"instance name '{name}' must not contain a path separator")
+    _SHELL_METACHARACTERS = set("'\";`|&$<>(){}[]!# \t\n\r*?~")
+    if any(ch in _SHELL_METACHARACTERS for ch in name):
+        raise ValueError(
+            f"instance name '{name}' contains invalid characters — only alphanumerics, "
+            f"hyphens, underscores, and dots are allowed"
+        )
     return name
 
 
