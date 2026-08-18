@@ -3,7 +3,7 @@
 Usage:
     python -m app                          # shows help
     python -m app sync                     # one-shot TR → Wallet sync (env vars)
-    python -m app sync --instance david    # one-shot sync for a named instance (YAML config)
+    python -m app sync --instance user1    # one-shot sync for a named instance (YAML config)
     python -m app backup auto              # smart daily backup
     python -m app backup monthly           # backup previous month
     python -m app backup monthly 2026-07   # backup specific month

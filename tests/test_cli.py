@@ -507,12 +507,12 @@ def test_sync_with_instance_flag_loads_from_config_file(tmp_path):
     ):
         result = _runner().invoke(
             cli,
-            ["sync", "--instance", "david"],
+            ["sync", "--instance", "user1"],
             env={"INSTANCES_CONFIG": str(cfg_file)},
         )
 
     assert result.exit_code == 0
-    mock_instances.to_config.assert_called_once_with("david")
+    mock_instances.to_config.assert_called_once_with("user1")
     mock_run.assert_called_once_with(cfg=mock_cfg)
 
 
@@ -528,7 +528,7 @@ def test_sync_without_instance_flag_uses_env(monkeypatch):
 def test_sync_with_instance_flag_missing_instances_config_env(tmp_path):
     """sync --instance without INSTANCES_CONFIG env var exits with an error."""
     result = _runner().invoke(
-        cli, ["sync", "--instance", "david"], env={"INSTANCES_CONFIG": ""}
+        cli, ["sync", "--instance", "user1"], env={"INSTANCES_CONFIG": ""}
     )
     assert result.exit_code != 0
 
@@ -555,12 +555,12 @@ def test_login_with_instance_flag_loads_from_config_file(tmp_path):
     ):
         result = _runner().invoke(
             cli,
-            ["login", "--instance", "david"],
+            ["login", "--instance", "user1"],
             env={"INSTANCES_CONFIG": str(cfg_file)},
         )
 
     assert result.exit_code == 0
-    mock_instances.to_config.assert_called_once_with("david")
+    mock_instances.to_config.assert_called_once_with("user1")
     mock_run.assert_called_once_with(cfg=mock_cfg)
 
 

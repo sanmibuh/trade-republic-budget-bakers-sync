@@ -291,20 +291,20 @@ telegram_chat_id: "..."      # optional
 allow_insecure_ssl: false    # optional, default false
 
 instances:
-  - name: david              # used as subdirectory name and instance identifier
+  - name: user1              # used as subdirectory name and instance identifier
     phone: "+34600000000"
     pin: "1234"
     wallet_api_key: "..."
     wallet_cash_account_id: "..."
     wallet_portfolio_account_id: "..."
-    owner_name: "David"      # optional, defaults to name.capitalize()
+    owner_name: "User1"      # optional, defaults to name.capitalize()
     lookback_days: 7         # optional, default 7
     dedup_ttl_days: 60       # optional, default 60
     category_strategy: none  # optional, default none
     labels:                  # optional
       BANK_TRANSACTION_INCOMING: label-id-123
 
-  - name: eli
+  - name: user2
     phone: "+34611111111"
     pin: "5678"
     wallet_api_key: "..."

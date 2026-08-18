@@ -455,12 +455,12 @@ def test_read_instance_uses_instance_env_var_when_set(monkeypatch):
 
 _MINIMAL_YAML = """\
 instances:
-  - name: david
+  - name: user1
     phone: "+34600000000"
     pin: "1234"
-    wallet_api_key: "key-david"
-    wallet_cash_account_id: "cash-david"
-    wallet_portfolio_account_id: "portfolio-david"
+    wallet_api_key: "key-user1"
+    wallet_cash_account_id: "cash-user1"
+    wallet_portfolio_account_id: "portfolio-user1"
 """
 
 _FULL_YAML = """\
@@ -470,24 +470,24 @@ telegram_chat_id: "chat-id"
 allow_insecure_ssl: true
 
 instances:
-  - name: david
+  - name: user1
     phone: "+34600000000"
     pin: "1234"
-    wallet_api_key: "key-david"
-    wallet_cash_account_id: "cash-david"
-    wallet_portfolio_account_id: "portfolio-david"
-    owner_name: "David"
+    wallet_api_key: "key-user1"
+    wallet_cash_account_id: "cash-user1"
+    wallet_portfolio_account_id: "portfolio-user1"
+    owner_name: "User1"
     lookback_days: 14
     dedup_ttl_days: 90
     category_strategy: history
     labels:
       BANK_TRANSACTION_INCOMING: label-abc
-  - name: eli
+  - name: user2
     phone: "+34611111111"
     pin: "5678"
-    wallet_api_key: "key-eli"
-    wallet_cash_account_id: "cash-eli"
-    wallet_portfolio_account_id: "portfolio-eli"
+    wallet_api_key: "key-user2"
+    wallet_cash_account_id: "cash-user2"
+    wallet_portfolio_account_id: "portfolio-user2"
 """
 
 
@@ -502,12 +502,12 @@ def test_instances_config_load_minimal(tmp_path):
 
     assert len(cfg.instances) == 1
     inst = cfg.instances[0]
-    assert inst.name == "david"
+    assert inst.name == "user1"
     assert inst.phone == "+34600000000"
     assert inst.pin == "1234"
-    assert inst.wallet_api_key == "key-david"
-    assert inst.wallet_cash_account_id == "cash-david"
-    assert inst.wallet_portfolio_account_id == "portfolio-david"
+    assert inst.wallet_api_key == "key-user1"
+    assert inst.wallet_cash_account_id == "cash-user1"
+    assert inst.wallet_portfolio_account_id == "portfolio-user1"
 
 
 def test_instances_config_load_global_defaults(tmp_path):
@@ -545,7 +545,7 @@ def test_instances_config_load_full_yaml(tmp_path):
     assert len(cfg.instances) == 2
 
     david = cfg.instances[0]
-    assert david.owner_name == "David"
+    assert david.owner_name == "User1"
     assert david.lookback_days == 14
     assert david.dedup_ttl_days == 90
     assert david.category_strategy == "history"
@@ -585,7 +585,7 @@ def test_instances_config_load_missing_required_instance_field(tmp_path):
 
     yaml_content = """\
 instances:
-  - name: david
+  - name: user1
     phone: "+34600000000"
     wallet_api_key: "key"
     wallet_cash_account_id: "cash"
@@ -623,7 +623,7 @@ def test_instances_config_load_invalid_category_strategy_raises(tmp_path):
 
     yaml_content = """\
 instances:
-  - name: david
+  - name: user1
     phone: "+34600000000"
     pin: "1234"
     wallet_api_key: "key"
@@ -655,13 +655,13 @@ def test_instances_config_load_duplicate_instance_names(tmp_path):
 
     yaml_content = """\
 instances:
-  - name: david
+  - name: user1
     phone: "+34600000000"
     pin: "1234"
     wallet_api_key: "k1"
     wallet_cash_account_id: "c1"
     wallet_portfolio_account_id: "p1"
-  - name: david
+  - name: user1
     phone: "+34611111111"
     pin: "5678"
     wallet_api_key: "k2"
@@ -671,7 +671,7 @@ instances:
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
 
-    with pytest.raises(ValueError, match="david"):
+    with pytest.raises(ValueError, match="user1"):
         InstancesConfig.load(cfg_file)
 
 
@@ -684,7 +684,7 @@ def test_instances_config_get_instance_found(tmp_path):
 
     cfg = InstancesConfig.load(cfg_file)
 
-    assert cfg.get_instance("eli").wallet_api_key == "key-eli"
+    assert cfg.get_instance("user2").wallet_api_key == "key-user2"
 
 
 def test_instances_config_get_instance_not_found(tmp_path):
@@ -708,7 +708,7 @@ def test_instances_config_to_config_data_dir_is_subdirectory(tmp_path):
     yaml_content = f"""\
 data_dir: {tmp_path}
 instances:
-  - name: david
+  - name: user1
     phone: "+34600000000"
     pin: "1234"
     wallet_api_key: "key"
@@ -718,9 +718,9 @@ instances:
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
 
-    cfg = InstancesConfig.load(cfg_file).to_config("david")
+    cfg = InstancesConfig.load(cfg_file).to_config("user1")
 
-    assert cfg.data_dir == Path(tmp_path) / "david"
+    assert cfg.data_dir == Path(tmp_path) / "user1"
 
 
 def test_instances_config_to_config_inherits_global_telegram(tmp_path):
@@ -730,7 +730,7 @@ def test_instances_config_to_config_inherits_global_telegram(tmp_path):
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(_FULL_YAML)
 
-    cfg = InstancesConfig.load(cfg_file).to_config("david")
+    cfg = InstancesConfig.load(cfg_file).to_config("user1")
 
     assert cfg.telegram_bot_token == "bot-token"
     assert cfg.telegram_chat_id == "chat-id"
@@ -744,9 +744,9 @@ def test_instances_config_to_config_instance_name_used_as_instance_field(tmp_pat
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(_MINIMAL_YAML)
 
-    cfg = InstancesConfig.load(cfg_file).to_config("david")
+    cfg = InstancesConfig.load(cfg_file).to_config("user1")
 
-    assert cfg.instance == "david"
+    assert cfg.instance == "user1"
 
 
 def test_instances_config_to_config_owner_name_defaults_to_capitalized_name(tmp_path):
@@ -756,9 +756,9 @@ def test_instances_config_to_config_owner_name_defaults_to_capitalized_name(tmp_
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(_MINIMAL_YAML)
 
-    cfg = InstancesConfig.load(cfg_file).to_config("david")
+    cfg = InstancesConfig.load(cfg_file).to_config("user1")
 
-    assert cfg.owner_name == "David"
+    assert cfg.owner_name == "User1"
 
 
 def test_instances_config_to_config_explicit_owner_name(tmp_path):
@@ -768,9 +768,9 @@ def test_instances_config_to_config_explicit_owner_name(tmp_path):
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(_FULL_YAML)
 
-    cfg = InstancesConfig.load(cfg_file).to_config("david")
+    cfg = InstancesConfig.load(cfg_file).to_config("user1")
 
-    assert cfg.owner_name == "David"
+    assert cfg.owner_name == "User1"
 
 
 def test_instances_config_to_config_credentials(tmp_path):
@@ -780,10 +780,10 @@ def test_instances_config_to_config_credentials(tmp_path):
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(_MINIMAL_YAML)
 
-    cfg = InstancesConfig.load(cfg_file).to_config("david")
+    cfg = InstancesConfig.load(cfg_file).to_config("user1")
 
     assert cfg.phone_number == "+34600000000"
     assert cfg.pin == "1234"
-    assert cfg.wallet_api_key == "key-david"
-    assert cfg.wallet_cash_account_id == "cash-david"
-    assert cfg.wallet_portfolio_account_id == "portfolio-david"
+    assert cfg.wallet_api_key == "key-user1"
+    assert cfg.wallet_cash_account_id == "cash-user1"
+    assert cfg.wallet_portfolio_account_id == "portfolio-user1"
