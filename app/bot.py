@@ -697,8 +697,6 @@ class TelegramBot:
         """Run sync for *inst* in-process. Called from a daemon thread."""
         try:
             _main_run(cfg=inst.config)
-        except SystemExit:
-            pass  # run() may exit via SystemExit on auth failures; already notified
         except Exception as exc:
             log.exception("Sync failed for instance %s", inst.name)
             self._send_message(
@@ -719,8 +717,6 @@ class TelegramBot:
         """Run resync for *inst* in-process. Called from a daemon thread."""
         try:
             _main_run_resync(date_str, cfg=inst.config)
-        except SystemExit:
-            pass
         except Exception as exc:
             log.exception("Resync failed for instance %s date %s", inst.name, date_str)
             self._send_message(
