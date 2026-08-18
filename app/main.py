@@ -49,8 +49,9 @@ def _connect(cfg: Config, notifier: Notifier) -> TRClient:
 # ---------------------------------------------------------------------------
 
 
-def run() -> int:
-    cfg = Config.from_env()
+def run(cfg: Config | None = None) -> int:
+    if cfg is None:
+        cfg = Config.from_env()
     notifier = _prepare(cfg)
     log.info("Starting sync for owner: %s", cfg.owner_name)
 
@@ -98,7 +99,7 @@ def run() -> int:
     return 0
 
 
-def run_login() -> int:
+def run_login(cfg: Config | None = None) -> int:
     """Re-authenticate with Trade Republic on demand and persist the session.
 
     Used by the ``login`` command (triggered by the Telegram ``/login`` command).
@@ -106,7 +107,8 @@ def run_login() -> int:
     the Telegram-based authenticator-code flow (or a push approval for accounts
     without an authenticator). Returns 0 on success, 1 on a recoverable failure.
     """
-    cfg = Config.from_env()
+    if cfg is None:
+        cfg = Config.from_env()
     notifier = _prepare(cfg)
     log.info("Starting on-demand login for owner: %s", cfg.owner_name)
 

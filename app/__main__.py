@@ -2,7 +2,8 @@
 
 Usage:
     python -m app                          # shows help
-    python -m app sync                     # one-shot TR → Wallet sync
+    python -m app sync                     # one-shot TR → Wallet sync (env vars)
+    python -m app sync --instance user1    # one-shot sync for a named instance (YAML config)
     python -m app backup auto              # smart daily backup
     python -m app backup monthly           # backup previous month
     python -m app backup monthly 2026-07   # backup specific month
@@ -13,10 +14,38 @@ Usage:
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
 import click
 
 from app.logging_setup import configure_logging, setup_logging
+
+if TYPE_CHECKING:
+    from app.config import Config
+
+
+def _resolve_instance_cfg(instance: str) -> Config:
+    """Load ``InstancesConfig`` via ``INSTANCES_CONFIG`` env var and return the
+    ``Config`` for *instance*.
+
+    ``INSTANCES_CONFIG`` is read through :func:`app.config.read_instances_config_path`
+    so that all env var access stays in ``config.py``.  Any ``ValueError`` or
+    ``FileNotFoundError`` is re-raised as a :class:`click.UsageError` so the user
+    sees a clean error message instead of a traceback.
+
+    Raises :class:`click.UsageError` immediately when *instance* is blank, so
+    passing ``--instance ""`` never silently falls back to env-var mode.
+    """
+    from app.config import InstancesConfig, read_instances_config_path
+
+    if not instance.strip():
+        raise click.UsageError("--instance value must not be blank")
+    instance = instance.strip()
+    try:
+        path = read_instances_config_path()
+        return InstancesConfig.load(path).to_config(instance)
+    except (ValueError, FileNotFoundError) as exc:
+        raise click.UsageError(str(exc)) from exc
 
 
 @click.group()
@@ -25,15 +54,29 @@ def cli() -> None:
 
 
 @cli.command()
-def sync() -> None:
+@click.option(
+    "--instance",
+    default=None,
+    metavar="NAME",
+    help="Instance name from the INSTANCES_CONFIG YAML file. "
+    "When set, credentials are loaded from the file instead of env vars.",
+)
+def sync(instance: str | None) -> None:
     """Run a one-shot Trade Republic → Wallet sync."""
     from app.main import run
 
-    sys.exit(run())
+    cfg = _resolve_instance_cfg(instance) if instance is not None else None
+    sys.exit(run(cfg=cfg))
 
 
 @cli.command()
-def login() -> None:
+@click.option(
+    "--instance",
+    default=None,
+    metavar="NAME",
+    help="Instance name from the INSTANCES_CONFIG YAML file.",
+)
+def login(instance: str | None) -> None:
     """Re-authenticate with Trade Republic on demand (renew the 2FA session).
 
     Resumes the saved session if still valid; otherwise runs the full login.
@@ -42,7 +85,8 @@ def login() -> None:
     """
     from app.main import run_login
 
-    sys.exit(run_login())
+    cfg = _resolve_instance_cfg(instance) if instance is not None else None
+    sys.exit(run_login(cfg=cfg))
 
 
 @cli.command(name="submit-code")

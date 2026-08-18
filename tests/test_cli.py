@@ -483,3 +483,118 @@ def test_check_pending_help():
     result = _runner().invoke(cli, ["check-pending", "--help"])
     assert result.exit_code == 0
     assert "pending" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# sync --instance flag
+# ---------------------------------------------------------------------------
+
+
+def test_sync_with_instance_flag_loads_from_config_file(tmp_path):
+    """sync --instance <name> resolves config from InstancesConfig and passes it to run()."""
+    from app.config import Config, InstancesConfig
+
+    mock_cfg = MagicMock(spec=Config)
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.to_config.return_value = mock_cfg
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.main.run", return_value=0) as mock_run,
+    ):
+        result = _runner().invoke(
+            cli,
+            ["sync", "--instance", "user1"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code == 0
+    mock_instances.to_config.assert_called_once_with("user1")
+    mock_run.assert_called_once_with(cfg=mock_cfg)
+
+
+def test_sync_without_instance_flag_uses_env(monkeypatch):
+    """sync without --instance falls back to Config.from_env() (backward compat)."""
+    with patch("app.main.run", return_value=0) as mock_run:
+        result = _runner().invoke(cli, ["sync"])
+    assert result.exit_code == 0
+    # run() called with no cfg argument (None default)
+    mock_run.assert_called_once_with(cfg=None)
+
+
+def test_sync_with_instance_flag_missing_instances_config_env(tmp_path):
+    """sync --instance without INSTANCES_CONFIG env var exits with an error."""
+    result = _runner().invoke(
+        cli, ["sync", "--instance", "user1"], env={"INSTANCES_CONFIG": ""}
+    )
+    assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# login --instance flag
+# ---------------------------------------------------------------------------
+
+
+def test_login_with_instance_flag_loads_from_config_file(tmp_path):
+    """login --instance <name> resolves config from InstancesConfig."""
+    from app.config import Config, InstancesConfig
+
+    mock_cfg = MagicMock(spec=Config)
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.to_config.return_value = mock_cfg
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.main.run_login", return_value=0) as mock_run,
+    ):
+        result = _runner().invoke(
+            cli,
+            ["login", "--instance", "user1"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code == 0
+    mock_instances.to_config.assert_called_once_with("user1")
+    mock_run.assert_called_once_with(cfg=mock_cfg)
+
+
+def test_login_without_instance_flag_uses_env():
+    """login without --instance falls back to Config.from_env() (backward compat)."""
+    with patch("app.main.run_login", return_value=0) as mock_run:
+        result = _runner().invoke(cli, ["login"])
+    assert result.exit_code == 0
+    mock_run.assert_called_once_with(cfg=None)
+
+
+def test_sync_with_instance_flag_load_error_shown_as_click_error(tmp_path):
+    """Errors from InstancesConfig.load() are shown as a Click UsageError, not a traceback."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with patch("app.config.InstancesConfig.load", side_effect=ValueError("bad config")):
+        result = _runner().invoke(
+            cli,
+            ["sync", "--instance", "user1"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code != 0
+    assert "bad config" in result.output
+
+
+def test_sync_with_blank_instance_flag_exits_with_error():
+    """sync --instance '' (blank string) must error out, not silently use env vars."""
+    result = _runner().invoke(cli, ["sync", "--instance", ""])
+    assert result.exit_code != 0
+
+
+def test_login_with_blank_instance_flag_exits_with_error():
+    """login --instance '' (blank string) must error out, not silently use env vars."""
+    result = _runner().invoke(cli, ["login", "--instance", ""])
+    assert result.exit_code != 0

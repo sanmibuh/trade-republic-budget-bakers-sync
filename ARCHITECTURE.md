@@ -272,6 +272,57 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   back to `OWNER_NAME` lowercased); used by `check-session` to look up `auth_state` in `sync.db`.
 - All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
+### Multi-instance YAML config (WIP — Phase 1 of #145)
+
+> **Status:** implemented but not yet used in production. The env-var mode above remains the current
+> deployment mechanism. The YAML config will replace it once all four phases of #145 are complete.
+> Do not deprecate env vars until Phase 4 is merged.
+
+`InstancesConfig` (`app/config.py`) supports loading N sync instances from a single YAML file,
+enabling a single-container deployment without per-instance Docker services.
+
+**File format** (`instances.yml`):
+
+```yaml
+# Global shared settings
+data_dir: /app/data          # optional, default /app/data
+telegram_bot_token: "..."    # optional
+telegram_chat_id: "..."      # optional
+allow_insecure_ssl: false    # optional, default false
+
+instances:
+  - name: user1              # used as subdirectory name and instance identifier
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "..."
+    wallet_cash_account_id: "..."
+    wallet_portfolio_account_id: "..."
+    owner_name: "User1"      # optional, defaults to name.capitalize()
+    lookback_days: 7         # optional, default 7
+    dedup_ttl_days: 60       # optional, default 60
+    category_strategy: none  # optional, default none
+    labels:                  # optional
+      BANK_TRANSACTION_INCOMING: label-id-123
+
+  - name: user2
+    phone: "+34611111111"
+    pin: "5678"
+    wallet_api_key: "..."
+    wallet_cash_account_id: "..."
+    wallet_portfolio_account_id: "..."
+```
+
+**Key behaviours:**
+- Each instance gets its own `data_dir/{name}/` subdirectory (session files, `sync.db`, logs).
+- Global `telegram_*` and `allow_insecure_ssl` are inherited by all instances.
+- `InstancesConfig.to_config(name)` returns a fully populated `Config` ready for `run()`.
+- `run(cfg=None)` and `run_login(cfg=None)` accept an injected `Config`; `None` falls back to
+  `Config.from_env()` — fully backwards-compatible.
+- CLI: `python -m app sync --instance david` and `python -m app login --instance david` resolve
+  config from the file at `INSTANCES_CONFIG` env var.
+- Validation on load: missing required fields, duplicate names, and invalid `category_strategy`
+  all raise `ValueError` with a descriptive message.
+
 ### OWNER_NAME
 - `OWNER_NAME` is optional — defaults to `"Backup"` when not set.
 - Sync services (`sync-david`, `sync-eli`) set it explicitly for per-owner notifications.
