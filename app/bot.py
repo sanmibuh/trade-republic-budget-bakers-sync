@@ -882,7 +882,7 @@ class TelegramBot:
                 lines: collections.deque[str] = collections.deque()
                 total_chars = 0
                 truncated = False
-                with log_file.open(errors="replace") as fh:
+                with log_file.open(encoding="utf-8", errors="replace") as fh:
                     for line in fh:
                         if not line.startswith(today_str):
                             continue

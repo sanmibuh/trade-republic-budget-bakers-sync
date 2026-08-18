@@ -1599,6 +1599,45 @@ def test_fetch_and_send_logs_truncation_preserves_tail_drops_head(tmp_path):
     )
 
 
+def test_fetch_and_send_logs_opens_log_file_with_utf8_encoding(tmp_path):
+    """sync.log is written with UTF-8; reading it must also use UTF-8 explicitly.
+
+    Without encoding="utf-8" the open() call falls back to the locale default,
+    which can mis-decode log output on non-UTF-8 systems.
+    """
+    import datetime as dt
+    from pathlib import Path
+
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (inst.config.data_dir / "sync.log").write_text(
+        f"{today} 10:00:00 INFO sync_runner: done\n", encoding="utf-8"
+    )
+
+    open_kwargs: list[dict] = []
+    real_path_open = Path.open
+
+    def recording_open(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if self.name == "sync.log":
+            open_kwargs.append(dict(kwargs))
+        return real_path_open(self, *args, **kwargs)
+
+    with (
+        patch("pathlib.Path.open", recording_open),
+        patch.object(bot, "_send_message"),
+    ):
+        bot._fetch_and_send_logs(inst)
+
+    assert open_kwargs, "sync.log was never opened via Path.open()"
+    for kwargs in open_kwargs:
+        assert kwargs.get("encoding") == "utf-8", (
+            f"sync.log must be opened with encoding='utf-8', got {kwargs}"
+        )
+
+
 def test_fetch_and_send_logs_sends_error_on_read_exception(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
