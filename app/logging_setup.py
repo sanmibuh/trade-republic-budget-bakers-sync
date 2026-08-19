@@ -19,11 +19,25 @@ def setup_logging(log_dir: Path) -> None:
     bot) share the same log directory so that ``{DATA_DIR}/logs/sync.log``
     receives output from every in-process call without handler lifecycle
     management.
+
+    Idempotent: if a ``RotatingFileHandler`` for ``log_dir/sync.log`` is already
+    attached to the root logger, the function returns early without adding
+    duplicate handlers.
     """
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "sync.log"
 
     root = logging.getLogger()
+
+    # Guard against duplicate handlers when called more than once in the same
+    # process (e.g. during testing or if a CLI entry point calls it twice).
+    if any(
+        isinstance(h, logging.handlers.RotatingFileHandler)
+        and Path(h.baseFilename) == log_file.resolve()
+        for h in root.handlers
+    ):
+        return
+
     root.setLevel(logging.DEBUG)
 
     fmt = _make_formatter()
