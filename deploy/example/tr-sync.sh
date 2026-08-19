@@ -112,11 +112,11 @@ case "$COMMAND" in
         docker compose -f "$COMPOSE_FILE" up -d $SERVICE
         ;;
     down)
-        docker compose -f "$COMPOSE_FILE" down $SERVICE
+        docker compose -f "$COMPOSE_FILE" down
         ;;
     upgrade)
         docker compose -f "$COMPOSE_FILE" pull $SERVICE
-        docker compose -f "$COMPOSE_FILE" down $SERVICE
+        docker compose -f "$COMPOSE_FILE" down
         docker compose -f "$COMPOSE_FILE" up -d $SERVICE
         ;;
     logs)
