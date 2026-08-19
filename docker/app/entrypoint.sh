@@ -18,6 +18,8 @@
 #   per instance (python -m app sync --instance <name>) using SYNC_SCHEDULE.
 #   Optionally registers the backup job when BACKUP_SCHEDULE is also set.
 #   The MODE env var is ignored in this mode.
+#   After registering cron jobs, starts the cron daemon in the background and
+#   then starts the Telegram bot as the foreground process (PID 1).
 #   Each instance logs to its own data_dir/<name>/sync.log (handled by the app).
 #
 # CMD override: if set, run a one-shot command and exit regardless of MODE.
@@ -90,7 +92,11 @@ if [ -n "$INSTANCES_CONFIG" ]; then
     log "Crontab registered:"
     cat "$CRONTAB_FILE"
 
-    exec cron -f
+    log "Starting cron daemon in background"
+    cron
+
+    log "Starting Telegram bot"
+    exec python -m app bot
 fi
 
 # ------------------------------------------------------------------

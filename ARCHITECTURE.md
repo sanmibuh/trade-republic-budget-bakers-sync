@@ -118,11 +118,10 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `submit-code` (`python -m app submit-code <code>`) checks for `.tr_2fa_pending` before writing the code file; if
   the marker is absent (no login in progress), it exits 1 with "No active login request for this instance" so stale
   `/code` submissions are rejected cleanly.
-- Cross-container hand-off: the bot and the sync/login containers do **not** share the data volume. The `/code` bot
-  command runs `python -m app submit-code <code>` inside the target container via the Docker SDK `exec_run`;
-  `submit-code` writes the code to `data_dir/.tr_2fa_code`, which the waiting `TelegramCodeProvider` reads.
-  pytr's v2 web login is stateful within a single process, so the login flow cannot be split across processes —
-  the same process that starts the login must receive the code.
+- Cross-container hand-off: in the legacy multi-container setup the bot and the sync containers do **not** share
+  the data volume. The `/code` bot command runs `python -m app submit-code <code>` inside the target container via
+  the Docker SDK `exec_run`. In the **single-container deployment** (Phase 4 of #145) all services share the same
+  process space and data volume — the bot writes the code file directly, no Docker SDK needed.
 - On-demand renewal: `/login` (bot) → `python -m app login` → `main.run_login()` triggers the 2FA flow explicitly.
   Scheduled cron syncs that hit an expired session trigger the same flow automatically (Eli via push, David via
   `/code`).
@@ -208,14 +207,16 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 - `entrypoint.sh` and `tr-sync.sh` both use `python -m app <subcommand>` — single consistent interface.
 
 ### Scheduled daemon
-- `docker/app/entrypoint.sh`: behaviour controlled by `MODE` env var (legacy) or `INSTANCES_CONFIG` (multi-instance):
+- `docker/app/entrypoint.sh`: behaviour controlled by `INSTANCES_CONFIG` (multi-instance) or `MODE` env var (legacy):
 
-  **Multi-instance mode** (activated when `INSTANCES_CONFIG` is set — Phase 2 of #145):
+  **Multi-instance mode** (activated when `INSTANCES_CONFIG` is set — Phase 2/4 of #145):
   - Calls `python -m app list-instances` to enumerate instance names from the YAML file.
   - Registers one `SYNC_SCHEDULE` cron job per instance: `python -m app sync --instance <name>`.
   - Optionally registers `BACKUP_SCHEDULE` cron job for `python -m app backup auto` when `BACKUP_SCHEDULE` is set.
+  - Starts the cron daemon in the background (`cron`), then starts the Telegram bot as the foreground
+    process (`exec python -m app bot`). The bot is PID 1; Docker monitors its health.
   - `MODE` env var is ignored in this mode.
-  - Each instance logs to the shared `{DATA_DIR}/logs/sync.log` (all instances share one log file).
+  - All instances share one log file: `{DATA_DIR}/logs/sync.log`.
   - Requires `SYNC_SCHEDULE` to be set; exits with an error if missing.
 
   **Legacy single-instance mode** (when `INSTANCES_CONFIG` is not set — fully backwards-compatible):
@@ -272,6 +273,16 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 - `read_instance()` — standalone helper that returns the logical instance name (`INSTANCE` env var, falling
   back to `OWNER_NAME` lowercased); used by `check-session` to look up `auth_state` in `sync.db`.
 - All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
+
+### Backup config derivation
+
+`BotConfig.from_env` builds `backup_cfg` with the following priority:
+
+1. **`WALLET_API_KEY` env var set** → `BackupConfig.from_env()` (backward-compatible path, reads `DATA_DIR` too).
+2. **`WALLET_API_KEY` absent + instances YAML loaded** → `BackupConfig` is derived from the first instance's
+   `wallet_api_key`; `data_dir` is set to `instances_yaml.data_dir / "backup"`; Telegram credentials come from
+   the YAML global settings. This is the path used in the single-container deployment.
+3. **Neither** → `backup_cfg` is `None` and `/backup` commands are disabled in the bot.
 
 ### Multi-instance YAML config (#145)
 
@@ -445,14 +456,13 @@ image publish workflows.
 ## Data volume
 
 `/app/data` (mounted from host) contains:
-- `sync.db` — SQLite database with `processed_events` table (purged after 60 days) and `auth_state` table (persisted auth status per instance)
+- `{name}/sync.db` — SQLite database per instance with `processed_events` and `auth_state` tables
 - `logs/sync.log` — rotating log file shared by all services (bot, sync, backup); written to `{DATA_DIR}/logs/sync.log`
-- pytr session/cookie files (login state)
-- `.tr_2fa_pending` — transient marker created by `TelegramCodeProvider` while waiting for a code; removed on success or timeout. `submit-code` checks for this file to reject stale code submissions.
-- `.tr_2fa_code` — transient file where `submit-code` drops the authenticator code for a waiting login/sync
-  process (created and removed within the login flow)
-- `backups/monthly/` — monthly JSON snapshots (permanent)
-- `backups/yearly/` — yearly JSON snapshots (permanent)
+- `{name}/` — pytr session/cookie files per instance (login state)
+- `{name}/.tr_2fa_pending` — transient marker created by `TelegramCodeProvider` while waiting for a code
+- `{name}/.tr_2fa_code` — transient file where `submit-code` drops the authenticator code
+- `backup/backups/monthly/` — monthly JSON snapshots (permanent)
+- `backup/backups/yearly/` — yearly JSON snapshots (permanent)
 
 ---
 

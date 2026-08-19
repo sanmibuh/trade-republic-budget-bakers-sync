@@ -165,13 +165,37 @@ def test_botconfig_from_env_instances_have_config_objects(monkeypatch):
     assert cfg.instances["user1"].config.phone_number == "+34600000000"
 
 
-def test_botconfig_from_env_backup_disabled_when_wallet_key_absent(monkeypatch):
+def test_botconfig_from_env_backup_from_yaml_when_env_key_absent(monkeypatch):
+    """When WALLET_API_KEY is not set, backup_cfg is derived from the first instance in YAML."""
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
     monkeypatch.delenv("WALLET_API_KEY", raising=False)
     with _mock_instances_load():
         cfg = BotConfig.from_env()
-    assert cfg.backup_cfg is None
+    assert cfg.backup_cfg is not None
+    assert cfg.backup_cfg.wallet_api_key == "key1"
+
+
+def test_botconfig_from_env_backup_yaml_data_dir_is_backup_subdir(monkeypatch):
+    """Backup data_dir derived from YAML uses instances data_dir / 'backup'."""
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("WALLET_API_KEY", raising=False)
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert cfg.backup_cfg is not None
+    assert cfg.backup_cfg.data_dir.name == "backup"
+
+
+def test_botconfig_from_env_backup_env_key_takes_precedence_over_yaml(monkeypatch):
+    """When WALLET_API_KEY env var is set, it takes precedence over the YAML instance key."""
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("WALLET_API_KEY", "envkey")
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert cfg.backup_cfg is not None
+    assert cfg.backup_cfg.wallet_api_key == "envkey"
 
 
 def test_botconfig_from_env_backup_enabled_when_wallet_key_present(monkeypatch):
