@@ -925,6 +925,10 @@ def test_bot_command_does_not_load_instances_config_twice(tmp_path):
 
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.data_dir = tmp_path
+    mock_instances.telegram_bot_token = "testtoken"
+    mock_instances.telegram_chat_id = "123456"
+    mock_instances.allow_insecure_ssl = False
+    mock_instances.instances = []
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text("")
 

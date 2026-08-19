@@ -266,8 +266,9 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 - `Config.instance` — logical instance name used for the Telegram 2FA prompt/`/code` routing. Read from
   `INSTANCE`, defaulting to `OWNER_NAME` lowercased (e.g. `david`, `eli`), which already matches the container
   instance name, so it need not be set explicitly in compose.
-- `BotEnv.from_env()` — config for the **bot** command. Reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
-  `INSTANCES_CONFIG` (path to the instances YAML file), and `TELEGRAM_VERIFY_SSL`.
+- `BotEnv.from_env()` — reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `TELEGRAM_VERIFY_SSL` from env.
+  No longer used directly by `BotConfig.from_env` (kept for backward compatibility).
+  `INSTANCES_CONFIG` is read separately via `read_instances_config_path()` → `InstancesConfig.load()`.
 - `read_data_dir()` — standalone helper that returns the `DATA_DIR` path (default `/app/data`); used by
   `check-session` which only needs the data directory, not full credentials.
 - `read_instance()` — standalone helper that returns the logical instance name (`INSTANCE` env var, falling

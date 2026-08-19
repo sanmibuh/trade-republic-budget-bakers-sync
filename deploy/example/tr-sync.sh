@@ -62,7 +62,7 @@ fi
 
 case "$COMMAND" in
     pull)
-        docker compose -f "$COMPOSE_FILE" pull $SERVICE
+        docker compose -f "$COMPOSE_FILE" pull "$SERVICE"
         ;;
     bootstrap)
         INSTANCE="$2"
@@ -72,7 +72,7 @@ case "$COMMAND" in
         fi
         docker compose -f "$COMPOSE_FILE" run --rm -it \
             -e CMD="login --instance $INSTANCE" \
-            $SERVICE
+            "$SERVICE"
         ;;
     sync)
         INSTANCE="$2"
@@ -82,7 +82,7 @@ case "$COMMAND" in
         fi
         docker compose -f "$COMPOSE_FILE" run --rm \
             -e CMD="sync --instance $INSTANCE" \
-            $SERVICE
+            "$SERVICE"
         ;;
     login)
         INSTANCE="$2"
@@ -92,7 +92,7 @@ case "$COMMAND" in
         fi
         docker compose -f "$COMPOSE_FILE" run --rm -it \
             -e CMD="login --instance $INSTANCE" \
-            $SERVICE
+            "$SERVICE"
         ;;
     backup)
         MODE="$2"
@@ -104,26 +104,26 @@ case "$COMMAND" in
         if [ -n "$PARAM" ]; then
             docker compose -f "$COMPOSE_FILE" run --rm \
                 -e CMD="backup $MODE $PARAM" \
-                $SERVICE
+                "$SERVICE"
         else
             docker compose -f "$COMPOSE_FILE" run --rm \
                 -e CMD="backup $MODE" \
-                $SERVICE
+                "$SERVICE"
         fi
         ;;
     up)
-        docker compose -f "$COMPOSE_FILE" up -d $SERVICE
+        docker compose -f "$COMPOSE_FILE" up -d "$SERVICE"
         ;;
     down)
         docker compose -f "$COMPOSE_FILE" down
         ;;
     upgrade)
-        docker compose -f "$COMPOSE_FILE" pull $SERVICE
+        docker compose -f "$COMPOSE_FILE" pull "$SERVICE"
         docker compose -f "$COMPOSE_FILE" down
-        docker compose -f "$COMPOSE_FILE" up -d $SERVICE
+        docker compose -f "$COMPOSE_FILE" up -d "$SERVICE"
         ;;
     logs)
-        docker compose -f "$COMPOSE_FILE" logs -f $SERVICE
+        docker compose -f "$COMPOSE_FILE" logs -f "$SERVICE"
         ;;
     *)
         echo "Error: unknown command '$COMMAND'"
