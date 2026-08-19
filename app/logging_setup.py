@@ -33,7 +33,7 @@ def setup_logging(log_dir: Path) -> None:
     # process (e.g. during testing or if a CLI entry point calls it twice).
     if any(
         isinstance(h, logging.handlers.RotatingFileHandler)
-        and Path(h.baseFilename) == log_file.resolve()
+        and Path(h.baseFilename).resolve() == log_file.resolve()
         for h in root.handlers
     ):
         return
