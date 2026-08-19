@@ -41,6 +41,7 @@ deploy/
   example/            # example config files (no secrets)
     docker-compose.yml
     instances.yml.example
+    tr-sync.sh
   nas/
     current/          # next version — rename to vXXX after deploy
       docker-compose.yml
@@ -50,7 +51,7 @@ deploy/
       ...
 ```
 
-`current/` is always the work in progress. After deploying, rename it with the release tag (`v300`, `v310`, etc.) as a read-only snapshot.
+`current/` is always the work in progress. After deploying, rename it with the release tag (`v300`, `v710`, etc.) as a read-only snapshot.
 
 ---
 
@@ -58,7 +59,7 @@ deploy/
 
 ### 1. Copy files to the NAS
 
-Copy `docker-compose.yml` and `tr-sync.sh` from `deploy/example/` to a folder on the NAS
+Copy `docker-compose.yml`, `tr-sync.sh`, and `instances.yml.example` from `deploy/example/` to a folder on the NAS
 (e.g. `/share/docker/tr-sync/`).
 
 ### 2. Create `instances.yml`
@@ -85,8 +86,8 @@ mkdir -p data
 ### 4. Bootstrap — first-time interactive 2FA login
 
 ```sh
-./tr-sync.sh bootstrap david
-./tr-sync.sh bootstrap eli
+./tr-sync.sh bootstrap user1
+./tr-sync.sh bootstrap user2
 ```
 
 Approve the push notification in the Trade Republic app (or enter the authenticator code).
@@ -135,7 +136,7 @@ Then copy the new version contents into a fresh `current/` when preparing the ne
 
 ```sh
 ./tr-sync.sh logs              # follow container logs
-./tr-sync.sh sync david        # force a manual one-shot sync for instance "david"
+./tr-sync.sh sync user1        # force a manual one-shot sync for instance "user1"
 ./tr-sync.sh down              # stop the container
 ./tr-sync.sh up                # start the container
 ```
@@ -162,12 +163,12 @@ Trade Republic sessions expire on a hard 24h cap, so a scheduled sync will event
 2. The bot replies asking for the authenticator code. Reply with the 6-digit code as a plain message.
    Push-approval accounts (no authenticator) just approve in the app — no code needed.
 3. If multiple logins are pending simultaneously (unlikely), the bot will ask you to disambiguate.
-   In that case use the explicit form: `/code <instance> <code>` — e.g. `/code david 123456`.
+   In that case use the explicit form: `/code <instance> <code>` — e.g. `/code user1 123456`.
 
 **From the NAS (interactive bootstrap):**
 
 ```sh
-./tr-sync.sh bootstrap david   # renew 2FA login for instance "david"
+./tr-sync.sh bootstrap user1   # renew 2FA login for instance "user1"
 ```
 
 ---

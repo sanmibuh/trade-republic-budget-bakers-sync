@@ -111,6 +111,11 @@ def read_data_dir() -> Path:
     return Path(os.getenv("DATA_DIR", _DEFAULT_DATA_DIR))
 
 
+def read_telegram_verify_ssl() -> bool:
+    """Return the TELEGRAM_VERIFY_SSL setting (default True)."""
+    return _bool_env("TELEGRAM_VERIFY_SSL", default=True)
+
+
 def read_instance() -> str:
     """Return the logical instance name for this container.
 

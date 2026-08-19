@@ -936,7 +936,6 @@ def test_bot_command_does_not_load_instances_config_twice(tmp_path):
 
     with (
         patch("app.config.InstancesConfig.load", side_effect=counting_load),
-        patch("app.bot.BotEnv.from_env"),
         patch("app.bot.TelegramBot") as mock_telegram,
         patch("app.__main__.setup_logging"),
     ):

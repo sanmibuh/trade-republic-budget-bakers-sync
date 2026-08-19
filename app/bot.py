@@ -56,11 +56,11 @@ from app.bot_keyboards import (
 )
 from app.config import (
     BackupConfig,
-    BotEnv,
     Config,
     InstancesConfig,
     has_valid_session,
     read_instances_config_path,
+    read_telegram_verify_ssl,
 )
 from app.main import (
     run as _main_run,
@@ -113,11 +113,25 @@ class BotConfig:
 
     @classmethod
     def from_env(cls, instances_yaml: InstancesConfig | None = None) -> BotConfig:
-        env = BotEnv.from_env()
-
         if instances_yaml is None:
             path = read_instances_config_path()
             instances_yaml = InstancesConfig.load(path)
+
+        # Telegram credentials: InstancesConfig.load already consolidates YAML values
+        # with env-var fallbacks (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID), so
+        # instances_yaml.telegram_bot_token is the resolved value from either source.
+        bot_token = instances_yaml.telegram_bot_token
+        chat_id = instances_yaml.telegram_chat_id
+        if not bot_token:
+            raise ValueError(
+                "Missing required credential TELEGRAM_BOT_TOKEN "
+                "(set in instances.yml or as an environment variable)"
+            )
+        if not chat_id:
+            raise ValueError(
+                "Missing required credential TELEGRAM_CHAT_ID "
+                "(set in instances.yml or as an environment variable)"
+            )
 
         instances: dict[str, InstanceConfig] = {}
         for inst in instances_yaml.instances:
@@ -140,11 +154,11 @@ class BotConfig:
             )
 
         return cls(
-            bot_token=env.bot_token,
-            chat_id=env.chat_id,
+            bot_token=bot_token,
+            chat_id=chat_id,
             instances=instances,
             backup_cfg=backup_cfg,
-            telegram_verify_ssl=env.telegram_verify_ssl,
+            telegram_verify_ssl=read_telegram_verify_ssl(),
             log_dir=instances_yaml.data_dir / "logs",
             allow_insecure_ssl=instances_yaml.allow_insecure_ssl,
         )

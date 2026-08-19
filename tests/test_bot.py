@@ -90,8 +90,6 @@ def _bot(
 # ---------------------------------------------------------------------------
 
 _VALID_ENV = {
-    "TELEGRAM_BOT_TOKEN": "mytoken",
-    "TELEGRAM_CHAT_ID": "123",
     "INSTANCES_CONFIG": "/fake/instances.yml",
 }
 
@@ -111,6 +109,28 @@ instances:
     wallet_api_key: "key2"
     wallet_cash_account_id: "cash2"
     wallet_portfolio_account_id: "portfolio2"
+"""
+
+_YAML_NO_TOKEN = """
+telegram_chat_id: "123"
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key1"
+    wallet_cash_account_id: "cash1"
+    wallet_portfolio_account_id: "portfolio1"
+"""
+
+_YAML_NO_CHAT_ID = """
+telegram_bot_token: "mytoken"
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key1"
+    wallet_cash_account_id: "cash1"
+    wallet_portfolio_account_id: "portfolio1"
 """
 
 
@@ -211,17 +231,34 @@ def test_botconfig_from_env_backup_enabled_when_wallet_key_present(monkeypatch):
 def test_botconfig_from_env_missing_token(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN")
-    with pytest.raises(ValueError, match="TELEGRAM_BOT_TOKEN"):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    with (
+        _mock_instances_load(_YAML_NO_TOKEN),
+        pytest.raises(ValueError, match="TELEGRAM_BOT_TOKEN"),
+    ):
         BotConfig.from_env()
 
 
 def test_botconfig_from_env_missing_chat_id(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID")
-    with pytest.raises(ValueError, match="TELEGRAM_CHAT_ID"):
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    with (
+        _mock_instances_load(_YAML_NO_CHAT_ID),
+        pytest.raises(ValueError, match="TELEGRAM_CHAT_ID"),
+    ):
         BotConfig.from_env()
+
+
+def test_botconfig_from_env_token_from_yaml_only(monkeypatch):
+    """TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID can come from instances.yml without env vars."""
+    monkeypatch.setenv("INSTANCES_CONFIG", "/fake/instances.yml")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert cfg.bot_token == "mytoken"
+    assert cfg.chat_id == "123"
 
 
 def test_botconfig_from_env_invalid_allow_insecure_ssl_raises(monkeypatch):
@@ -263,7 +300,7 @@ def test_botconfig_telegram_verify_ssl_invalid(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
     monkeypatch.setenv("TELEGRAM_VERIFY_SSL", "maybe")
-    with pytest.raises(ValueError, match="TELEGRAM_VERIFY_SSL"):
+    with _mock_instances_load(), pytest.raises(ValueError, match="TELEGRAM_VERIFY_SSL"):
         BotConfig.from_env()
 
 

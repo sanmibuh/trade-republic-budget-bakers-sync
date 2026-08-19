@@ -20,7 +20,7 @@
 #   The MODE env var is ignored in this mode.
 #   After registering cron jobs, starts the cron daemon in the background and
 #   then starts the Telegram bot as the foreground process (PID 1).
-#   Each instance logs to its own data_dir/<name>/sync.log (handled by the app).
+#   All instances log to the shared {DATA_DIR}/logs/sync.log file.
 #
 # CMD override: if set, run a one-shot command and exit regardless of MODE.
 #   CMD="sync"
