@@ -141,17 +141,18 @@ class BotConfig:
                 config=full_cfg,
             )
 
-        backup_cfg: BackupConfig | None = BackupConfig.from_env_optional()
-        if backup_cfg is None and instances_yaml.instances:
-            first = instances_yaml.instances[0]
-            backup_cfg = BackupConfig(
-                owner_name="Backup",
-                wallet_api_key=first.wallet_api_key,
-                telegram_bot_token=instances_yaml.telegram_bot_token,
-                telegram_chat_id=instances_yaml.telegram_chat_id,
-                data_dir=instances_yaml.data_dir / "backup",
-                allow_insecure_ssl=instances_yaml.allow_insecure_ssl,
-            )
+        # Always derive backup_cfg from instances_yaml so that Telegram credentials,
+        # data_dir, and allow_insecure_ssl are consistent with the sync instances.
+        # wallet_api_key uses WALLET_API_KEY env var when set (backward-compat),
+        # otherwise falls back to the first instance's key (single-container path).
+        env_backup = BackupConfig.from_env_optional()
+        env_wallet_key = env_backup.wallet_api_key if env_backup else None
+        backup_cfg = BackupConfig.from_instances_yaml(
+            instances_yaml, wallet_api_key=env_wallet_key
+        )
+        if backup_cfg is None:
+            # No instances in YAML and no env key — backup disabled.
+            backup_cfg = env_backup
 
         return cls(
             bot_token=bot_token,

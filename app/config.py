@@ -225,6 +225,35 @@ class BackupConfig:
             return None
         return cls.from_env()
 
+    @classmethod
+    def from_instances_yaml(
+        cls,
+        instances_yaml: InstancesConfig,
+        wallet_api_key: str | None = None,
+    ) -> BackupConfig | None:
+        """Build a :class:`BackupConfig` from an :class:`InstancesConfig`.
+
+        Telegram credentials, ``data_dir``, and ``allow_insecure_ssl`` are always
+        taken from *instances_yaml* so that the backup service is consistent with
+        the sync instances in the single-container deployment.
+
+        ``wallet_api_key`` overrides the key from the first instance (use this to
+        propagate ``WALLET_API_KEY`` from the environment when it is set).
+
+        Returns ``None`` when *instances_yaml* has no instances.
+        """
+        if not instances_yaml.instances:
+            return None
+        first = instances_yaml.instances[0]
+        return cls(
+            owner_name="Backup",
+            wallet_api_key=wallet_api_key or first.wallet_api_key,
+            telegram_bot_token=instances_yaml.telegram_bot_token,
+            telegram_chat_id=instances_yaml.telegram_chat_id,
+            data_dir=instances_yaml.data_dir / "backup",
+            allow_insecure_ssl=instances_yaml.allow_insecure_ssl,
+        )
+
 
 @dataclass(frozen=True)
 class BotEnv:

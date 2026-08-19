@@ -218,6 +218,22 @@ def test_botconfig_from_env_backup_env_key_takes_precedence_over_yaml(monkeypatc
     assert cfg.backup_cfg.wallet_api_key == "envkey"
 
 
+def test_botconfig_from_env_backup_uses_yaml_telegram_when_env_wallet_key_set(
+    monkeypatch,
+):
+    """Even when WALLET_API_KEY is set in env, Telegram creds come from instances YAML."""
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("WALLET_API_KEY", "envkey")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert cfg.backup_cfg is not None
+    assert cfg.backup_cfg.telegram_bot_token == "mytoken"
+    assert cfg.backup_cfg.telegram_chat_id == "123"
+
+
 def test_botconfig_from_env_backup_enabled_when_wallet_key_present(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)

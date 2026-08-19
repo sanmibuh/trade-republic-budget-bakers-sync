@@ -228,12 +228,29 @@ def backup(mode: str, param: str | None) -> None:
         run_monthly,
         run_yearly,
     )
-    from app.config import BackupConfig
+    from app.config import BackupConfig, InstancesConfig, read_instances_config_path
     from app.http_client import configure
     from app.notifier import Notifier
     from app.wallet_client import WalletClient
 
-    cfg = BackupConfig.from_env()
+    # Build BackupConfig: prefer env (backward-compat); fall back to InstancesConfig
+    # YAML when WALLET_API_KEY is absent (single-container mode).
+    env_backup = BackupConfig.from_env_optional()
+    env_wallet_key = env_backup.wallet_api_key if env_backup else None
+    cfg: BackupConfig | None = None
+    try:
+        instances_yaml = InstancesConfig.load(read_instances_config_path())
+        cfg = BackupConfig.from_instances_yaml(
+            instances_yaml, wallet_api_key=env_wallet_key
+        )
+    except (ValueError, OSError):
+        cfg = env_backup
+    if cfg is None:
+        cfg = env_backup
+    if cfg is None:
+        raise click.UsageError(
+            "Missing WALLET_API_KEY: set it in instances.yml or as an environment variable"
+        )
     setup_logging(cfg.data_dir / "logs")
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     client = WalletClient(api_key=cfg.wallet_api_key)
