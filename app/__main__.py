@@ -337,7 +337,10 @@ def bot() -> None:
     except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
     setup_logging(instances_yaml.data_dir / "logs")
-    run()
+    try:
+        run()
+    except (ValueError, OSError) as exc:
+        raise click.UsageError(str(exc)) from exc
 
 
 if __name__ == "__main__":  # pragma: no cover

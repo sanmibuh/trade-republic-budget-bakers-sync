@@ -668,6 +668,29 @@ def test_bot_invalid_instances_config_shows_clean_error(tmp_path):
     assert "Traceback" not in result.output
 
 
+def test_bot_run_config_error_shows_clean_error(tmp_path):
+    """ValueError raised inside bot.run() (e.g. second BotConfig.from_env load) must
+    surface as a clean UsageError, not a raw traceback."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    from app.config import InstancesConfig
+
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.data_dir = tmp_path
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.__main__.setup_logging"),
+        patch("app.bot.run", side_effect=ValueError("bad env var in second load")),
+    ):
+        result = _runner().invoke(cli, ["bot"], env={"INSTANCES_CONFIG": str(cfg_file)})
+
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "bad env var" in result.output
+
+
 def test_sync_without_instance_flag_uses_env(monkeypatch):
     """sync without --instance falls back to Config.from_env() (backward compat)."""
     from unittest.mock import ANY
