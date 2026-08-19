@@ -1,0 +1,18 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 335
+app/bot.py
+  h_97a91c9e567f87 493-494,496-504
+tests/test_bot.py
+  h_97a91c9e567f87 1475-1501
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "377106071c99edadfb163762b8e8e98d1a87c556",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
