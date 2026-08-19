@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 
 import click
 
-from app.config import read_data_dir
 from app.logging_setup import setup_logging
 
 if TYPE_CHECKING:
@@ -68,8 +67,13 @@ def sync(instance: str | None) -> None:
     from app.http_client import configure
     from app.main import run
 
-    setup_logging(read_data_dir() / "logs")
-    cfg = _resolve_instance_cfg(instance) if instance is not None else Config.from_env()
+    if instance is not None:
+        cfg = _resolve_instance_cfg(instance)
+        log_dir = cfg.data_dir.parent / "logs"
+    else:
+        cfg = Config.from_env()
+        log_dir = cfg.data_dir / "logs"
+    setup_logging(log_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run(cfg=cfg))
 
@@ -92,8 +96,13 @@ def login(instance: str | None) -> None:
     from app.http_client import configure
     from app.main import run_login
 
-    setup_logging(read_data_dir() / "logs")
-    cfg = _resolve_instance_cfg(instance) if instance is not None else Config.from_env()
+    if instance is not None:
+        cfg = _resolve_instance_cfg(instance)
+        log_dir = cfg.data_dir.parent / "logs"
+    else:
+        cfg = Config.from_env()
+        log_dir = cfg.data_dir / "logs"
+    setup_logging(log_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run_login(cfg=cfg))
 
@@ -270,8 +279,8 @@ def resync(date: str) -> None:
     from app.http_client import configure
     from app.main import run_resync
 
-    setup_logging(read_data_dir() / "logs")
     cfg = Config.from_env()
+    setup_logging(cfg.data_dir / "logs")
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run_resync(date, cfg=cfg))
 
@@ -321,8 +330,10 @@ def bot() -> None:
       /backup [monthly|yearly] [period]
     """
     from app.bot import run
+    from app.config import InstancesConfig, read_instances_config_path
 
-    setup_logging(read_data_dir() / "logs")
+    instances_yaml = InstancesConfig.load(read_instances_config_path())
+    setup_logging(instances_yaml.data_dir / "logs")
     run()
 
 

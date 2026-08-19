@@ -60,7 +60,6 @@ from app.config import (
     Config,
     InstancesConfig,
     has_valid_session,
-    read_data_dir,
     read_instances_config_path,
 )
 from app.main import (
@@ -135,7 +134,7 @@ class BotConfig:
             instances=instances,
             backup_cfg=backup_cfg,
             telegram_verify_ssl=env.telegram_verify_ssl,
-            log_dir=read_data_dir() / "logs",
+            log_dir=instances_yaml.data_dir / "logs",
             allow_insecure_ssl=instances_yaml.allow_insecure_ssl,
         )
 
