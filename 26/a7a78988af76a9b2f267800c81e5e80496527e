@@ -1,0 +1,24 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 121-124,210,212,216-217,219,277-286,459,461-465
+app/bot.py
+  h_97a91c9e567f87 131-140
+deploy/DEPLOY.md
+  h_97a91c9e567f87 47,61-62,64,66,69,72,74-79,82,85,88-89,92-95,98,113-114,121,137-140,170,177,179-182
+deploy/example/docker-compose.yml
+  h_97a91c9e567f87 4-6,8-10,13,17-20,22,24,26-27
+docker/app/entrypoint.sh
+  h_97a91c9e567f87 21-22,95-99
+tests/test_bot.py
+  h_97a91c9e567f87 168-169,175-198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "26a7a78988af76a9b2f267800c81e5e80496527e",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
