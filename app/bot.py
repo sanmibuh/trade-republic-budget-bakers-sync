@@ -125,12 +125,12 @@ class BotConfig:
         if not bot_token:
             raise ValueError(
                 "Missing required credential TELEGRAM_BOT_TOKEN "
-                "(set in instances.yml or as an environment variable)"
+                "(set in the instances config file or as an environment variable)"
             )
         if not chat_id:
             raise ValueError(
                 "Missing required credential TELEGRAM_CHAT_ID "
-                "(set in instances.yml or as an environment variable)"
+                "(set in the instances config file or as an environment variable)"
             )
 
         instances: dict[str, InstanceConfig] = {}

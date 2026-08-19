@@ -20,7 +20,8 @@ services:
       # Cron schedule for automatic backup
       BACKUP_SCHEDULE: "0 3 * * *"
       TZ: "Europe/Berlin"
-      # ALLOW_INSECURE_SSL: "true"  # Uncomment only if SSL verification fails in your environment
+      # Note: allow_insecure_ssl must be set in instances.yml (not here as an env var),
+      # since in multi-instance mode it is read from the YAML config by InstancesConfig.load.
     volumes:
       # Instances YAML — contains all credentials for sync, bot, and backup (keep secret, never commit)
       - ./instances.yml:/app/config/instances.yml:ro
