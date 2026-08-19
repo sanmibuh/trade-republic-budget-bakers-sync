@@ -297,7 +297,7 @@ class TelegramBot:
                 "command": "login",
                 "description": "Renew Trade Republic 2FA session (choose instance)",
             },
-            {"command": "logs", "description": "Show today's logs for an instance"},
+            {"command": "logs", "description": "Show today's shared sync log"},
             {
                 "command": "status",
                 "description": "Show instances and backup service availability",
@@ -528,7 +528,7 @@ class TelegramBot:
             "/sync — Force Trade Republic sync \\(choose instance\\)",
             "/resync `[YYYY\\-MM\\-DD]` — Force re\\-sync of a specific day, bypassing dedup",
             "/login — Renew Trade Republic 2FA session \\(choose instance\\)",
-            "/logs — Show today's logs for an instance",
+            "/logs — Show today's shared sync log",
             "/code `<instance> <code>` — Submit an authenticator code \\(or send the 6\\-digit code as a plain message\\)",
         ]
         if self._cfg.backup_cfg:

@@ -325,14 +325,17 @@ def bot() -> None:
       /sync              (shows an inline keyboard to pick the instance)
       /login             (shows an inline keyboard to pick the instance)
       /resync [YYYY-MM-DD]
-      /logs              (shows today's log lines for an instance)
+      /logs              (shows today's shared sync log)
       /code <instance> <code>  (or send the 6-digit code as a plain message)
       /backup [monthly|yearly] [period]
     """
     from app.bot import run
     from app.config import InstancesConfig, read_instances_config_path
 
-    instances_yaml = InstancesConfig.load(read_instances_config_path())
+    try:
+        instances_yaml = InstancesConfig.load(read_instances_config_path())
+    except (ValueError, OSError) as exc:
+        raise click.UsageError(str(exc)) from exc
     setup_logging(instances_yaml.data_dir / "logs")
     run()
 

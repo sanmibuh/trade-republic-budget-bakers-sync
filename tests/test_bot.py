@@ -294,6 +294,18 @@ def test_register_commands_excludes_backup_when_not_configured(tmp_path):
     assert "sync" in cmd_names
 
 
+def test_register_commands_logs_description_does_not_mention_instance(tmp_path):
+    """The registered /logs command description must reflect the shared log, not an instance."""
+    bot = _bot(tmp_path=tmp_path)
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+        bot._register_commands()
+    commands = mock_post.call_args.kwargs["json"]["commands"]
+    logs_cmd = next(c for c in commands if c["command"] == "logs")
+    assert "instance" not in logs_cmd["description"].lower()
+
+
 def test_register_commands_does_not_raise_on_failure(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     with patch("app.bot.requests.post", side_effect=requests.RequestException("fail")):
@@ -416,6 +428,18 @@ def test_cmd_help_excludes_backup_when_not_configured(tmp_path):
     msg = mock_send.call_args.args[0]
     assert "sync" in msg.lower()
     assert "/backup" not in msg
+
+
+def test_cmd_help_logs_line_does_not_mention_instance(tmp_path):
+    """/help output for /logs must not claim it shows logs 'for an instance'."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_help([])
+    msg = mock_send.call_args.args[0]
+    # Find the /logs line and confirm it doesn't say "for an instance"
+    logs_line = next((ln for ln in msg.splitlines() if "/logs" in ln), None)
+    assert logs_line is not None
+    assert "instance" not in logs_line.lower()
 
 
 # ---------------------------------------------------------------------------

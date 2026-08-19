@@ -650,6 +650,24 @@ def test_bot_command_uses_yaml_data_dir_for_logging(tmp_path):
     mock_setup.assert_called_once_with(yaml_root / "logs")
 
 
+def test_bot_missing_instances_config_shows_clean_error():
+    """bot without INSTANCES_CONFIG env var must show a clean UsageError, not a traceback."""
+    result = _runner().invoke(cli, ["bot"], env={"INSTANCES_CONFIG": ""})
+    assert result.exit_code != 0
+    # Must not produce a raw exception traceback
+    assert "Traceback" not in result.output
+    assert "Error" in result.output or result.exit_code == 2
+
+
+def test_bot_invalid_instances_config_shows_clean_error(tmp_path):
+    """bot with a broken INSTANCES_CONFIG YAML must show a clean UsageError."""
+    bad_yaml = tmp_path / "bad.yml"
+    bad_yaml.write_text(": invalid: yaml: [")
+    result = _runner().invoke(cli, ["bot"], env={"INSTANCES_CONFIG": str(bad_yaml)})
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+
+
 def test_sync_without_instance_flag_uses_env(monkeypatch):
     """sync without --instance falls back to Config.from_env() (backward compat)."""
     from unittest.mock import ANY
