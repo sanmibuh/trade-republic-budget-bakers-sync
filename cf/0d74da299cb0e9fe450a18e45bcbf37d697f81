@@ -1,0 +1,19 @@
+tests/test_cli.py
+  s_952d040fa893cd::t_dea9480103f905 671-693
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "cf0d74da299cb0e9fe450a18e45bcbf37d697f81",
+  "prompts": {},
+  "sessions": {
+    "s_952d040fa893cd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_feaf30dcdffePFsUe3B3p0veke",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
