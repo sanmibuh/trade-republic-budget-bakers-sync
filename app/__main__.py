@@ -64,10 +64,13 @@ def cli() -> None:
 )
 def sync(instance: str | None) -> None:
     """Run a one-shot Trade Republic → Wallet sync."""
+    from app.config import Config
+    from app.http_client import configure
     from app.main import run
 
     setup_logging(read_data_dir() / "logs")
-    cfg = _resolve_instance_cfg(instance) if instance is not None else None
+    cfg = _resolve_instance_cfg(instance) if instance is not None else Config.from_env()
+    configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run(cfg=cfg))
 
 
@@ -85,10 +88,13 @@ def login(instance: str | None) -> None:
     For authenticator accounts the code is requested via Telegram (reply with
     /code <instance> <code>); for push accounts, approve the request in the app.
     """
+    from app.config import Config
+    from app.http_client import configure
     from app.main import run_login
 
     setup_logging(read_data_dir() / "logs")
-    cfg = _resolve_instance_cfg(instance) if instance is not None else None
+    cfg = _resolve_instance_cfg(instance) if instance is not None else Config.from_env()
+    configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run_login(cfg=cfg))
 
 
@@ -260,10 +266,14 @@ def resync(date: str) -> None:
     Example:
       python -m app resync 2026-07-15
     """
+    from app.config import Config
+    from app.http_client import configure
     from app.main import run_resync
 
     setup_logging(read_data_dir() / "logs")
-    sys.exit(run_resync(date))
+    cfg = Config.from_env()
+    configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
+    sys.exit(run_resync(date, cfg=cfg))
 
 
 @cli.command(name="list-instances")

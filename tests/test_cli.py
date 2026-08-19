@@ -43,10 +43,14 @@ def test_backup_help():
 
 
 def test_sync_calls_run():
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
     with (
         patch("app.main.run", return_value=0) as mock_run,
         patch("app.__main__.setup_logging"),
         patch("app.__main__.read_data_dir"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
     ):
         result = _runner().invoke(cli, ["sync"])
     assert result.exit_code == 0
@@ -54,10 +58,14 @@ def test_sync_calls_run():
 
 
 def test_sync_exits_with_run_return_code():
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
     with (
         patch("app.main.run", return_value=1),
         patch("app.__main__.setup_logging"),
         patch("app.__main__.read_data_dir"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
     ):
         result = _runner().invoke(cli, ["sync"])
     assert result.exit_code == 1
@@ -210,10 +218,14 @@ def test_login_help():
 
 
 def test_login_calls_run_login():
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
     with (
         patch("app.main.run_login", return_value=0) as mock_run,
         patch("app.__main__.setup_logging"),
         patch("app.__main__.read_data_dir"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
     ):
         result = _runner().invoke(cli, ["login"])
     assert result.exit_code == 0
@@ -221,10 +233,14 @@ def test_login_calls_run_login():
 
 
 def test_login_exits_with_return_code():
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
     with (
         patch("app.main.run_login", return_value=1),
         patch("app.__main__.setup_logging"),
         patch("app.__main__.read_data_dir"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
     ):
         result = _runner().invoke(cli, ["login"])
     assert result.exit_code == 1
@@ -380,21 +396,31 @@ def test_resync_help():
 
 
 def test_resync_calls_run_resync_with_date():
+    from unittest.mock import ANY
+
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
     with (
         patch("app.main.run_resync", return_value=0) as mock_run,
         patch("app.__main__.setup_logging"),
         patch("app.__main__.read_data_dir"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
     ):
         result = _runner().invoke(cli, ["resync", "2026-07-15"])
     assert result.exit_code == 0
-    mock_run.assert_called_once_with("2026-07-15")
+    mock_run.assert_called_once_with("2026-07-15", cfg=ANY)
 
 
 def test_resync_exits_with_run_resync_return_code():
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
     with (
         patch("app.main.run_resync", return_value=1),
         patch("app.__main__.setup_logging"),
         patch("app.__main__.read_data_dir"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
     ):
         result = _runner().invoke(cli, ["resync", "2026-07-15"])
     assert result.exit_code == 1
@@ -552,14 +578,20 @@ def test_sync_with_instance_flag_loads_from_config_file(tmp_path):
 
 def test_sync_without_instance_flag_uses_env(monkeypatch):
     """sync without --instance falls back to Config.from_env() (backward compat)."""
+    from unittest.mock import ANY
+
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
     with (
         patch("app.main.run", return_value=0) as mock_run,
         patch("app.__main__.setup_logging"),
+        patch("app.__main__.read_data_dir"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
     ):
         result = _runner().invoke(cli, ["sync"])
     assert result.exit_code == 0
-    # run() called with no cfg argument (None default)
-    mock_run.assert_called_once_with(cfg=None)
+    mock_run.assert_called_once_with(cfg=ANY)
 
 
 def test_sync_with_instance_flag_missing_instances_config_env(tmp_path):
@@ -604,13 +636,20 @@ def test_login_with_instance_flag_loads_from_config_file(tmp_path):
 
 def test_login_without_instance_flag_uses_env():
     """login without --instance falls back to Config.from_env() (backward compat)."""
+    from unittest.mock import ANY
+
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
     with (
         patch("app.main.run_login", return_value=0) as mock_run,
         patch("app.__main__.setup_logging"),
+        patch("app.__main__.read_data_dir"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
     ):
         result = _runner().invoke(cli, ["login"])
     assert result.exit_code == 0
-    mock_run.assert_called_once_with(cfg=None)
+    mock_run.assert_called_once_with(cfg=ANY)
 
 
 def test_sync_with_instance_flag_load_error_shown_as_click_error(tmp_path):

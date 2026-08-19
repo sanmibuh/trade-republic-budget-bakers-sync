@@ -64,7 +64,6 @@ from app.config import (
     read_instances_config_path,
 )
 from app.main import (
-    _RUN_LOCK,
     run as _main_run,
     run_login as _main_run_login,
     run_resync as _main_run_resync,
@@ -111,6 +110,7 @@ class BotConfig:
     backup_cfg: BackupConfig | None = None  # None means backup commands are disabled
     telegram_verify_ssl: bool = True
     log_dir: Path = field(default_factory=lambda: Path("/app/data/logs"))
+    allow_insecure_ssl: bool = False
 
     @classmethod
     def from_env(cls) -> BotConfig:
@@ -136,6 +136,7 @@ class BotConfig:
             backup_cfg=backup_cfg,
             telegram_verify_ssl=env.telegram_verify_ssl,
             log_dir=read_data_dir() / "logs",
+            allow_insecure_ssl=instances_yaml.allow_insecure_ssl,
         )
 
 
@@ -250,6 +251,9 @@ class TelegramBot:
         # Instances that have an active login flow waiting for a 2FA code.
         # Maps instance key (lower-case name) → InstanceConfig.
         self._pending_login: dict[str, InstanceConfig] = {}
+        # Configure SSL once at startup — all in-process sync/login/resync/backup
+        # calls share this policy without racing on a per-run configure() call.
+        http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
         if not cfg.telegram_verify_ssl:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -676,8 +680,6 @@ class TelegramBot:
         if cfg is None:
             return
         cfg.data_dir.mkdir(parents=True, exist_ok=True)
-        with _RUN_LOCK:
-            http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
         client = WalletClient(api_key=cfg.wallet_api_key)
         notifier = Notifier(
             cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name

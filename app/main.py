@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import logging
-import threading
 from datetime import UTC, date, datetime, timedelta
 
-from app import http_client
 from app.config import Config
 from app.notifier import Notifier
 from app.persistence import EventRepository
@@ -21,10 +19,6 @@ from app.wallet_client import WalletClient
 
 log = logging.getLogger(__name__)
 
-# Serializes calls to http_client.configure() — protects global SSL state from
-# concurrent bot-triggered operations overwriting each other's policy.
-_RUN_LOCK = threading.Lock()
-
 
 # ---------------------------------------------------------------------------
 # Bootstrap helpers (shared by run() and run_login())
@@ -34,16 +28,17 @@ _RUN_LOCK = threading.Lock()
 def _prepare(cfg: Config) -> Notifier:
     """Shared bootstrap for the sync/login entry points.
 
-    Ensures the data dir exists, configures the SSL circuit-breaker under
-    ``_RUN_LOCK`` (global SSL state), and returns a ready-to-use ``Notifier``.
+    Ensures the data dir exists and returns a ready-to-use ``Notifier``.
+
+    SSL is configured once at process startup by each CLI entry point or by
+    ``TelegramBot.__init__()`` — not here — so repeated in-process calls from
+    the bot share a single, stable SSL policy without racing.
 
     Logging is configured once at process startup by each CLI entry point —
     not here — so repeated in-process calls (e.g. from the bot) reuse the
     shared log file without any handler lifecycle management.
     """
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
-    with _RUN_LOCK:
-        http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     return Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)
 
 

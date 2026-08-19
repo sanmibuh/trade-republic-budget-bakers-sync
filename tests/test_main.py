@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -322,7 +321,6 @@ def test_run_login_connects_and_returns_zero(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.http_client.configure"),
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.sync_runner.TRClient") as MockTR,
         patch("app.sync_runner._build_code_provider", return_value=MagicMock()),
@@ -348,7 +346,6 @@ def test_run_login_session_expired_notifies_and_exits(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.http_client.configure"),
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.sync_runner.TRClient") as MockTR,
         patch("app.sync_runner._build_code_provider", return_value=None),
@@ -373,7 +370,6 @@ def test_run_login_login_failed_notifies_and_exits(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.http_client.configure"),
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.sync_runner.TRClient") as MockTR,
         patch("app.sync_runner._build_code_provider", return_value=MagicMock()),
@@ -397,7 +393,6 @@ def test_run_login_unexpected_error_notifies_and_exits(tmp_path):
 
     with (
         patch("app.main.Config.from_env") as mock_cfg_cls,
-        patch("app.main.http_client.configure"),
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.sync_runner.TRClient") as MockTR,
         patch("app.sync_runner._build_code_provider", return_value=MagicMock()),
@@ -426,19 +421,14 @@ def test_prepare_creates_data_dir_and_returns_notifier(tmp_path):
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path / "data"
-    cfg.allow_insecure_ssl = True
     cfg.telegram_bot_token = "tok"
     cfg.telegram_chat_id = "chat"
     cfg.owner_name = "David"
 
-    with (
-        patch("app.main.http_client.configure") as mock_configure,
-        patch("app.main.Notifier") as mock_notifier_cls,
-    ):
+    with patch("app.main.Notifier") as mock_notifier_cls:
         notifier = _prepare(cfg)
 
     assert cfg.data_dir.is_dir()
-    mock_configure.assert_called_once_with(allow_insecure_ssl=True)
     mock_notifier_cls.assert_called_once_with("tok", "chat", "David")
     assert notifier is mock_notifier_cls.return_value
 
@@ -543,52 +533,3 @@ def test_run_resync_rejects_datetime_string():
     result = run_resync("2026-07-15T12:00:00")
 
     assert result == 1
-
-
-# ---------------------------------------------------------------------------
-# _prepare — http_client.configure() must be inside _RUN_LOCK
-# ---------------------------------------------------------------------------
-
-
-def test_prepare_http_configure_is_inside_lock(tmp_path):
-    """http_client.configure() must be called while _RUN_LOCK is held.
-
-    If configure() runs before the lock is acquired, a second concurrent call
-    could overwrite the SSL policy of the first call.
-    This test holds the lock externally, starts _prepare in a thread, and
-    asserts that configure() is NOT called until the lock is released.
-    """
-    import time
-    from unittest.mock import patch
-
-    from app.main import _RUN_LOCK, _prepare
-
-    configure_called = threading.Event()
-
-    cfg = MagicMock()
-    cfg.data_dir = tmp_path / "inst"
-    cfg.allow_insecure_ssl = False
-    cfg.telegram_bot_token = None
-    cfg.telegram_chat_id = None
-    cfg.owner_name = "test"
-
-    def _run() -> None:
-        with (
-            patch("app.main.http_client") as mock_http,
-            patch("app.main.Notifier"),
-        ):
-            mock_http.configure.side_effect = lambda **_: configure_called.set()
-            _prepare(cfg)
-
-    with _RUN_LOCK:
-        t = threading.Thread(target=_run)
-        t.start()
-        time.sleep(
-            0.05
-        )  # give the thread a chance to race if the lock is not respected
-        assert not configure_called.is_set(), (
-            "http_client.configure() was called before _RUN_LOCK was released"
-        )
-
-    t.join(timeout=5)
-    assert configure_called.is_set(), "http_client.configure() was never called"
