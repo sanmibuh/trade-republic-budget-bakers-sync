@@ -1,0 +1,16 @@
+app/bot.py
+  h_97a91c9e567f87 128,133
+deploy/example/docker-compose.yml
+  h_97a91c9e567f87 23-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "ea077ac53240de1209a7d57ffa94955da91a3ddd",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
