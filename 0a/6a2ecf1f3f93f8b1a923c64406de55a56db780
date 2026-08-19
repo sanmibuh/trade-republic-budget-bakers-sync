@@ -1,0 +1,20 @@
+app/__main__.py
+  h_97a91c9e567f87 238-239,244-246,248-258,261
+app/bot.py
+  h_97a91c9e567f87 123-125
+docker/app/entrypoint.sh
+  h_97a91c9e567f87 97-101
+tests/test_config.py
+  h_97a91c9e567f87 8,240-275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "0a6a2ecf1f3f93f8b1a923c64406de55a56db780",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
