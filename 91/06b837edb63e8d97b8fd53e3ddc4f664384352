@@ -1,0 +1,23 @@
+app/bot.py
+  s_3a0516f55671f2::t_68e8d005a7ceee 63,120-135,157-158,161
+deploy/example/tr-sync.sh
+  s_3a0516f55671f2::t_7de0fc32250a9c 1-129
+tests/test_bot.py
+  s_3a0516f55671f2::t_2a5ef4cfc23d09 114-135,234-238,245-249,253-263,303
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "9106b837edb63e8d97b8fd53e3ddc4f664384352",
+  "prompts": {},
+  "sessions": {
+    "s_3a0516f55671f2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe5f5fd2affeczJj2CMG2hACwF",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
