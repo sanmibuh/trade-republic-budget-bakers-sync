@@ -1472,6 +1472,33 @@ def test_legacy_callback_logs_dispatches_fetch_and_send_logs(tmp_path):
     assert mock_thread.call_args.kwargs["target"] == bot._fetch_and_send_logs
 
 
+def test_legacy_callback_logs_works_for_unknown_instance(tmp_path):
+    """A legacy logs:<instance> callback must work even if the instance no longer exists.
+
+    After the shared-log migration the instance name in the callback data is
+    irrelevant — the shared log is fetched regardless.  Old inline buttons must
+    not produce an "Unknown instance" error even if the instance was renamed or
+    removed from the config.
+    """
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        mock_thread.return_value.start = MagicMock()
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "logs:deleted_instance",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["target"] == bot._fetch_and_send_logs
+    mock_send.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # TelegramBot._fetch_and_send_logs (shared log — no instance argument)
 # ---------------------------------------------------------------------------

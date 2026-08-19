@@ -490,8 +490,18 @@ class TelegramBot:
 
         Also accepts legacy ``logs:<instance>`` callbacks (from chat history
         buttons created before the shared-log migration) and routes them to
-        the current shared-log implementation — the instance name is ignored.
+        the current shared-log implementation — the instance name is ignored,
+        so stale buttons work even if the instance was renamed or removed.
         """
+        # Legacy logs callbacks bypass the instance lookup — the shared log
+        # does not depend on which instance was originally selected.
+        if cmd == "logs":
+            threading.Thread(
+                target=self._fetch_and_send_logs,
+                daemon=True,
+            ).start()
+            return
+
         instance_key = parts[-1].lower()
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
@@ -502,12 +512,6 @@ class TelegramBot:
             self._launch_sync(inst)
         elif cmd == "login":
             self._launch_login(inst)
-        elif cmd == "logs":
-            # Legacy callback — instance picker was removed; use shared log.
-            threading.Thread(
-                target=self._fetch_and_send_logs,
-                daemon=True,
-            ).start()
         else:
             log.warning("Unknown callback cmd: %r", cmd)
 

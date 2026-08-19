@@ -332,7 +332,7 @@ instances:
   - **Bot process**: called in the `bot` CLI command with `read_data_dir() / "logs"` → all in-process sync/login/resync/backup calls share a single `{DATA_DIR}/logs/sync.log`.
   - **Standalone sync / login / resync**: called in the respective CLI command with `read_data_dir() / "logs"`.
   - **Standalone backup**: called in the `backup` CLI command with `cfg.data_dir / "logs"`.
-- `configure_logging()` — minimal console-only logging setup for short-lived entry points that need no file output (e.g. `submit-code`, `check-session`).
+- `configure_logging()` — minimal console-only logging setup available for short-lived entry points that need no file output; currently not used by any CLI command (short-lived commands such as `submit-code` and `check-session` run without any logging configuration).
 - Because logging is configured once at startup and never torn down, `_prepare` in `main.py` needs no handler lifecycle management — there is no handler accumulation risk between in-process calls.
 - The `/logs` Telegram command reads today's lines from the shared `{DATA_DIR}/logs/sync.log` directly (no instance picker — all instances write to the same file).
 
