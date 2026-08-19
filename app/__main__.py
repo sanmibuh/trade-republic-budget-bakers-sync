@@ -30,8 +30,9 @@ def _resolve_instance_cfg(instance: str) -> Config:
 
     ``INSTANCES_CONFIG`` is read through :func:`app.config.read_instances_config_path`
     so that all env var access stays in ``config.py``.  Any ``ValueError`` or
-    ``FileNotFoundError`` is re-raised as a :class:`click.UsageError` so the user
-    sees a clean error message instead of a traceback.
+    ``OSError`` (including ``FileNotFoundError`` and ``PermissionError``) is
+    re-raised as a :class:`click.UsageError` so the user sees a clean error
+    message instead of a traceback.
 
     Raises :class:`click.UsageError` immediately when *instance* is blank, so
     passing ``--instance ""`` never silently falls back to env-var mode.
@@ -44,7 +45,7 @@ def _resolve_instance_cfg(instance: str) -> Config:
     try:
         path = read_instances_config_path()
         return InstancesConfig.load(path).to_config(instance)
-    except (ValueError, FileNotFoundError) as exc:
+    except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
 
 
@@ -338,7 +339,7 @@ def bot() -> None:
         raise click.UsageError(str(exc)) from exc
     setup_logging(instances_yaml.data_dir / "logs")
     try:
-        run()
+        run(instances_yaml=instances_yaml)
     except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
 

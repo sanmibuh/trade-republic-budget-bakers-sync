@@ -877,3 +877,72 @@ def test_list_instances_permission_error_shown_as_click_error(tmp_path):
 
     assert result.exit_code != 0
     assert "denied" in result.output
+
+
+def test_sync_with_instance_flag_permission_error_shown_as_click_error(tmp_path):
+    """PermissionError from InstancesConfig.load() in sync --instance must show UsageError."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with (
+        patch("app.config.InstancesConfig.load", side_effect=PermissionError("denied")),
+        patch("app.__main__.setup_logging"),
+    ):
+        result = _runner().invoke(
+            cli,
+            ["sync", "--instance", "user1"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "denied" in result.output
+
+
+def test_login_with_instance_flag_permission_error_shown_as_click_error(tmp_path):
+    """PermissionError from InstancesConfig.load() in login --instance must show UsageError."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with (
+        patch("app.config.InstancesConfig.load", side_effect=PermissionError("denied")),
+        patch("app.__main__.setup_logging"),
+    ):
+        result = _runner().invoke(
+            cli,
+            ["login", "--instance", "user1"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "denied" in result.output
+
+
+def test_bot_command_does_not_load_instances_config_twice(tmp_path):
+    """bot CLI must not load InstancesConfig a second time inside bot.run()."""
+    from app.config import InstancesConfig
+
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.data_dir = tmp_path
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    load_calls: list[object] = []
+
+    def counting_load(path: object) -> object:
+        load_calls.append(path)
+        return mock_instances
+
+    with (
+        patch("app.config.InstancesConfig.load", side_effect=counting_load),
+        patch("app.bot.BotEnv.from_env"),
+        patch("app.bot.TelegramBot") as mock_telegram,
+        patch("app.__main__.setup_logging"),
+    ):
+        mock_telegram.return_value.run.return_value = None
+        _runner().invoke(cli, ["bot"], env={"INSTANCES_CONFIG": str(cfg_file)})
+
+    assert len(load_calls) == 1, (
+        f"InstancesConfig.load() called {len(load_calls)} times; expected 1"
+    )

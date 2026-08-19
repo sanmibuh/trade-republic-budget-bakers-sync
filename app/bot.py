@@ -112,11 +112,12 @@ class BotConfig:
     allow_insecure_ssl: bool = False
 
     @classmethod
-    def from_env(cls) -> BotConfig:
+    def from_env(cls, instances_yaml: InstancesConfig | None = None) -> BotConfig:
         env = BotEnv.from_env()
 
-        path = read_instances_config_path()
-        instances_yaml = InstancesConfig.load(path)
+        if instances_yaml is None:
+            path = read_instances_config_path()
+            instances_yaml = InstancesConfig.load(path)
 
         instances: dict[str, InstanceConfig] = {}
         for inst in instances_yaml.instances:
@@ -1001,8 +1002,14 @@ class TelegramBot:
 # ---------------------------------------------------------------------------
 
 
-def run() -> None:
-    """Load config from environment and start the bot."""
-    cfg = BotConfig.from_env()
+def run(instances_yaml: InstancesConfig | None = None) -> None:
+    """Load config from environment and start the bot.
+
+    *instances_yaml* — optional pre-loaded :class:`~app.config.InstancesConfig`.
+    When provided, ``BotConfig.from_env`` skips loading it a second time, avoiding
+    duplicate I/O when the caller (e.g. the ``bot`` CLI command) has already loaded
+    it to derive the log directory.
+    """
+    cfg = BotConfig.from_env(instances_yaml=instances_yaml)
     bot = TelegramBot(cfg)
     bot.run()
