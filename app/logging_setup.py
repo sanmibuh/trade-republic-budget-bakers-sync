@@ -61,9 +61,11 @@ def setup_logging(log_dir: Path) -> None:
 def configure_logging() -> None:
     """Minimal console-only logging setup for entry points that have no data dir.
 
-    Intended as a fallback for contexts where ``setup_logging`` cannot be called
-    (e.g. library use or tests).  All current CLI commands use ``setup_logging``
-    with a resolved data directory instead.
+    Intended as a fallback for library use or tests.  CLI commands that handle
+    data (``sync``, ``login``, ``resync``, ``backup``, ``bot``) use
+    ``setup_logging`` with a resolved data directory instead.  Short-lived
+    commands (``submit-code``, ``check-pending``, ``check-session``,
+    ``list-instances``) run without any explicit logging configuration.
     """
     root = logging.getLogger()
     if root.handlers:

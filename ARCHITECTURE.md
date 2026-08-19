@@ -329,10 +329,12 @@ instances:
 
 ### Logging (`app/logging_setup.py`)
 - `setup_logging(log_dir)` — called **once at process startup** by each CLI entry point; sets up rotating file handler + console handler. Returns `None`.
-  - **Bot process**: called in the `bot` CLI command with `read_data_dir() / "logs"` → all in-process sync/login/resync/backup calls share a single `{DATA_DIR}/logs/sync.log`.
-  - **Standalone sync / login / resync**: called in the respective CLI command with `read_data_dir() / "logs"`.
+  - **Bot process**: called in the `bot` CLI command with `instances_yaml.data_dir / "logs"` → all in-process sync/login/resync/backup calls share a single `{DATA_DIR}/logs/sync.log`.
+  - **Standalone sync / login**: called with `cfg.data_dir.parent / "logs"` when `--instance` is used (so all instances share the same log directory one level above the instance data dir), or `cfg.data_dir / "logs"` when driven by env vars.
+  - **Standalone resync**: called with `cfg.data_dir / "logs"` (always env-var driven).
   - **Standalone backup**: called in the `backup` CLI command with `cfg.data_dir / "logs"`.
-- `configure_logging()` — minimal console-only logging setup available for short-lived entry points that need no file output; currently not used by any CLI command (short-lived commands such as `submit-code` and `check-session` run without any logging configuration).
+  - **Short-lived commands** (`submit-code`, `check-pending`, `check-session`, `list-instances`): do not call `setup_logging` — they run without any logging configuration.
+- `configure_logging()` — minimal console-only fallback; not called by any CLI command.
 - Because logging is configured once at startup and never torn down, `_prepare` in `main.py` needs no handler lifecycle management — there is no handler accumulation risk between in-process calls.
 - The `/logs` Telegram command reads today's lines from the shared `{DATA_DIR}/logs/sync.log` directly (no instance picker — all instances write to the same file).
 
