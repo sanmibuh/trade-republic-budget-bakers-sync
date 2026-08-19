@@ -1,0 +1,18 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 283-285
+deploy/example/docker-compose.yml
+  h_97a91c9e567f87 9-10
+deploy/example/tr-sync.sh
+  h_97a91c9e567f87 74-75,84-85,94-95,106-107,110-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "3017c19d94ee2059b143b05d0b99afdee303bf20",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
