@@ -71,9 +71,8 @@ case "$COMMAND" in
             usage; exit 1
         fi
         docker compose -f "$COMPOSE_FILE" run --rm -it \
-            -e SYNC_SCHEDULE= \
-            -e BACKUP_SCHEDULE= \
-            $SERVICE python -m app login --instance "$INSTANCE"
+            -e CMD="login --instance $INSTANCE" \
+            $SERVICE
         ;;
     sync)
         INSTANCE="$2"
@@ -82,7 +81,8 @@ case "$COMMAND" in
             usage; exit 1
         fi
         docker compose -f "$COMPOSE_FILE" run --rm \
-            $SERVICE python -m app sync --instance "$INSTANCE"
+            -e CMD="sync --instance $INSTANCE" \
+            $SERVICE
         ;;
     login)
         INSTANCE="$2"
@@ -91,7 +91,8 @@ case "$COMMAND" in
             usage; exit 1
         fi
         docker compose -f "$COMPOSE_FILE" run --rm -it \
-            $SERVICE python -m app login --instance "$INSTANCE"
+            -e CMD="login --instance $INSTANCE" \
+            $SERVICE
         ;;
     backup)
         MODE="$2"
@@ -102,10 +103,12 @@ case "$COMMAND" in
         fi
         if [ -n "$PARAM" ]; then
             docker compose -f "$COMPOSE_FILE" run --rm \
-                $SERVICE python -m app backup "$MODE" "$PARAM"
+                -e CMD="backup $MODE $PARAM" \
+                $SERVICE
         else
             docker compose -f "$COMPOSE_FILE" run --rm \
-                $SERVICE python -m app backup "$MODE"
+                -e CMD="backup $MODE" \
+                $SERVICE
         fi
         ;;
     up)

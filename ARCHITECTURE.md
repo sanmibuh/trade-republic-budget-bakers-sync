@@ -280,8 +280,9 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 
 1. **`WALLET_API_KEY` env var set** → `BackupConfig.from_env()` (backward-compatible path, reads `DATA_DIR` too).
 2. **`WALLET_API_KEY` absent + instances YAML loaded** → `BackupConfig` is derived from the first instance's
-   `wallet_api_key`; `data_dir` is set to `instances_yaml.data_dir / "backup"`; Telegram credentials come from
-   the YAML global settings. This is the path used in the single-container deployment.
+   `wallet_api_key`; `data_dir` is set to `instances_yaml.data_dir / "backup"`; Telegram credentials are taken
+   from `instances_yaml.telegram_bot_token` / `telegram_chat_id` (resolved from YAML or env var by
+   `InstancesConfig.load`). This is the path used in the single-container deployment.
 3. **Neither** → `backup_cfg` is `None` and `/backup` commands are disabled in the bot.
 
 ### Multi-instance YAML config (#145)

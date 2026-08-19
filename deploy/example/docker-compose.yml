@@ -6,7 +6,8 @@ services:
     restart: unless-stopped
     healthcheck:
       # Verifies that both the cron daemon and the Telegram bot process are alive.
-      test: ["CMD-SHELL", "pgrep cron > /dev/null && pgrep -f 'app bot' > /dev/null || exit 1"]
+      # Bracket notation avoids pgrep matching its own process.
+      test: ["CMD-SHELL", "pgrep cron > /dev/null && pgrep -f '[a]pp bot' > /dev/null || exit 1"]
       interval: 60s
       timeout: 5s
       retries: 3
