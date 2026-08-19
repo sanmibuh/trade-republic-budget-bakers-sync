@@ -186,7 +186,3 @@ def run_resync(date_str: str, cfg: Config | None = None) -> int:
         return 1
 
     return 0
-
-
-if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(run())
