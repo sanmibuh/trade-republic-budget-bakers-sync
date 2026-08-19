@@ -120,8 +120,9 @@ class BotConfig:
         # Telegram credentials: InstancesConfig.load already consolidates YAML values
         # with env-var fallbacks (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID), so
         # instances_yaml.telegram_bot_token is the resolved value from either source.
-        bot_token = instances_yaml.telegram_bot_token
-        chat_id = instances_yaml.telegram_chat_id
+        # Strip whitespace to match the behaviour of _required_env().
+        bot_token = (instances_yaml.telegram_bot_token or "").strip() or None
+        chat_id = (instances_yaml.telegram_chat_id or "").strip() or None
         if not bot_token:
             raise ValueError(
                 "Missing required credential TELEGRAM_BOT_TOKEN "

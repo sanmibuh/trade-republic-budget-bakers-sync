@@ -235,21 +235,30 @@ def backup(mode: str, param: str | None) -> None:
 
     # Build BackupConfig: prefer env (backward-compat); fall back to InstancesConfig
     # YAML when WALLET_API_KEY is absent (single-container mode).
+    # If INSTANCES_CONFIG is set but the YAML is invalid or empty, surface that error
+    # rather than silently falling back to a misleading "Missing WALLET_API_KEY" message.
     env_backup = BackupConfig.from_env_optional()
     env_wallet_key = env_backup.wallet_api_key if env_backup else None
     cfg: BackupConfig | None = None
     try:
-        instances_yaml = InstancesConfig.load(read_instances_config_path())
-        cfg = BackupConfig.from_instances_yaml(
-            instances_yaml, wallet_api_key=env_wallet_key
-        )
-    except (ValueError, OSError):
+        instances_yaml_path = read_instances_config_path()
+    except ValueError:
+        # INSTANCES_CONFIG not set — use env-only path.
         cfg = env_backup
-    if cfg is None:
-        cfg = env_backup
+    else:
+        try:
+            instances_yaml = InstancesConfig.load(instances_yaml_path)
+        except (ValueError, OSError) as exc:
+            if env_backup is None:
+                raise click.UsageError(str(exc)) from exc
+            cfg = env_backup
+        else:
+            cfg = BackupConfig.from_instances_yaml(
+                instances_yaml, wallet_api_key=env_wallet_key
+            )
     if cfg is None:
         raise click.UsageError(
-            "Missing WALLET_API_KEY: set it in instances.yml or as an environment variable"
+            "Missing WALLET_API_KEY: set it in the instances config file or as an environment variable"
         )
     setup_logging(cfg.data_dir / "logs")
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)

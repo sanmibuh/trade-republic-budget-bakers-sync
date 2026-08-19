@@ -5,6 +5,7 @@ import pytest
 from app.config import (
     BackupConfig,
     Config,
+    InstanceConfig,
     InstancesConfig,
     has_valid_session,
     read_instance,
@@ -236,16 +237,43 @@ def test_backup_config_allow_insecure_ssl_true_when_set(monkeypatch):
 # BackupConfig.from_instances_yaml
 # ---------------------------------------------------------------------------
 
-_INSTANCES_YAML_FOR_BACKUP = (
-    InstancesConfig.load.__func__(  # type: ignore[attr-defined]
-        InstancesConfig,
-        __import__("pathlib").Path(__file__).parent
-        / "_fixtures"
-        / "instances_backup.yml",
+
+def _make_instances_yaml(
+    wallet_api_key: str = "yamlkey",
+    telegram_bot_token: str | None = "yamltoken",
+    telegram_chat_id: str | None = "yamlchat",
+    allow_insecure_ssl: bool = False,
+    data_dir: str = "/app/data",
+    empty: bool = False,
+) -> InstancesConfig:
+    from pathlib import Path
+
+    instances = (
+        []
+        if empty
+        else [
+            InstanceConfig(
+                name="user1",
+                phone="+34600000000",
+                pin="1234",
+                wallet_api_key=wallet_api_key,
+                wallet_cash_account_id="cash1",
+                wallet_portfolio_account_id="port1",
+                owner_name=None,
+                lookback_days=7,
+                dedup_ttl_days=60,
+                label_ids={},
+                category_strategy="none",
+            )
+        ]
     )
-    if False
-    else None
-)  # placeholder; tests use a helper below
+    return InstancesConfig(
+        instances=instances,
+        data_dir=Path(data_dir),
+        telegram_bot_token=telegram_bot_token,
+        telegram_chat_id=telegram_chat_id,
+        allow_insecure_ssl=allow_insecure_ssl,
+    )
 
 
 def _make_instances_yaml(

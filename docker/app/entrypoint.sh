@@ -94,6 +94,11 @@ if [ -n "$INSTANCES_CONFIG" ]; then
 
     log "Starting cron daemon in background"
     cron
+    # Verify cron is actually running before starting the bot.
+    if ! pgrep cron > /dev/null 2>&1; then
+        log "ERROR: cron failed to start. Aborting."
+        exit 1
+    fi
 
     log "Starting Telegram bot"
     exec python -m app bot
