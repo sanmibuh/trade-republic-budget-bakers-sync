@@ -215,7 +215,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   - Registers one `SYNC_SCHEDULE` cron job per instance: `python -m app sync --instance <name>`.
   - Optionally registers `BACKUP_SCHEDULE` cron job for `python -m app backup auto` when `BACKUP_SCHEDULE` is set.
   - `MODE` env var is ignored in this mode.
-  - Each instance logs to its own `data_dir/<name>/sync.log` (handled by the app's `setup_logging`).
+  - Each instance logs to the shared `{DATA_DIR}/logs/sync.log` (all instances share one log file).
   - Requires `SYNC_SCHEDULE` to be set; exits with an error if missing.
 
   **Legacy single-instance mode** (when `INSTANCES_CONFIG` is not set — fully backwards-compatible):
@@ -328,8 +328,15 @@ instances:
 - The backup service omits it; notifications show `"Backup"` as the owner.
 
 ### Logging (`app/logging_setup.py`)
-- `setup_logging(data_dir)` — used by long-running daemons (sync, backup, bot); sets up rotating file handler + console handler.
-- `configure_logging()` — used by CLI entry points (`login`, `submit-code`, `check-session`); console only, no file.
+- `setup_logging(log_dir)` — called **once at process startup** by each CLI entry point; sets up rotating file handler + console handler. Returns `None`.
+  - **Bot process**: called in the `bot` CLI command with `instances_yaml.data_dir / "logs"` → all in-process sync/login/resync/backup calls share a single `{DATA_DIR}/logs/sync.log`.
+  - **Standalone sync / login**: called with `cfg.data_dir.parent / "logs"` when `--instance` is used (so all instances share the same log directory one level above the instance data dir), or `cfg.data_dir / "logs"` when driven by env vars.
+  - **Standalone resync**: called with `cfg.data_dir / "logs"` (always env-var driven).
+  - **Standalone backup**: called in the `backup` CLI command with `cfg.data_dir / "logs"`.
+  - **Short-lived commands** (`submit-code`, `check-pending`, `check-session`, `list-instances`): do not call `setup_logging` — they run without any logging configuration.
+- `configure_logging()` — minimal console-only fallback; not called by any CLI command.
+- Because logging is configured once at startup and never torn down, `_prepare` in `main.py` needs no handler lifecycle management — there is no handler accumulation risk between in-process calls.
+- The `/logs` Telegram command reads today's lines from the shared `{DATA_DIR}/logs/sync.log` directly (no instance picker — all instances write to the same file).
 
 ### SSL circuit-breaker (`app/http_client.py`)
 - `SSLCircuitBreaker` — class that encapsulates circuit state (`verify`, `allow_insecure`) and policy.
@@ -439,7 +446,7 @@ image publish workflows.
 
 `/app/data` (mounted from host) contains:
 - `sync.db` — SQLite database with `processed_events` table (purged after 60 days) and `auth_state` table (persisted auth status per instance)
-- `sync.log` — rotating log file
+- `logs/sync.log` — rotating log file shared by all services (bot, sync, backup); written to `{DATA_DIR}/logs/sync.log`
 - pytr session/cookie files (login state)
 - `.tr_2fa_pending` — transient marker created by `TelegramCodeProvider` while waiting for a code; removed on success or timeout. `submit-code` checks for this file to reject stale code submissions.
 - `.tr_2fa_code` — transient file where `submit-code` drops the authenticator code for a waiting login/sync

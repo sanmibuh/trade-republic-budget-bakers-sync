@@ -62,9 +62,7 @@ from app.config import (
     has_valid_session,
     read_instances_config_path,
 )
-from app.logging_setup import setup_logging
 from app.main import (
-    _RUN_LOCK,
     run as _main_run,
     run_login as _main_run_login,
     run_resync as _main_run_resync,
@@ -110,13 +108,16 @@ class BotConfig:
     instances: dict[str, InstanceConfig] = field(default_factory=dict)
     backup_cfg: BackupConfig | None = None  # None means backup commands are disabled
     telegram_verify_ssl: bool = True
+    log_dir: Path = field(default_factory=lambda: Path("/app/data/logs"))
+    allow_insecure_ssl: bool = False
 
     @classmethod
-    def from_env(cls) -> BotConfig:
+    def from_env(cls, instances_yaml: InstancesConfig | None = None) -> BotConfig:
         env = BotEnv.from_env()
 
-        path = read_instances_config_path()
-        instances_yaml = InstancesConfig.load(path)
+        if instances_yaml is None:
+            path = read_instances_config_path()
+            instances_yaml = InstancesConfig.load(path)
 
         instances: dict[str, InstanceConfig] = {}
         for inst in instances_yaml.instances:
@@ -134,6 +135,8 @@ class BotConfig:
             instances=instances,
             backup_cfg=backup_cfg,
             telegram_verify_ssl=env.telegram_verify_ssl,
+            log_dir=instances_yaml.data_dir / "logs",
+            allow_insecure_ssl=instances_yaml.allow_insecure_ssl,
         )
 
 
@@ -248,6 +251,9 @@ class TelegramBot:
         # Instances that have an active login flow waiting for a 2FA code.
         # Maps instance key (lower-case name) → InstanceConfig.
         self._pending_login: dict[str, InstanceConfig] = {}
+        # Configure SSL once at startup — all in-process sync/login/resync/backup
+        # calls share this policy without racing on a per-run configure() call.
+        http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
         if not cfg.telegram_verify_ssl:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -292,7 +298,7 @@ class TelegramBot:
                 "command": "login",
                 "description": "Renew Trade Republic 2FA session (choose instance)",
             },
-            {"command": "logs", "description": "Show today's logs for an instance"},
+            {"command": "logs", "description": "Show today's shared sync log"},
             {
                 "command": "status",
                 "description": "Show instances and backup service availability",
@@ -484,7 +490,22 @@ class TelegramBot:
         self._launch_resync(inst, date_str)
 
     def _on_cb_instance_cmd(self, cmd: str, parts: list[str]) -> None:
-        """Handle instance-routed callbacks: sync, login, logs."""
+        """Handle instance-routed callbacks: sync, login.
+
+        Also accepts legacy ``logs:<instance>`` callbacks (from chat history
+        buttons created before the shared-log migration) and routes them to
+        the current shared-log implementation — the instance name is ignored,
+        so stale buttons work even if the instance was renamed or removed.
+        """
+        # Legacy logs callbacks bypass the instance lookup — the shared log
+        # does not depend on which instance was originally selected.
+        if cmd == "logs":
+            threading.Thread(
+                target=self._fetch_and_send_logs,
+                daemon=True,
+            ).start()
+            return
+
         instance_key = parts[-1].lower()
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
@@ -495,12 +516,6 @@ class TelegramBot:
             self._launch_sync(inst)
         elif cmd == "login":
             self._launch_login(inst)
-        elif cmd == "logs":
-            threading.Thread(
-                target=self._fetch_and_send_logs,
-                args=(inst,),
-                daemon=True,
-            ).start()
         else:
             log.warning("Unknown callback cmd: %r", cmd)
 
@@ -514,7 +529,7 @@ class TelegramBot:
             "/sync — Force Trade Republic sync \\(choose instance\\)",
             "/resync `[YYYY\\-MM\\-DD]` — Force re\\-sync of a specific day, bypassing dedup",
             "/login — Renew Trade Republic 2FA session \\(choose instance\\)",
-            "/logs — Show today's logs for an instance",
+            "/logs — Show today's shared sync log",
             "/code `<instance> <code>` — Submit an authenticator code \\(or send the 6\\-digit code as a plain message\\)",
         ]
         if self._cfg.backup_cfg:
@@ -588,7 +603,10 @@ class TelegramBot:
         )
 
     def _cmd_logs(self, _args: list[str]) -> None:
-        self._pick_instance("logs", "📋 *Logs* — Choose instance:")
+        threading.Thread(
+            target=self._fetch_and_send_logs,
+            daemon=True,
+        ).start()
 
     def _cmd_code(self, args: list[str]) -> None:
         """Deliver an authenticator code to a waiting login process: /code <instance> <code>."""
@@ -662,41 +680,29 @@ class TelegramBot:
         if cfg is None:
             return
         cfg.data_dir.mkdir(parents=True, exist_ok=True)
-        with _RUN_LOCK:
-            http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
-            handlers = setup_logging(cfg.data_dir)
-            root = logging.getLogger()
-            client = WalletClient(api_key=cfg.wallet_api_key)
-            notifier = Notifier(
-                cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name
-            )
-            try:
-                if mode == "auto":
-                    backup_module.run_auto(client, notifier, cfg.data_dir)
-                elif mode == "monthly":
-                    year, month = backup_module._parse_monthly_param(period)
-                    backup_module.run_monthly(
-                        client, notifier, cfg.data_dir, year, month
-                    )
-                elif mode == "yearly":
-                    year = backup_module._parse_yearly_param(period)
-                    backup_module.run_yearly(client, notifier, cfg.data_dir, year)
-                else:
-                    log.warning("Unknown backup mode %r — ignoring", mode)
-                    self._send_message(
-                        f"⚠️ Unknown backup mode: `{_esc(mode)}`\\. Expected `monthly` or `yearly`\\."
-                    )
-            except Exception as exc:
-                log.exception(
-                    "Backup failed (mode=%s period=%s): %s", mode, period, exc
-                )
+        client = WalletClient(api_key=cfg.wallet_api_key)
+        notifier = Notifier(
+            cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name
+        )
+        try:
+            if mode == "auto":
+                backup_module.run_auto(client, notifier, cfg.data_dir)
+            elif mode == "monthly":
+                year, month = backup_module._parse_monthly_param(period)
+                backup_module.run_monthly(client, notifier, cfg.data_dir, year, month)
+            elif mode == "yearly":
+                year = backup_module._parse_yearly_param(period)
+                backup_module.run_yearly(client, notifier, cfg.data_dir, year)
+            else:
+                log.warning("Unknown backup mode %r — ignoring", mode)
                 self._send_message(
-                    f"❌ Backup \\({_esc(mode)} {_esc(period)}\\) failed: {_esc(str(exc))}"
+                    f"⚠️ Unknown backup mode: `{_esc(mode)}`\\. Expected `monthly` or `yearly`\\."
                 )
-            finally:
-                for h in handlers:
-                    root.removeHandler(h)
-                    h.close()
+        except Exception as exc:
+            log.exception("Backup failed (mode=%s period=%s): %s", mode, period, exc)
+            self._send_message(
+                f"❌ Backup \\({_esc(mode)} {_esc(period)}\\) failed: {_esc(str(exc))}"
+            )
 
     # ------------------------------------------------------------------
     # Execution — direct in-process calls
@@ -866,15 +872,15 @@ class TelegramBot:
                     break
         return pending
 
-    def _fetch_and_send_logs(self, inst: InstanceConfig) -> None:
-        """Fetch today's logs for *inst* from the log file and send them to Telegram."""
+    def _fetch_and_send_logs(self) -> None:
+        """Fetch today's logs from the shared log file and send them to Telegram."""
         today_str = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
-        log_file = inst.config.data_dir / "sync.log"
+        log_file = self._cfg.log_dir / "sync.log"
         # MarkdownV2 header — used only when there are no logs (plain-text message not needed).
-        header_md = f"📋 Logs for *{_esc(inst.name)}* \\({_esc(today_str)} UTC\\)\n\n"
+        header_md = f"📋 Logs \\({_esc(today_str)} UTC\\)\n\n"
         # Plain-text header — used when the log body is sent with parse_mode=None so that
         # MarkdownV2 escape characters are not displayed literally in Telegram.
-        header_plain = f"📋 Logs for {inst.name} ({today_str} UTC)\n\n"
+        header_plain = f"📋 Logs ({today_str} UTC)\n\n"
         try:
             if not log_file.exists():
                 text = ""
@@ -897,9 +903,7 @@ class TelegramBot:
                 if truncated:
                     text = "[... truncated ...]\n" + text
         except Exception as exc:
-            self._send_message(
-                f"❌ Could not read logs for `{_esc(inst.name)}`: {_esc(str(exc))}"
-            )
+            self._send_message(f"❌ Could not read logs: {_esc(str(exc))}")
             return
 
         if not text.strip():
@@ -998,8 +1002,14 @@ class TelegramBot:
 # ---------------------------------------------------------------------------
 
 
-def run() -> None:
-    """Load config from environment and start the bot."""
-    cfg = BotConfig.from_env()
+def run(instances_yaml: InstancesConfig | None = None) -> None:
+    """Load config from environment and start the bot.
+
+    *instances_yaml* — optional pre-loaded :class:`~app.config.InstancesConfig`.
+    When provided, ``BotConfig.from_env`` skips loading it a second time, avoiding
+    duplicate I/O when the caller (e.g. the ``bot`` CLI command) has already loaded
+    it to derive the log directory.
+    """
+    cfg = BotConfig.from_env(instances_yaml=instances_yaml)
     bot = TelegramBot(cfg)
     bot.run()

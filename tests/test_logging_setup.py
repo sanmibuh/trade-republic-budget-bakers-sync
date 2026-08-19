@@ -12,9 +12,10 @@ def test_setup_logging_creates_log_file(tmp_path):
     root = logging.getLogger()
     original_handlers = root.handlers[:]
     try:
-        setup_logging(tmp_path)
+        result = setup_logging(tmp_path)
         log_file = tmp_path / "sync.log"
         assert log_file.exists()
+        assert result is None
     finally:
         # Remove handlers added by this call to avoid polluting other tests
         for h in root.handlers[:]:
@@ -89,6 +90,25 @@ def test_configure_logging_idempotent():
                 h.close()
         for h in before:
             root.addHandler(h)
+
+
+def test_setup_logging_idempotent(tmp_path):
+    """Calling setup_logging() twice for the same log_dir must not duplicate handlers."""
+    root = logging.getLogger()
+    before = set(root.handlers)
+    try:
+        setup_logging(tmp_path)
+        handlers_after_first = [h for h in root.handlers if h not in before]
+        setup_logging(tmp_path)  # second call — same dir
+        handlers_after_second = [h for h in root.handlers if h not in before]
+        assert len(handlers_after_second) == len(handlers_after_first), (
+            "setup_logging() added duplicate handlers on second call"
+        )
+    finally:
+        for h in root.handlers[:]:
+            if h not in before:
+                root.removeHandler(h)
+                h.close()
 
 
 def test_setup_logging_and_configure_logging_use_same_format(tmp_path):

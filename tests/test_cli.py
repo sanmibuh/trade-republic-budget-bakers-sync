@@ -43,14 +43,28 @@ def test_backup_help():
 
 
 def test_sync_calls_run():
-    with patch("app.main.run", return_value=0) as mock_run:
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
+    with (
+        patch("app.main.run", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
+    ):
         result = _runner().invoke(cli, ["sync"])
     assert result.exit_code == 0
     mock_run.assert_called_once()
 
 
 def test_sync_exits_with_run_return_code():
-    with patch("app.main.run", return_value=1):
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
+    with (
+        patch("app.main.run", return_value=1),
+        patch("app.__main__.setup_logging"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
+    ):
         result = _runner().invoke(cli, ["sync"])
     assert result.exit_code == 1
 
@@ -102,7 +116,7 @@ def test_backup_auto_calls_run_auto(tmp_path):
         result = _runner().invoke(cli, ["backup", "auto"])
     assert result.exit_code == 0
     mock_auto.assert_called_once()
-    mock_setup_log.assert_called_once_with(tmp_path)
+    mock_setup_log.assert_called_once_with(tmp_path / "logs")
 
 
 # ---------------------------------------------------------------------------
@@ -202,14 +216,28 @@ def test_login_help():
 
 
 def test_login_calls_run_login():
-    with patch("app.main.run_login", return_value=0) as mock_run:
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
+    with (
+        patch("app.main.run_login", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
+    ):
         result = _runner().invoke(cli, ["login"])
     assert result.exit_code == 0
     mock_run.assert_called_once()
 
 
 def test_login_exits_with_return_code():
-    with patch("app.main.run_login", return_value=1):
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
+    with (
+        patch("app.main.run_login", return_value=1),
+        patch("app.__main__.setup_logging"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
+    ):
         result = _runner().invoke(cli, ["login"])
     assert result.exit_code == 1
 
@@ -271,7 +299,9 @@ def test_bot_help_lists_logs_and_code_commands():
 def test_bot_calls_run():
     with (
         patch("app.bot.run") as mock_run,
-        patch("app.__main__.configure_logging"),
+        patch("app.__main__.setup_logging"),
+        patch("app.config.InstancesConfig.load"),
+        patch("app.config.read_instances_config_path"),
     ):
         _runner().invoke(cli, ["bot"])
     mock_run.assert_called_once()
@@ -363,14 +393,30 @@ def test_resync_help():
 
 
 def test_resync_calls_run_resync_with_date():
-    with patch("app.main.run_resync", return_value=0) as mock_run:
+    from unittest.mock import ANY
+
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
+    with (
+        patch("app.main.run_resync", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
+    ):
         result = _runner().invoke(cli, ["resync", "2026-07-15"])
     assert result.exit_code == 0
-    mock_run.assert_called_once_with("2026-07-15")
+    mock_run.assert_called_once_with("2026-07-15", cfg=ANY)
 
 
 def test_resync_exits_with_run_resync_return_code():
-    with patch("app.main.run_resync", return_value=1):
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
+    with (
+        patch("app.main.run_resync", return_value=1),
+        patch("app.__main__.setup_logging"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
+    ):
         result = _runner().invoke(cli, ["resync", "2026-07-15"])
     assert result.exit_code == 1
 
@@ -503,6 +549,7 @@ def test_sync_with_instance_flag_loads_from_config_file(tmp_path):
     from app.config import Config, InstancesConfig
 
     mock_cfg = MagicMock(spec=Config)
+    mock_cfg.data_dir = tmp_path / "user1"
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
 
@@ -512,6 +559,8 @@ def test_sync_with_instance_flag_loads_from_config_file(tmp_path):
     with (
         patch("app.config.InstancesConfig.load", return_value=mock_instances),
         patch("app.main.run", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
+        patch("app.http_client.configure"),
     ):
         result = _runner().invoke(
             cli,
@@ -524,13 +573,139 @@ def test_sync_with_instance_flag_loads_from_config_file(tmp_path):
     mock_run.assert_called_once_with(cfg=mock_cfg)
 
 
+def test_sync_with_instance_flag_uses_yaml_root_for_logging(tmp_path):
+    """sync --instance must call setup_logging with the YAML data_dir root, not DATA_DIR."""
+    from app.config import Config, InstancesConfig
+
+    yaml_root = tmp_path / "yaml_root"
+    mock_cfg = MagicMock(spec=Config)
+    mock_cfg.data_dir = yaml_root / "user1"  # per-instance subdir
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.to_config.return_value = mock_cfg
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.main.run", return_value=0),
+        patch("app.__main__.setup_logging") as mock_setup,
+        patch("app.http_client.configure"),
+    ):
+        _runner().invoke(
+            cli,
+            ["sync", "--instance", "user1"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    mock_setup.assert_called_once_with(yaml_root / "logs")
+
+
+def test_login_with_instance_flag_uses_yaml_root_for_logging(tmp_path):
+    """login --instance must call setup_logging with the YAML data_dir root, not DATA_DIR."""
+    from app.config import Config, InstancesConfig
+
+    yaml_root = tmp_path / "yaml_root"
+    mock_cfg = MagicMock(spec=Config)
+    mock_cfg.data_dir = yaml_root / "user1"
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.to_config.return_value = mock_cfg
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.main.run_login", return_value=0),
+        patch("app.__main__.setup_logging") as mock_setup,
+        patch("app.http_client.configure"),
+    ):
+        _runner().invoke(
+            cli,
+            ["login", "--instance", "user1"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    mock_setup.assert_called_once_with(yaml_root / "logs")
+
+
+def test_bot_command_uses_yaml_data_dir_for_logging(tmp_path):
+    """bot CLI command must derive the setup_logging path from InstancesConfig.data_dir."""
+    from app.config import InstancesConfig
+
+    yaml_root = tmp_path / "yaml_root"
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.data_dir = yaml_root
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.bot.run"),
+        patch("app.__main__.setup_logging") as mock_setup,
+    ):
+        _runner().invoke(cli, ["bot"], env={"INSTANCES_CONFIG": str(cfg_file)})
+
+    mock_setup.assert_called_once_with(yaml_root / "logs")
+
+
+def test_bot_missing_instances_config_shows_clean_error():
+    """bot without INSTANCES_CONFIG env var must show a clean UsageError, not a traceback."""
+    result = _runner().invoke(cli, ["bot"], env={"INSTANCES_CONFIG": ""})
+    assert result.exit_code != 0
+    # Must not produce a raw exception traceback
+    assert "Traceback" not in result.output
+    assert "Error" in result.output or result.exit_code == 2
+
+
+def test_bot_invalid_instances_config_shows_clean_error(tmp_path):
+    """bot with a broken INSTANCES_CONFIG YAML must show a clean UsageError."""
+    bad_yaml = tmp_path / "bad.yml"
+    bad_yaml.write_text(": invalid: yaml: [")
+    result = _runner().invoke(cli, ["bot"], env={"INSTANCES_CONFIG": str(bad_yaml)})
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+
+
+def test_bot_run_config_error_shows_clean_error(tmp_path):
+    """ValueError raised inside bot.run() (e.g. second BotConfig.from_env load) must
+    surface as a clean UsageError, not a raw traceback."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    from app.config import InstancesConfig
+
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.data_dir = tmp_path
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.__main__.setup_logging"),
+        patch("app.bot.run", side_effect=ValueError("bad env var in second load")),
+    ):
+        result = _runner().invoke(cli, ["bot"], env={"INSTANCES_CONFIG": str(cfg_file)})
+
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "bad env var" in result.output
+
+
 def test_sync_without_instance_flag_uses_env(monkeypatch):
     """sync without --instance falls back to Config.from_env() (backward compat)."""
-    with patch("app.main.run", return_value=0) as mock_run:
+    from unittest.mock import ANY
+
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
+    with (
+        patch("app.main.run", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
+    ):
         result = _runner().invoke(cli, ["sync"])
     assert result.exit_code == 0
-    # run() called with no cfg argument (None default)
-    mock_run.assert_called_once_with(cfg=None)
+    mock_run.assert_called_once_with(cfg=ANY)
 
 
 def test_sync_with_instance_flag_missing_instances_config_env(tmp_path):
@@ -551,6 +726,7 @@ def test_login_with_instance_flag_loads_from_config_file(tmp_path):
     from app.config import Config, InstancesConfig
 
     mock_cfg = MagicMock(spec=Config)
+    mock_cfg.data_dir = tmp_path / "user1"
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
 
@@ -560,6 +736,8 @@ def test_login_with_instance_flag_loads_from_config_file(tmp_path):
     with (
         patch("app.config.InstancesConfig.load", return_value=mock_instances),
         patch("app.main.run_login", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
+        patch("app.http_client.configure"),
     ):
         result = _runner().invoke(
             cli,
@@ -574,10 +752,19 @@ def test_login_with_instance_flag_loads_from_config_file(tmp_path):
 
 def test_login_without_instance_flag_uses_env():
     """login without --instance falls back to Config.from_env() (backward compat)."""
-    with patch("app.main.run_login", return_value=0) as mock_run:
+    from unittest.mock import ANY
+
+    mock_cfg = MagicMock()
+    mock_cfg.allow_insecure_ssl = False
+    with (
+        patch("app.main.run_login", return_value=0) as mock_run,
+        patch("app.__main__.setup_logging"),
+        patch("app.config.Config.from_env", return_value=mock_cfg),
+        patch("app.http_client.configure"),
+    ):
         result = _runner().invoke(cli, ["login"])
     assert result.exit_code == 0
-    mock_run.assert_called_once_with(cfg=None)
+    mock_run.assert_called_once_with(cfg=ANY)
 
 
 def test_sync_with_instance_flag_load_error_shown_as_click_error(tmp_path):
@@ -585,7 +772,10 @@ def test_sync_with_instance_flag_load_error_shown_as_click_error(tmp_path):
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text("")
 
-    with patch("app.config.InstancesConfig.load", side_effect=ValueError("bad config")):
+    with (
+        patch("app.config.InstancesConfig.load", side_effect=ValueError("bad config")),
+        patch("app.__main__.setup_logging"),
+    ):
         result = _runner().invoke(
             cli,
             ["sync", "--instance", "user1"],
@@ -687,3 +877,72 @@ def test_list_instances_permission_error_shown_as_click_error(tmp_path):
 
     assert result.exit_code != 0
     assert "denied" in result.output
+
+
+def test_sync_with_instance_flag_permission_error_shown_as_click_error(tmp_path):
+    """PermissionError from InstancesConfig.load() in sync --instance must show UsageError."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with (
+        patch("app.config.InstancesConfig.load", side_effect=PermissionError("denied")),
+        patch("app.__main__.setup_logging"),
+    ):
+        result = _runner().invoke(
+            cli,
+            ["sync", "--instance", "user1"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "denied" in result.output
+
+
+def test_login_with_instance_flag_permission_error_shown_as_click_error(tmp_path):
+    """PermissionError from InstancesConfig.load() in login --instance must show UsageError."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with (
+        patch("app.config.InstancesConfig.load", side_effect=PermissionError("denied")),
+        patch("app.__main__.setup_logging"),
+    ):
+        result = _runner().invoke(
+            cli,
+            ["login", "--instance", "user1"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "denied" in result.output
+
+
+def test_bot_command_does_not_load_instances_config_twice(tmp_path):
+    """bot CLI must not load InstancesConfig a second time inside bot.run()."""
+    from app.config import InstancesConfig
+
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.data_dir = tmp_path
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    load_calls: list[object] = []
+
+    def counting_load(path: object) -> object:
+        load_calls.append(path)
+        return mock_instances
+
+    with (
+        patch("app.config.InstancesConfig.load", side_effect=counting_load),
+        patch("app.bot.BotEnv.from_env"),
+        patch("app.bot.TelegramBot") as mock_telegram,
+        patch("app.__main__.setup_logging"),
+    ):
+        mock_telegram.return_value.run.return_value = None
+        _runner().invoke(cli, ["bot"], env={"INSTANCES_CONFIG": str(cfg_file)})
+
+    assert len(load_calls) == 1, (
+        f"InstancesConfig.load() called {len(load_calls)} times; expected 1"
+    )

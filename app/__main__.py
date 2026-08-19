@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import click
 
-from app.logging_setup import configure_logging, setup_logging
+from app.logging_setup import setup_logging
 
 if TYPE_CHECKING:
     from app.config import Config
@@ -30,8 +30,9 @@ def _resolve_instance_cfg(instance: str) -> Config:
 
     ``INSTANCES_CONFIG`` is read through :func:`app.config.read_instances_config_path`
     so that all env var access stays in ``config.py``.  Any ``ValueError`` or
-    ``FileNotFoundError`` is re-raised as a :class:`click.UsageError` so the user
-    sees a clean error message instead of a traceback.
+    ``OSError`` (including ``FileNotFoundError`` and ``PermissionError``) is
+    re-raised as a :class:`click.UsageError` so the user sees a clean error
+    message instead of a traceback.
 
     Raises :class:`click.UsageError` immediately when *instance* is blank, so
     passing ``--instance ""`` never silently falls back to env-var mode.
@@ -44,7 +45,7 @@ def _resolve_instance_cfg(instance: str) -> Config:
     try:
         path = read_instances_config_path()
         return InstancesConfig.load(path).to_config(instance)
-    except (ValueError, FileNotFoundError) as exc:
+    except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
 
 
@@ -63,9 +64,18 @@ def cli() -> None:
 )
 def sync(instance: str | None) -> None:
     """Run a one-shot Trade Republic → Wallet sync."""
+    from app.config import Config
+    from app.http_client import configure
     from app.main import run
 
-    cfg = _resolve_instance_cfg(instance) if instance is not None else None
+    if instance is not None:
+        cfg = _resolve_instance_cfg(instance)
+        log_dir = cfg.data_dir.parent / "logs"
+    else:
+        cfg = Config.from_env()
+        log_dir = cfg.data_dir / "logs"
+    setup_logging(log_dir)
+    configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run(cfg=cfg))
 
 
@@ -83,9 +93,18 @@ def login(instance: str | None) -> None:
     For authenticator accounts the code is requested via Telegram (reply with
     /code <instance> <code>); for push accounts, approve the request in the app.
     """
+    from app.config import Config
+    from app.http_client import configure
     from app.main import run_login
 
-    cfg = _resolve_instance_cfg(instance) if instance is not None else None
+    if instance is not None:
+        cfg = _resolve_instance_cfg(instance)
+        log_dir = cfg.data_dir.parent / "logs"
+    else:
+        cfg = Config.from_env()
+        log_dir = cfg.data_dir / "logs"
+    setup_logging(log_dir)
+    configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run_login(cfg=cfg))
 
 
@@ -215,7 +234,7 @@ def backup(mode: str, param: str | None) -> None:
     from app.wallet_client import WalletClient
 
     cfg = BackupConfig.from_env()
-    setup_logging(cfg.data_dir)
+    setup_logging(cfg.data_dir / "logs")
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     client = WalletClient(api_key=cfg.wallet_api_key)
     notifier = Notifier(
@@ -257,9 +276,14 @@ def resync(date: str) -> None:
     Example:
       python -m app resync 2026-07-15
     """
+    from app.config import Config
+    from app.http_client import configure
     from app.main import run_resync
 
-    sys.exit(run_resync(date))
+    cfg = Config.from_env()
+    setup_logging(cfg.data_dir / "logs")
+    configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
+    sys.exit(run_resync(date, cfg=cfg))
 
 
 @cli.command(name="list-instances")
@@ -302,14 +326,22 @@ def bot() -> None:
       /sync              (shows an inline keyboard to pick the instance)
       /login             (shows an inline keyboard to pick the instance)
       /resync [YYYY-MM-DD]
-      /logs              (shows today's log lines for an instance)
+      /logs              (shows today's shared sync log)
       /code <instance> <code>  (or send the 6-digit code as a plain message)
       /backup [monthly|yearly] [period]
     """
     from app.bot import run
+    from app.config import InstancesConfig, read_instances_config_path
 
-    configure_logging()
-    run()
+    try:
+        instances_yaml = InstancesConfig.load(read_instances_config_path())
+    except (ValueError, OSError) as exc:
+        raise click.UsageError(str(exc)) from exc
+    setup_logging(instances_yaml.data_dir / "logs")
+    try:
+        run(instances_yaml=instances_yaml)
+    except (ValueError, OSError) as exc:
+        raise click.UsageError(str(exc)) from exc
 
 
 if __name__ == "__main__":  # pragma: no cover
