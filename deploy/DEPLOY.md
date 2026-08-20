@@ -31,6 +31,8 @@ make run-bot                           # start Telegram bot
 
 ## Folder structure
 
+### In this repository (`deploy/`)
+
 ```
 deploy/
   DEPLOY.md           # this guide
@@ -42,13 +44,21 @@ deploy/
     docker-compose.yml
     instances.yml.example
     tr-sync.sh
-  nas/
-    current/          # next version — rename to vXXX after deploy
-      docker-compose.yml
-      instances.yml   # all credentials (never committed)
-      tr-sync.sh      # management script
-    v201/             # v2.0.1 — deployed, read-only
-      ...
+```
+
+### On the NAS (not in git)
+
+The NAS folder (e.g. `/share/docker/tr-sync/`) is managed outside git.
+Its layout mirrors the versioned snapshots kept there:
+
+```
+/share/docker/tr-sync/    # example NAS path — adjust to your setup
+  current/                # work in progress — rename to vXXX after deploy
+    docker-compose.yml
+    instances.yml         # all credentials (never committed to git)
+    tr-sync.sh            # management script
+  v201/                   # v2.0.1 — deployed, read-only snapshot
+    ...
 ```
 
 `current/` is always the work in progress. After deploying, rename it with the release tag (`v300`, `v710`, etc.) as a read-only snapshot.

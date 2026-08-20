@@ -133,6 +133,19 @@ instances:
     wallet_portfolio_account_id: "portfolio1"
 """
 
+# Unquoted numeric scalars — YAML loads these as int, not str.
+_YAML_NUMERIC_CHAT_ID = """
+telegram_bot_token: "mytoken"
+telegram_chat_id: 123
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key1"
+    wallet_cash_account_id: "cash1"
+    wallet_portfolio_account_id: "portfolio1"
+"""
+
 
 def _mock_instances_load(yaml_text: str = _YAML_CONTENT):
     """Return a patcher for InstancesConfig.load that parses *yaml_text*."""
@@ -274,6 +287,16 @@ def test_botconfig_from_env_token_from_yaml_only(monkeypatch):
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.bot_token == "mytoken"
+    assert cfg.chat_id == "123"
+
+
+def test_botconfig_from_env_numeric_chat_id_in_yaml(monkeypatch):
+    """Unquoted numeric telegram_chat_id in YAML (loaded as int) must not raise AttributeError."""
+    monkeypatch.setenv("INSTANCES_CONFIG", "/fake/instances.yml")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    with _mock_instances_load(_YAML_NUMERIC_CHAT_ID):
+        cfg = BotConfig.from_env()
     assert cfg.chat_id == "123"
 
 
