@@ -108,7 +108,7 @@ if [ -n "$INSTANCES_CONFIG" ]; then
     BOT_PID=$!
     # Keep the shell as PID 1 so it can forward signals to both children and
     # reap them cleanly when the container is stopped.
-    trap 'log "Received signal — stopping cron and bot"; kill "$CRON_PID" "$BOT_PID" 2>/dev/null' TERM INT
+    trap 'log "Received signal — stopping cron and bot"; kill "$CRON_PID" "$BOT_PID" 2>/dev/null; wait "$CRON_PID" "$BOT_PID" 2>/dev/null; exit 0' TERM INT
     # Supervise both processes: if either exits unexpectedly the container
     # should restart rather than silently run in a degraded state.
     while true; do
