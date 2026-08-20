@@ -55,7 +55,7 @@ if [ -n "$INSTANCES_CONFIG" ]; then
     }
 
     if [ -z "$SCHEDULES" ]; then
-        log "ERROR: no sync schedules found in $INSTANCES_CONFIG (set sync.schedule)"
+        log "ERROR: no sync schedules found in $INSTANCES_CONFIG (set sync.schedule or a per-instance schedule)"
         exit 1
     fi
 

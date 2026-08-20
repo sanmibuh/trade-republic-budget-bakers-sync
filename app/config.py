@@ -414,7 +414,9 @@ def _parse_instance(
             )
 
     # wallet_api_key: per-instance takes precedence, then global, then error.
-    raw_wallet_key = raw_inst.get("wallet_api_key") or global_wallet_api_key
+    # Both values are stripped and blank-checked to match env var handling.
+    raw_inst_key = str(raw_inst.get("wallet_api_key") or "").strip() or None
+    raw_wallet_key = raw_inst_key or global_wallet_api_key
     if not raw_wallet_key:
         raise ValueError(
             f"instance '{name}' is missing required field 'wallet_api_key' "
@@ -471,7 +473,9 @@ def _parse_sync_section(
     ``(raw_instances_list, global_wallet_key, global_lookback, global_cat, sync_schedule)``
     """
     raw_instances_list = raw_sync.get("instances") or []
-    global_wallet_key: str | None = raw_sync.get("wallet_api_key") or None
+    global_wallet_key: str | None = (
+        str(raw_sync.get("wallet_api_key") or "").strip() or None
+    )
     global_lookback: int | None = None
     raw_gl = raw_sync.get("lookback_days")
     if raw_gl is not None:
@@ -506,13 +510,13 @@ class InstancesConfig:
     Required YAML layout::
 
         sync:
-          schedule: "…"          # global default, overridable per instance
+          schedule: "…"          # global default, overridable per instance (optional)
           wallet_api_key: "…"    # global default, overridable per instance
-          lookback_days: 7
-          category_strategy: history
+          lookback_days: 7       # optional
+          category_strategy: history  # optional
           instances:
             - name: …
-        backup_schedule: "…"
+        backup_schedule: "…"     # optional — omit to disable scheduled backups
     """
 
     instances: list[InstanceConfig]

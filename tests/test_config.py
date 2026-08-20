@@ -1607,3 +1607,48 @@ sync:
 
     with pytest.raises(ValueError, match="instance"):
         InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# wallet_api_key blank-check — per-instance and global
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_blank_per_instance_wallet_api_key_raises(tmp_path):
+    """A blank per-instance wallet_api_key must raise ValueError, not silently pass."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "   "
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="wallet_api_key"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+def test_instances_config_load_blank_global_wallet_api_key_raises(tmp_path):
+    """A blank sync.wallet_api_key (global) must raise ValueError, not silently pass."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  wallet_api_key: "   "
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="wallet_api_key"):
+        InstancesConfig.load(tmp_path / "i.yml")
