@@ -243,7 +243,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 ### Telegram bot
 - `app/bot.py`: long-polling bot and command handlers; wires `app/bot_keyboards.py`; executes all sync/login/resync/backup operations via direct in-process Python calls (no Docker SDK, no `exec_run`).
 - `app/bot_keyboards.py`: stateless inline keyboard builder functions (backup type/period pickers, instance pickers, resync date picker); no dependency on bot state.
-- `BotConfig` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `INSTANCES_CONFIG` from env. `INSTANCES_CONFIG` is a path to the instances YAML file; backup config is read from `BackupConfig.from_env()`.
+- `BotConfig` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `INSTANCES_CONFIG` from env. `INSTANCES_CONFIG` is a path to the instances YAML file; backup config is derived from `BackupConfig.from_instances_yaml()` with an optional `WALLET_API_KEY` env override via `read_optional_wallet_api_key()`.
 - Each sync instance is represented as `InstanceConfig(name, config: Config)` — the bot calls `main.run()`, `main.run_login()`, and `main.run_resync()` directly with the instance's `Config`.
 - Backup command (`/backup [monthly|yearly] [period]`) uses a two-step inline keyboard: first choose type
   (Monthly / Yearly), then choose the period. Direct args (`/backup monthly 2026-07`) skip the keyboards.
@@ -280,18 +280,24 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   `check-session` which only needs the data directory, not full credentials.
 - `read_instance()` — standalone helper that returns the logical instance name (`INSTANCE` env var, falling
   back to `OWNER_NAME` lowercased); used by `check-session` to look up `auth_state` in `sync.db`.
+- `read_optional_wallet_api_key()` — returns `WALLET_API_KEY` from env or `None`; used by the bot to allow an
+  explicit env override of the YAML wallet key without breaking the "no `os.getenv` outside `config.py`" rule.
 - All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
 ### Backup config derivation
 
 `BotConfig.from_env` builds `backup_cfg` with the following priority:
 
-1. **`WALLET_API_KEY` env var set** → `BackupConfig.from_env()` (backward-compatible path, reads `DATA_DIR` too).
-2. **`WALLET_API_KEY` absent + instances YAML loaded** → `BackupConfig` is derived from the first instance's
-   `wallet_api_key`; `data_dir` is set to `instances_yaml.data_dir / "backup"`; Telegram credentials are taken
-   from `instances_yaml.telegram_bot_token` / `telegram_chat_id` (resolved from YAML or env var by
-   `InstancesConfig.load`). This is the path used in the single-container deployment.
-3. **Neither** → `backup_cfg` is `None` and `/backup` commands are disabled in the bot.
+1. **`WALLET_API_KEY` env var set** → used as override; `BackupConfig` is derived from
+   `BackupConfig.from_instances_yaml(instances_yaml, wallet_api_key=env_key)`.
+2. **`WALLET_API_KEY` absent** → `BackupConfig` is derived from the first instance's
+   `wallet_api_key`; `data_dir` is set to `instances_yaml.data_dir / "backup"`; Telegram credentials
+   are taken from `instances_yaml.telegram_bot_token` / `telegram_chat_id`.
+3. **No instances in YAML** → `backup_cfg` is `None` and `/backup` commands are disabled.
+
+The `backup` CLI command (`python -m app backup`) always loads config exclusively from
+`InstancesConfig` via `_resolve_backup_cfg()`. There is no `WALLET_API_KEY` env fallback for
+the CLI command — `INSTANCES_CONFIG` must be set.
 
 ### Multi-instance YAML config (#145)
 
@@ -340,9 +346,8 @@ sync:
       wallet_portfolio_account_id: "..."
 ```
 
-Flat top-level `instances:` (legacy format without a `sync:` section) is still accepted for
-backward compatibility.  In that layout schedules must be provided externally; `sync_schedule`
-and `backup_schedule` will be `None`.
+The `sync:` section is **required** — files without it raise `ValueError` with a clear message
+pointing to `instances.yml.example`.
 
 **Key behaviours:**
 - Each instance gets its own `data_dir/{name}/` subdirectory (session files, `sync.db`, logs).
