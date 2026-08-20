@@ -1,0 +1,18 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 216-220
+deploy/example/tr-sync.sh
+  h_97a91c9e567f87 117-123,125-132
+docker/app/entrypoint.sh
+  h_97a91c9e567f87 112-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "2f2d9e425c2b99a3cd0968c2c7512ca85f20867b",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
