@@ -106,6 +106,17 @@ def read_instances_config_path() -> Path:
     return Path(raw)
 
 
+def read_optional_wallet_api_key() -> str | None:
+    """Return ``WALLET_API_KEY`` from env, or ``None`` if absent or blank.
+
+    Used by the bot to let an explicit env override take precedence over the
+    key stored in the instances YAML.  All ``os.getenv`` calls must stay in
+    ``config.py``; callers must use this helper instead of calling
+    ``os.getenv`` directly.
+    """
+    return os.getenv("WALLET_API_KEY", "").strip() or None
+
+
 def read_data_dir() -> Path:
     """Return the data directory path from the DATA_DIR environment variable."""
     return Path(os.getenv("DATA_DIR", _DEFAULT_DATA_DIR))
@@ -211,19 +222,6 @@ class BackupConfig:
             **_read_notifier_env(),
             wallet_api_key=_required_env("WALLET_API_KEY"),
         )
-
-    @classmethod
-    def from_env_optional(cls) -> BackupConfig | None:
-        """Return a ``BackupConfig`` from env, or ``None`` if ``WALLET_API_KEY`` is absent.
-
-        Unlike ``from_env()``, this method treats a missing ``WALLET_API_KEY`` as
-        "backup not configured" and returns ``None``.  Any other ``ValueError``
-        (e.g. an invalid ``ALLOW_INSECURE_SSL`` value) is re-raised so that genuine
-        misconfiguration is not silently swallowed.
-        """
-        if not os.getenv("WALLET_API_KEY", "").strip():
-            return None
-        return cls.from_env()
 
     @classmethod
     def from_instances_yaml(
@@ -464,6 +462,39 @@ def _parse_instance(
     )
 
 
+def _parse_sync_section(
+    raw_sync: dict,
+) -> tuple[list, str | None, int | None, str | None, str | None]:
+    """Parse the ``sync:`` mapping and return its five components.
+
+    Returns a tuple of:
+    ``(raw_instances_list, global_wallet_key, global_lookback, global_cat, sync_schedule)``
+    """
+    raw_instances_list = raw_sync.get("instances") or []
+    global_wallet_key: str | None = raw_sync.get("wallet_api_key") or None
+    global_lookback: int | None = None
+    raw_gl = raw_sync.get("lookback_days")
+    if raw_gl is not None:
+        try:
+            global_lookback = int(raw_gl)
+        except (ValueError, TypeError) as err:
+            raise ValueError(
+                f"sync.lookback_days must be an integer, got: {raw_gl!r}"
+            ) from err
+    global_cat: str | None = raw_sync.get("category_strategy") or None
+    raw_sched = raw_sync.get("schedule")
+    sync_schedule: str | None = (
+        str(raw_sched).strip() if raw_sched is not None else None
+    ) or None
+    return (
+        raw_instances_list,
+        global_wallet_key,
+        global_lookback,
+        global_cat,
+        sync_schedule,
+    )
+
+
 @dataclass(frozen=True)
 class InstancesConfig:
     """Configuration for all sync instances, loaded from a YAML file.
@@ -472,14 +503,7 @@ class InstancesConfig:
     Each instance gets its own ``data_dir`` subdirectory:
     ``{root_data_dir}/{instance.name}/``.
 
-    Supports two YAML layouts:
-
-    *Flat* (legacy)::
-
-        instances:
-          - name: …
-
-    *Nested* (current)::
+    Required YAML layout::
 
         sync:
           schedule: "…"          # global default, overridable per instance
@@ -515,33 +539,22 @@ class InstancesConfig:
                 f"{type(data).__name__ if data is not None else 'empty file'}"
             )
 
-        # Detect layout: nested (sync.instances) vs flat (top-level instances).
         raw_sync = data.get("sync")
-        if raw_sync is not None:
-            if not isinstance(raw_sync, dict):
-                raise ValueError("'sync' must be a YAML mapping")
-            raw_instances_list = raw_sync.get("instances") or []
-            global_wallet_key: str | None = raw_sync.get("wallet_api_key") or None
-            global_lookback: int | None = None
-            raw_gl = raw_sync.get("lookback_days")
-            if raw_gl is not None:
-                try:
-                    global_lookback = int(raw_gl)
-                except (ValueError, TypeError) as err:
-                    raise ValueError(
-                        f"sync.lookback_days must be an integer, got: {raw_gl!r}"
-                    ) from err
-            global_cat: str | None = raw_sync.get("category_strategy") or None
-            raw_sched = raw_sync.get("schedule")
-            sync_schedule: str | None = (
-                str(raw_sched).strip() if raw_sched is not None else None
-            ) or None
-        else:
-            raw_instances_list = data.get("instances") or []
-            global_wallet_key = None
-            global_lookback = None
-            global_cat = None
-            sync_schedule = None
+        if raw_sync is None:
+            raise ValueError(
+                "instances config must have a 'sync' section — "
+                "see instances.yml.example for the required format"
+            )
+        if not isinstance(raw_sync, dict):
+            raise ValueError("'sync' must be a YAML mapping")
+
+        (
+            raw_instances_list,
+            global_wallet_key,
+            global_lookback,
+            global_cat,
+            sync_schedule,
+        ) = _parse_sync_section(raw_sync)
 
         if not raw_instances_list:
             raise ValueError("instances config must define at least one instance")

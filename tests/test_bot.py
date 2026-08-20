@@ -96,54 +96,58 @@ _VALID_ENV = {
 _YAML_CONTENT = """
 telegram_bot_token: "mytoken"
 telegram_chat_id: "123"
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key1"
-    wallet_cash_account_id: "cash1"
-    wallet_portfolio_account_id: "portfolio1"
-  - name: user2
-    phone: "+34611111111"
-    pin: "5678"
-    wallet_api_key: "key2"
-    wallet_cash_account_id: "cash2"
-    wallet_portfolio_account_id: "portfolio2"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key1"
+      wallet_cash_account_id: "cash1"
+      wallet_portfolio_account_id: "portfolio1"
+    - name: user2
+      phone: "+34611111111"
+      pin: "5678"
+      wallet_api_key: "key2"
+      wallet_cash_account_id: "cash2"
+      wallet_portfolio_account_id: "portfolio2"
 """
 
 _YAML_NO_TOKEN = """
 telegram_chat_id: "123"
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key1"
-    wallet_cash_account_id: "cash1"
-    wallet_portfolio_account_id: "portfolio1"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key1"
+      wallet_cash_account_id: "cash1"
+      wallet_portfolio_account_id: "portfolio1"
 """
 
 _YAML_NO_CHAT_ID = """
 telegram_bot_token: "mytoken"
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key1"
-    wallet_cash_account_id: "cash1"
-    wallet_portfolio_account_id: "portfolio1"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key1"
+      wallet_cash_account_id: "cash1"
+      wallet_portfolio_account_id: "portfolio1"
 """
 
 # Unquoted numeric scalars — YAML loads these as int, not str.
 _YAML_NUMERIC_CHAT_ID = """
 telegram_bot_token: "mytoken"
 telegram_chat_id: 123
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key1"
-    wallet_cash_account_id: "cash1"
-    wallet_portfolio_account_id: "portfolio1"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key1"
+      wallet_cash_account_id: "cash1"
+      wallet_portfolio_account_id: "portfolio1"
 """
 
 
@@ -301,12 +305,17 @@ def test_botconfig_from_env_numeric_chat_id_in_yaml(monkeypatch):
 
 
 def test_botconfig_from_env_invalid_allow_insecure_ssl_raises(monkeypatch):
-    """A bad ALLOW_INSECURE_SSL value must propagate as ValueError, not be silently swallowed."""
+    """A bad allow_insecure_ssl value in the YAML must propagate as ValueError."""
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.setenv("WALLET_API_KEY", "key")
-    monkeypatch.setenv("ALLOW_INSECURE_SSL", "not-a-bool")
-    with _mock_instances_load(), pytest.raises(ValueError, match="ALLOW_INSECURE_SSL"):
+    bad_yaml = _YAML_CONTENT.replace(
+        'telegram_bot_token: "mytoken"',
+        'allow_insecure_ssl: "not-a-bool"\ntelegram_bot_token: "mytoken"',
+    )
+    with (
+        _mock_instances_load(bad_yaml),
+        pytest.raises(ValueError, match="allow_insecure_ssl"),
+    ):
         BotConfig.from_env()
 
 

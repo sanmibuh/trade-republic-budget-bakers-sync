@@ -100,6 +100,17 @@ def _mock_cfg(tmp_path):
     return cfg
 
 
+def _mock_backup_cfg(tmp_path):
+    cfg = MagicMock()
+    cfg.wallet_api_key = "key"
+    cfg.telegram_bot_token = None
+    cfg.telegram_chat_id = None
+    cfg.owner_name = "Test"
+    cfg.data_dir = tmp_path
+    cfg.allow_insecure_ssl = False
+    return cfg
+
+
 # ---------------------------------------------------------------------------
 # backup auto
 # ---------------------------------------------------------------------------
@@ -109,8 +120,8 @@ def test_backup_auto_calls_run_auto(tmp_path):
     with (
         patch("app.__main__.setup_logging") as mock_setup_log,
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -122,55 +133,30 @@ def test_backup_auto_calls_run_auto(tmp_path):
     mock_setup_log.assert_called_once_with(tmp_path / "logs")
 
 
-def test_backup_auto_falls_back_to_instances_config_when_no_wallet_key(tmp_path):
-    """backup auto uses InstancesConfig as fallback when WALLET_API_KEY is not set."""
-    import yaml
-
+def test_backup_auto_loads_config_from_instances_yaml(tmp_path):
+    """backup auto resolves config exclusively from InstancesConfig."""
     from app.config import BackupConfig
 
-    cfg_file = tmp_path / "instances.yml"
-    cfg_file.write_text(
-        yaml.dump(
-            {
-                "data_dir": str(tmp_path),
-                "telegram_bot_token": "tok",
-                "telegram_chat_id": "chat",
-                "instances": [
-                    {
-                        "name": "user1",
-                        "phone": "+34600000000",
-                        "pin": "1234",
-                        "wallet_api_key": "yamlkey",
-                        "wallet_cash_account_id": "cash1",
-                        "wallet_portfolio_account_id": "port1",
-                    }
-                ],
-            }
-        )
-    )
     expected_cfg = BackupConfig(
         owner_name="Backup",
         wallet_api_key="yamlkey",
-        telegram_bot_token="tok",
-        telegram_chat_id="chat",
+        telegram_bot_token=None,
+        telegram_chat_id=None,
         data_dir=tmp_path / "backup",
         allow_insecure_ssl=False,
     )
     with (
         patch("app.__main__.setup_logging"),
-        patch("app.config.BackupConfig.from_env_optional", return_value=None),
         patch(
-            "app.config.BackupConfig.from_instances_yaml", return_value=expected_cfg
-        ) as mock_from_yaml,
+            "app.__main__._resolve_backup_cfg", return_value=expected_cfg
+        ) as mock_resolve,
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
         patch("app.backup.run_auto") as mock_auto,
     ):
-        result = _runner().invoke(
-            cli, ["backup", "auto"], env={"INSTANCES_CONFIG": str(cfg_file)}
-        )
+        result = _runner().invoke(cli, ["backup", "auto"])
     assert result.exit_code == 0, result.output
-    mock_from_yaml.assert_called_once()
+    mock_resolve.assert_called_once()
     mock_auto.assert_called_once()
 
 
@@ -183,8 +169,8 @@ def test_backup_monthly_default_calls_run_monthly(tmp_path):
     with (
         patch("app.__main__.setup_logging"),
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -199,8 +185,8 @@ def test_backup_monthly_with_param(tmp_path):
     with (
         patch("app.__main__.setup_logging"),
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -216,8 +202,8 @@ def test_backup_monthly_invalid_param_exits(tmp_path):
     with (
         patch("app.__main__.setup_logging"),
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -235,8 +221,8 @@ def test_backup_yearly_default_calls_run_yearly(tmp_path):
     with (
         patch("app.__main__.setup_logging"),
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -251,8 +237,8 @@ def test_backup_yearly_with_param(tmp_path):
     with (
         patch("app.__main__.setup_logging"),
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -267,8 +253,8 @@ def test_backup_yearly_invalid_param_exits(tmp_path):
     with (
         patch("app.__main__.setup_logging"),
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
