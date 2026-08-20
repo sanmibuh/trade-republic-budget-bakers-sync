@@ -109,11 +109,25 @@ if [ -n "$INSTANCES_CONFIG" ]; then
     # Keep the shell as PID 1 so it can forward signals to both children and
     # reap them cleanly when the container is stopped.
     trap 'log "Received signal — stopping cron and bot"; kill "$CRON_PID" "$BOT_PID" 2>/dev/null' TERM INT
-    wait "$BOT_PID"
-    BOT_EXIT=$?
-    kill "$CRON_PID" 2>/dev/null
-    wait "$CRON_PID" 2>/dev/null
-    exit "$BOT_EXIT"
+    # Supervise both processes: if either exits unexpectedly the container
+    # should restart rather than silently run in a degraded state.
+    while true; do
+        if ! kill -0 "$CRON_PID" 2>/dev/null; then
+            log "ERROR: cron exited unexpectedly. Stopping bot and aborting."
+            kill "$BOT_PID" 2>/dev/null
+            wait "$BOT_PID" 2>/dev/null
+            exit 1
+        fi
+        if ! kill -0 "$BOT_PID" 2>/dev/null; then
+            wait "$BOT_PID"
+            BOT_EXIT=$?
+            log "Bot exited (code $BOT_EXIT). Stopping cron."
+            kill "$CRON_PID" 2>/dev/null
+            wait "$CRON_PID" 2>/dev/null
+            exit "$BOT_EXIT"
+        fi
+        sleep 5
+    done
 fi
 
 # ------------------------------------------------------------------

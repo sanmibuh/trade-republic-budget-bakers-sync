@@ -213,8 +213,11 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   - Calls `python -m app list-instances` to enumerate instance names from the YAML file.
   - Registers one `SYNC_SCHEDULE` cron job per instance: `python -m app sync --instance <name>`.
   - Optionally registers `BACKUP_SCHEDULE` cron job for `python -m app backup auto` when `BACKUP_SCHEDULE` is set.
-  - Starts the cron daemon in the background (`cron`), then starts the Telegram bot as the foreground
-    process (`exec python -m app bot`). The bot is PID 1; Docker monitors its health.
+  - Starts the cron daemon in the background (`cron -f &`), then starts the Telegram bot also in
+    the background (`python -m app bot &`). The shell remains as PID 1 and supervises both children:
+    if either process exits unexpectedly the shell kills the other and exits non-zero so Docker can
+    restart the container. A `SIGTERM`/`SIGINT` trap ensures both children are stopped cleanly on
+    `docker stop`.
   - `MODE` env var is ignored in this mode.
   - All instances share one log file: `{DATA_DIR}/logs/sync.log`.
   - Requires `SYNC_SCHEDULE` to be set; exits with an error if missing.

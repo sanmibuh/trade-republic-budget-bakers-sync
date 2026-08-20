@@ -114,7 +114,22 @@ case "$COMMAND" in
             echo "Error: mode required (auto | monthly | yearly)"
             usage; exit 1
         fi
+        case "$MODE" in
+            auto|monthly|yearly) ;;
+            *)
+                echo "Error: invalid backup mode '$MODE' (allowed: auto | monthly | yearly)"
+                exit 1
+                ;;
+        esac
         if [ -n "$PARAM" ]; then
+            # PARAM is a date string: YYYY-MM for monthly, YYYY for yearly.
+            case "$PARAM" in
+                [0-9][0-9][0-9][0-9]-[0-9][0-9]|[0-9][0-9][0-9][0-9]) ;;
+                *)
+                    echo "Error: invalid param '$PARAM' (expected YYYY-MM or YYYY)"
+                    exit 1
+                    ;;
+            esac
             docker compose -f "$COMPOSE_FILE" run --rm \
                 -e CMD="backup $MODE $PARAM" \
                 "$SERVICE"
