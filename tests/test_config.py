@@ -276,44 +276,6 @@ def _make_instances_yaml(
     )
 
 
-def _make_instances_yaml(
-    wallet_api_key: str = "yamlkey",
-    telegram_bot_token: str | None = "yamltoken",
-    telegram_chat_id: str | None = "yamlchat",
-    allow_insecure_ssl: bool = False,
-    data_dir: str = "/app/data",
-    empty: bool = False,
-) -> InstancesConfig:
-    from pathlib import Path
-
-    instances = (
-        []
-        if empty
-        else [
-            __import__("app.config", fromlist=["InstanceConfig"]).InstanceConfig(
-                name="user1",
-                phone="+34600000000",
-                pin="1234",
-                wallet_api_key=wallet_api_key,
-                wallet_cash_account_id="cash1",
-                wallet_portfolio_account_id="port1",
-                owner_name=None,
-                lookback_days=7,
-                dedup_ttl_days=60,
-                label_ids={},
-                category_strategy="none",
-            )
-        ]
-    )
-    return InstancesConfig(
-        instances=instances,
-        data_dir=Path(data_dir),
-        telegram_bot_token=telegram_bot_token,
-        telegram_chat_id=telegram_chat_id,
-        allow_insecure_ssl=allow_insecure_ssl,
-    )
-
-
 def test_backup_config_from_instances_yaml_uses_first_instance_wallet_key():
     yaml = _make_instances_yaml(wallet_api_key="yamlkey")
     cfg = BackupConfig.from_instances_yaml(yaml)

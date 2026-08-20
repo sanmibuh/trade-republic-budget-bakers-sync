@@ -93,9 +93,10 @@ if [ -n "$INSTANCES_CONFIG" ]; then
     cat "$CRONTAB_FILE"
 
     log "Starting cron daemon in background"
-    cron
-    # Verify cron is actually running before starting the bot.
-    if ! pgrep cron > /dev/null 2>&1; then
+    cron -f &
+    CRON_PID=$!
+    # Verify cron started successfully (no race — kill -0 checks the PID directly).
+    if ! kill -0 "$CRON_PID" 2>/dev/null; then
         log "ERROR: cron failed to start. Aborting."
         exit 1
     fi
