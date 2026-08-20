@@ -18,7 +18,11 @@
 #   per instance (python -m app sync --instance <name>) using SYNC_SCHEDULE.
 #   Optionally registers the backup job when BACKUP_SCHEDULE is also set.
 #   The MODE env var is ignored in this mode.
-#   Each instance logs to its own data_dir/<name>/sync.log (handled by the app).
+#   After registering cron jobs, starts the cron daemon in the background and
+#   then starts the Telegram bot as a background process. The shell remains as
+#   PID 1, traps SIGTERM/INT, and waits for the bot to exit — ensuring both
+#   processes are stopped cleanly when the container is shut down.
+#   All instances log to the shared {DATA_DIR}/logs/sync.log file.
 #
 # CMD override: if set, run a one-shot command and exit regardless of MODE.
 #   CMD="sync"
@@ -90,7 +94,40 @@ if [ -n "$INSTANCES_CONFIG" ]; then
     log "Crontab registered:"
     cat "$CRONTAB_FILE"
 
-    exec cron -f
+    log "Starting cron daemon in background"
+    cron -f &
+    CRON_PID=$!
+    # Verify cron started successfully (no race — kill -0 checks the PID directly).
+    if ! kill -0 "$CRON_PID" 2>/dev/null; then
+        log "ERROR: cron failed to start. Aborting."
+        exit 1
+    fi
+
+    log "Starting Telegram bot"
+    python -m app bot &
+    BOT_PID=$!
+    # Keep the shell as PID 1 so it can forward signals to both children and
+    # reap them cleanly when the container is stopped.
+    trap 'log "Received signal — stopping cron and bot"; kill "$CRON_PID" "$BOT_PID" 2>/dev/null; wait "$CRON_PID" "$BOT_PID" 2>/dev/null; exit 0' TERM INT
+    # Supervise both processes: if either exits unexpectedly the container
+    # should restart rather than silently run in a degraded state.
+    while true; do
+        if ! kill -0 "$CRON_PID" 2>/dev/null; then
+            log "ERROR: cron exited unexpectedly. Stopping bot and aborting."
+            kill "$BOT_PID" 2>/dev/null
+            wait "$BOT_PID" 2>/dev/null
+            exit 1
+        fi
+        if ! kill -0 "$BOT_PID" 2>/dev/null; then
+            wait "$BOT_PID"
+            BOT_EXIT=$?
+            log "Bot exited (code $BOT_EXIT). Stopping cron."
+            kill "$CRON_PID" 2>/dev/null
+            wait "$CRON_PID" 2>/dev/null
+            exit "$BOT_EXIT"
+        fi
+        sleep 5
+    done
 fi
 
 # ------------------------------------------------------------------

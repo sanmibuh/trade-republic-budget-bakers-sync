@@ -31,6 +31,8 @@ make run-bot                           # start Telegram bot
 
 ## Folder structure
 
+### In this repository (`deploy/`)
+
 ```
 deploy/
   DEPLOY.md           # this guide
@@ -40,25 +42,26 @@ deploy/
     data/               # written by local runs (never committed)
   example/            # example config files (no secrets)
     docker-compose.yml
-    wallet.env.example
-    telegram.env.example
-    sync-1.env.example
-    sync-2.env.example
     instances.yml.example
-  nas/
-    current/          # next version — rename to vXXX after deploy
-      docker-compose.yml
-      wallet.env      # real credentials (never committed)
-      telegram.env    # real credentials (never committed)
-      sync-1.env      # per-account credentials (never committed)
-      sync-2.env
-      instances.yml   # multi-instance YAML config (never committed)
-      tr-sync.sh      # management script
-    v201/             # v2.0.1 — deployed, read-only
-      ...
+    tr-sync.sh
 ```
 
-`current/` is always the work in progress. After deploying, rename it with the release tag (`v300`, `v310`, etc.) as a read-only snapshot.
+### On the NAS (not in git)
+
+The NAS folder (e.g. `/share/docker/tr-sync/`) is managed outside git.
+Its layout mirrors the versioned snapshots kept there:
+
+```
+/share/docker/tr-sync/    # example NAS path — adjust to your setup
+  current/                # work in progress — rename to vXXX after deploy
+    docker-compose.yml
+    instances.yml         # all credentials (never committed to git)
+    tr-sync.sh            # management script
+  v201/                   # v2.0.1 — deployed, read-only snapshot
+    ...
+```
+
+`current/` is always the work in progress. After deploying, rename it with the release tag (`v300`, `v710`, etc.) as a read-only snapshot.
 
 ---
 
@@ -66,48 +69,44 @@ deploy/
 
 ### 1. Copy files to the NAS
 
-Copy the contents of `deploy/example/` to a folder on the NAS (e.g. `/share/docker/tr-sync/`).
+Copy `docker-compose.yml`, `tr-sync.sh`, and `instances.yml.example` from `deploy/example/` to a folder on the NAS
+(e.g. `/share/docker/tr-sync/`).
 
-### 2. Fill in credentials
+### 2. Create `instances.yml`
 
-Rename the example files and fill in real values:
-
-```sh
-cp wallet.env.example       wallet.env
-cp telegram.env.example     telegram.env
-cp sync-1.env.example       sync-1.env
-cp sync-2.env.example       sync-2.env
-cp instances.yml.example    instances.yml
-```
-
-- `wallet.env` — BudgetBakers Wallet API key (backup service and Telegram bot when backup commands are enabled)
-- `telegram.env` — Telegram bot token and chat ID (all services)
-- `sync-1.env` — Trade Republic phone and PIN for account 1
-- `sync-2.env` — Trade Republic phone and PIN for account 2
-- `instances.yml` — All instance credentials for the Telegram bot (phone, PIN, Wallet keys per instance)
-
-### 3. Bootstrap (one-time interactive 2FA login)
+Copy the example and fill in real values:
 
 ```sh
-./tr-sync.sh bootstrap sync-1
-./tr-sync.sh bootstrap sync-2
+cp instances.yml.example instances.yml
 ```
 
-Approve the push notification in the Trade Republic app (or enter the authenticator code). The session is saved to the data volume and reused automatically.
+Edit `instances.yml` with your credentials:
 
-### 4. Start all services
+- `telegram_bot_token` / `telegram_chat_id` — Telegram bot credentials (global, shared by all instances)
+- Per instance: Trade Republic phone, PIN, and BudgetBakers Wallet API key + account IDs
+
+See `instances.yml.example` for the full format.
+
+### 3. Create the data directory
+
+```sh
+mkdir -p data
+```
+
+### 4. Bootstrap — first-time interactive 2FA login
+
+```sh
+./tr-sync.sh bootstrap user1
+./tr-sync.sh bootstrap user2
+```
+
+Approve the push notification in the Trade Republic app (or enter the authenticator code).
+The session is saved to the data volume and reused automatically.
+
+### 5. Start the container
 
 ```sh
 ./tr-sync.sh up
-```
-
-Or start individually:
-
-```sh
-./tr-sync.sh up sync-1
-./tr-sync.sh up sync-2
-./tr-sync.sh up backup
-./tr-sync.sh up telegram-bot
 ```
 
 ---
@@ -122,21 +121,15 @@ image: ghcr.io/sanmibuh/tr-wallet-sync:v3.1.0
 
 ### 2. Copy updated files to the NAS
 
-Copy `docker-compose.yml` and `tr-sync.sh` from `current/` to the NAS folder. Leave `.env` files untouched.
+Copy `docker-compose.yml` and `tr-sync.sh` from `current/` to the NAS folder.
+Leave `instances.yml` untouched.
 
 ### 3. Upgrade on the NAS
 
 ```sh
 cd /share/docker/tr-sync
 
-./tr-sync.sh upgrade          # pull + down + up for all services
-```
-
-Or per service if you want more control:
-
-```sh
-./tr-sync.sh upgrade sync-1
-./tr-sync.sh upgrade telegram-bot
+./tr-sync.sh upgrade
 ```
 
 ### 4. Rename `current/` with the release tag
@@ -152,13 +145,10 @@ Then copy the new version contents into a fresh `current/` when preparing the ne
 ## Day-to-day operations
 
 ```sh
-./tr-sync.sh logs  sync-1        # follow logs in real time
-./tr-sync.sh sync  sync-1        # force a manual one-shot sync
-./tr-sync.sh down  sync-1        # stop a service
-./tr-sync.sh up    sync-1        # start a service
-./tr-sync.sh down                # stop all services
-./tr-sync.sh up                  # start all services
-./tr-sync.sh logs  telegram-bot  # follow bot logs
+./tr-sync.sh logs              # follow container logs
+./tr-sync.sh sync user1        # force a manual one-shot sync for instance "user1"
+./tr-sync.sh down              # stop the container
+./tr-sync.sh up                # start the container
 ```
 
 ---
@@ -183,23 +173,21 @@ Trade Republic sessions expire on a hard 24h cap, so a scheduled sync will event
 2. The bot replies asking for the authenticator code. Reply with the 6-digit code as a plain message.
    Push-approval accounts (no authenticator) just approve in the app — no code needed.
 3. If multiple logins are pending simultaneously (unlikely), the bot will ask you to disambiguate.
-   In that case use the explicit form: `/code <instance> <code>` — e.g. `/code david 123456`.
+   In that case use the explicit form: `/code <instance> <code>` — e.g. `/code user1 123456`.
 
 **From the NAS (interactive bootstrap):**
 
 ```sh
-./tr-sync.sh bootstrap sync-1   # renew 2FA login for account 1
+./tr-sync.sh bootstrap user1   # renew 2FA login for instance "user1"
 ```
 
 ---
 
 ## Production schedules
 
-Defined in `docker-compose.yml` under each service's `environment:`.
+Defined in `docker-compose.yml` under `environment:`.
 
-| Service      | SYNC_SCHEDULE       | BACKUP_SCHEDULE |
-|--------------|---------------------|-----------------|
-| sync-1       | `0 8,14,21 * * *`   | —               |
-| sync-2       | `5 8,14,21 * * *`   | —               |
-| backup       | —                   | `0 3 * * *`     |
-| telegram-bot | —                   | —               |
+| Variable          | Value               | Purpose                          |
+|-------------------|---------------------|----------------------------------|
+| `SYNC_SCHEDULE`   | `0 8,14,21 * * *`   | Sync all instances (via cron)    |
+| `BACKUP_SCHEDULE` | `0 3 * * *`         | Automatic daily backup (via cron)|

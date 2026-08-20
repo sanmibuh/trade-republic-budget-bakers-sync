@@ -56,11 +56,11 @@ from app.bot_keyboards import (
 )
 from app.config import (
     BackupConfig,
-    BotEnv,
     Config,
     InstancesConfig,
     has_valid_session,
     read_instances_config_path,
+    read_telegram_verify_ssl,
 )
 from app.main import (
     run as _main_run,
@@ -113,11 +113,26 @@ class BotConfig:
 
     @classmethod
     def from_env(cls, instances_yaml: InstancesConfig | None = None) -> BotConfig:
-        env = BotEnv.from_env()
-
         if instances_yaml is None:
             path = read_instances_config_path()
             instances_yaml = InstancesConfig.load(path)
+
+        # Telegram credentials: InstancesConfig.load already consolidates YAML values
+        # with env-var fallbacks (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID), so
+        # instances_yaml.telegram_bot_token is the resolved value from either source.
+        # Strip whitespace to match the behaviour of _required_env().
+        bot_token = str(instances_yaml.telegram_bot_token or "").strip() or None
+        chat_id = str(instances_yaml.telegram_chat_id or "").strip() or None
+        if not bot_token:
+            raise ValueError(
+                "Missing required credential TELEGRAM_BOT_TOKEN "
+                "(set in the instances config file or as an environment variable)"
+            )
+        if not chat_id:
+            raise ValueError(
+                "Missing required credential TELEGRAM_CHAT_ID "
+                "(set in the instances config file or as an environment variable)"
+            )
 
         instances: dict[str, InstanceConfig] = {}
         for inst in instances_yaml.instances:
@@ -127,14 +142,25 @@ class BotConfig:
                 config=full_cfg,
             )
 
-        backup_cfg: BackupConfig | None = BackupConfig.from_env_optional()
+        # Always derive backup_cfg from instances_yaml so that Telegram credentials,
+        # data_dir, and allow_insecure_ssl are consistent with the sync instances.
+        # wallet_api_key uses WALLET_API_KEY env var when set (backward-compat),
+        # otherwise falls back to the first instance's key (single-container path).
+        env_backup = BackupConfig.from_env_optional()
+        env_wallet_key = env_backup.wallet_api_key if env_backup else None
+        backup_cfg = BackupConfig.from_instances_yaml(
+            instances_yaml, wallet_api_key=env_wallet_key
+        )
+        if backup_cfg is None:
+            # No instances in YAML and no env key — backup disabled.
+            backup_cfg = env_backup
 
         return cls(
-            bot_token=env.bot_token,
-            chat_id=env.chat_id,
+            bot_token=bot_token,
+            chat_id=chat_id,
             instances=instances,
             backup_cfg=backup_cfg,
-            telegram_verify_ssl=env.telegram_verify_ssl,
+            telegram_verify_ssl=read_telegram_verify_ssl(),
             log_dir=instances_yaml.data_dir / "logs",
             allow_insecure_ssl=instances_yaml.allow_insecure_ssl,
         )

@@ -90,8 +90,6 @@ def _bot(
 # ---------------------------------------------------------------------------
 
 _VALID_ENV = {
-    "TELEGRAM_BOT_TOKEN": "mytoken",
-    "TELEGRAM_CHAT_ID": "123",
     "INSTANCES_CONFIG": "/fake/instances.yml",
 }
 
@@ -111,6 +109,41 @@ instances:
     wallet_api_key: "key2"
     wallet_cash_account_id: "cash2"
     wallet_portfolio_account_id: "portfolio2"
+"""
+
+_YAML_NO_TOKEN = """
+telegram_chat_id: "123"
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key1"
+    wallet_cash_account_id: "cash1"
+    wallet_portfolio_account_id: "portfolio1"
+"""
+
+_YAML_NO_CHAT_ID = """
+telegram_bot_token: "mytoken"
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key1"
+    wallet_cash_account_id: "cash1"
+    wallet_portfolio_account_id: "portfolio1"
+"""
+
+# Unquoted numeric scalars — YAML loads these as int, not str.
+_YAML_NUMERIC_CHAT_ID = """
+telegram_bot_token: "mytoken"
+telegram_chat_id: 123
+instances:
+  - name: user1
+    phone: "+34600000000"
+    pin: "1234"
+    wallet_api_key: "key1"
+    wallet_cash_account_id: "cash1"
+    wallet_portfolio_account_id: "portfolio1"
 """
 
 
@@ -165,13 +198,53 @@ def test_botconfig_from_env_instances_have_config_objects(monkeypatch):
     assert cfg.instances["user1"].config.phone_number == "+34600000000"
 
 
-def test_botconfig_from_env_backup_disabled_when_wallet_key_absent(monkeypatch):
+def test_botconfig_from_env_backup_from_yaml_when_env_key_absent(monkeypatch):
+    """When WALLET_API_KEY is not set, backup_cfg is derived from the first instance in YAML."""
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
     monkeypatch.delenv("WALLET_API_KEY", raising=False)
     with _mock_instances_load():
         cfg = BotConfig.from_env()
-    assert cfg.backup_cfg is None
+    assert cfg.backup_cfg is not None
+    assert cfg.backup_cfg.wallet_api_key == "key1"
+
+
+def test_botconfig_from_env_backup_yaml_data_dir_is_backup_subdir(monkeypatch):
+    """Backup data_dir derived from YAML uses instances data_dir / 'backup'."""
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("WALLET_API_KEY", raising=False)
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert cfg.backup_cfg is not None
+    assert cfg.backup_cfg.data_dir.name == "backup"
+
+
+def test_botconfig_from_env_backup_env_key_takes_precedence_over_yaml(monkeypatch):
+    """When WALLET_API_KEY env var is set, it takes precedence over the YAML instance key."""
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("WALLET_API_KEY", "envkey")
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert cfg.backup_cfg is not None
+    assert cfg.backup_cfg.wallet_api_key == "envkey"
+
+
+def test_botconfig_from_env_backup_uses_yaml_telegram_when_env_wallet_key_set(
+    monkeypatch,
+):
+    """Even when WALLET_API_KEY is set in env, Telegram creds come from instances YAML."""
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("WALLET_API_KEY", "envkey")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert cfg.backup_cfg is not None
+    assert cfg.backup_cfg.telegram_bot_token == "mytoken"
+    assert cfg.backup_cfg.telegram_chat_id == "123"
 
 
 def test_botconfig_from_env_backup_enabled_when_wallet_key_present(monkeypatch):
@@ -187,17 +260,44 @@ def test_botconfig_from_env_backup_enabled_when_wallet_key_present(monkeypatch):
 def test_botconfig_from_env_missing_token(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN")
-    with pytest.raises(ValueError, match="TELEGRAM_BOT_TOKEN"):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    with (
+        _mock_instances_load(_YAML_NO_TOKEN),
+        pytest.raises(ValueError, match="TELEGRAM_BOT_TOKEN"),
+    ):
         BotConfig.from_env()
 
 
 def test_botconfig_from_env_missing_chat_id(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID")
-    with pytest.raises(ValueError, match="TELEGRAM_CHAT_ID"):
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    with (
+        _mock_instances_load(_YAML_NO_CHAT_ID),
+        pytest.raises(ValueError, match="TELEGRAM_CHAT_ID"),
+    ):
         BotConfig.from_env()
+
+
+def test_botconfig_from_env_token_from_yaml_only(monkeypatch):
+    """TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID can come from instances.yml without env vars."""
+    monkeypatch.setenv("INSTANCES_CONFIG", "/fake/instances.yml")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert cfg.bot_token == "mytoken"
+    assert cfg.chat_id == "123"
+
+
+def test_botconfig_from_env_numeric_chat_id_in_yaml(monkeypatch):
+    """Unquoted numeric telegram_chat_id in YAML (loaded as int) must not raise AttributeError."""
+    monkeypatch.setenv("INSTANCES_CONFIG", "/fake/instances.yml")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    with _mock_instances_load(_YAML_NUMERIC_CHAT_ID):
+        cfg = BotConfig.from_env()
+    assert cfg.chat_id == "123"
 
 
 def test_botconfig_from_env_invalid_allow_insecure_ssl_raises(monkeypatch):
@@ -239,7 +339,7 @@ def test_botconfig_telegram_verify_ssl_invalid(monkeypatch):
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
     monkeypatch.setenv("TELEGRAM_VERIFY_SSL", "maybe")
-    with pytest.raises(ValueError, match="TELEGRAM_VERIFY_SSL"):
+    with _mock_instances_load(), pytest.raises(ValueError, match="TELEGRAM_VERIFY_SSL"):
         BotConfig.from_env()
 
 

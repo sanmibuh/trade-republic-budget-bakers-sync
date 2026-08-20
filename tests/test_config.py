@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.config import BackupConfig, Config, has_valid_session, read_instance
+from app.config import (
+    BackupConfig,
+    Config,
+    InstanceConfig,
+    InstancesConfig,
+    has_valid_session,
+    read_instance,
+)
 
 BASE_ENV = {
     "PHONE_NUMBER": "+34600000000",
@@ -227,8 +234,88 @@ def test_backup_config_allow_insecure_ssl_true_when_set(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# has_valid_session
+# BackupConfig.from_instances_yaml
 # ---------------------------------------------------------------------------
+
+
+def _make_instances_yaml(
+    wallet_api_key: str = "yamlkey",
+    telegram_bot_token: str | None = "yamltoken",
+    telegram_chat_id: str | None = "yamlchat",
+    allow_insecure_ssl: bool = False,
+    data_dir: str = "/app/data",
+    empty: bool = False,
+) -> InstancesConfig:
+    from pathlib import Path
+
+    instances = (
+        []
+        if empty
+        else [
+            InstanceConfig(
+                name="user1",
+                phone="+34600000000",
+                pin="1234",
+                wallet_api_key=wallet_api_key,
+                wallet_cash_account_id="cash1",
+                wallet_portfolio_account_id="port1",
+                owner_name=None,
+                lookback_days=7,
+                dedup_ttl_days=60,
+                label_ids={},
+                category_strategy="none",
+            )
+        ]
+    )
+    return InstancesConfig(
+        instances=instances,
+        data_dir=Path(data_dir),
+        telegram_bot_token=telegram_bot_token,
+        telegram_chat_id=telegram_chat_id,
+        allow_insecure_ssl=allow_insecure_ssl,
+    )
+
+
+def test_backup_config_from_instances_yaml_uses_first_instance_wallet_key():
+    yaml = _make_instances_yaml(wallet_api_key="yamlkey")
+    cfg = BackupConfig.from_instances_yaml(yaml)
+    assert cfg is not None
+    assert cfg.wallet_api_key == "yamlkey"
+
+
+def test_backup_config_from_instances_yaml_accepts_override_wallet_key():
+    yaml = _make_instances_yaml(wallet_api_key="yamlkey")
+    cfg = BackupConfig.from_instances_yaml(yaml, wallet_api_key="envkey")
+    assert cfg is not None
+    assert cfg.wallet_api_key == "envkey"
+
+
+def test_backup_config_from_instances_yaml_empty_instances_returns_none():
+    yaml = _make_instances_yaml(empty=True)
+    assert BackupConfig.from_instances_yaml(yaml) is None
+
+
+def test_backup_config_from_instances_yaml_data_dir_is_backup_subdir():
+    yaml = _make_instances_yaml(data_dir="/app/data")
+    cfg = BackupConfig.from_instances_yaml(yaml)
+    assert cfg is not None
+    assert str(cfg.data_dir) == "/app/data/backup"
+
+
+def test_backup_config_from_instances_yaml_uses_yaml_telegram_creds():
+    yaml = _make_instances_yaml(telegram_bot_token="tok", telegram_chat_id="chat")
+    cfg = BackupConfig.from_instances_yaml(yaml)
+    assert cfg is not None
+    assert cfg.telegram_bot_token == "tok"
+    assert cfg.telegram_chat_id == "chat"
+
+
+def test_backup_config_from_instances_yaml_propagates_allow_insecure_ssl():
+    yaml = _make_instances_yaml(allow_insecure_ssl=True)
+    cfg = BackupConfig.from_instances_yaml(yaml)
+    assert cfg is not None
+    assert cfg.allow_insecure_ssl is True
+
 
 _FAR_FUTURE = 9_999_999_999
 _PAST = 1_000_000_000

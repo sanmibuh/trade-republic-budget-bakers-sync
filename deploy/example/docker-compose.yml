@@ -1,99 +1,30 @@
 name: tr-sync
 
-x-common: &common
-  image: ghcr.io/sanmibuh/tr-wallet-sync:v7.0.0
-  restart: unless-stopped
-
-# Health check for cron-based services (sync, backup).
-# Verifies that the cron daemon is still alive inside the container.
-x-healthcheck-cron: &healthcheck-cron
-  healthcheck:
-    test: ["CMD-SHELL", "pgrep cron > /dev/null || exit 1"]
-    interval: 60s
-    timeout: 5s
-    retries: 3
-    start_period: 15s
-
-x-sync-env: &sync-env
-  MODE: sync
-  LOOKBACK_DAYS: "10"
-  TZ: "Europe/Berlin"
-  # Optional: attach a BudgetBakers label UUID to records of these event types
-  # LABEL_BANK_TRANSACTION_INCOMING: "<uuid>"
-  # LABEL_BANK_TRANSACTION_OUTGOING: "<uuid>"
-
 services:
-  sync-1:
-    <<: [*common, *healthcheck-cron]
-    env_file:
-      - wallet.env
-      - telegram.env
-      - sync-1.env
-    environment:
-      <<: *sync-env
-      OWNER_NAME: "Account 1"
-      # INSTANCE must match the name used in instances.yml so that sync.db entries
-      # written by this container can be read by the bot under the same key.
-      INSTANCE: "1"
-      WALLET_CASH_ACCOUNT_ID: "<cash_account_uuid>"
-      WALLET_PORTFOLIO_ACCOUNT_ID: "<portfolio_account_uuid>"
-      SYNC_SCHEDULE: "0 8,14,21 * * *"
-    volumes:
-      - ./1:/app/data
-
-  sync-2:
-    <<: [*common, *healthcheck-cron]
-    env_file:
-      - wallet.env
-      - telegram.env
-      - sync-2.env
-    environment:
-      <<: *sync-env
-      OWNER_NAME: "Account 2"
-      INSTANCE: "2"   # must match the name used in instances.yml
-      WALLET_CASH_ACCOUNT_ID: "<cash_account_uuid>"
-      WALLET_PORTFOLIO_ACCOUNT_ID: "<portfolio_account_uuid>"
-      SYNC_SCHEDULE: "5 8,14,21 * * *"   # 5-minute offset to avoid API collision
-    volumes:
-      - ./2:/app/data
-
-  backup:
-    <<: [*common, *healthcheck-cron]
-    env_file:
-      - wallet.env
-      - telegram.env
-    environment:
-      MODE: backup
-      BACKUP_SCHEDULE: "0 3 * * *"
-      TZ: "Europe/Berlin"
-    volumes:
-      - ./backup:/app/data
-
-  telegram-bot:
-    <<: *common
+  tr-sync:
+    image: ghcr.io/sanmibuh/tr-wallet-sync:v7.0.0
+    restart: unless-stopped
     healthcheck:
-      # Verifies that the bot Python process is still running.
-      test: ["CMD-SHELL", "pgrep -f 'app bot' > /dev/null || exit 1"]
-      interval: 30s
+      # Verifies that both the cron daemon and the Telegram bot process are alive.
+      # Bracket notation avoids pgrep matching its own process.
+      test: ["CMD-SHELL", "pgrep cron > /dev/null && pgrep -f '[a]pp bot' > /dev/null || exit 1"]
+      interval: 60s
       timeout: 5s
       retries: 3
-      start_period: 20s
-    entrypoint: ["python", "-m", "app", "bot"]
-    env_file:
-      - telegram.env
-      - wallet.env
+      start_period: 30s
     environment:
       # Path to the instances YAML config (mounted below)
       INSTANCES_CONFIG: /app/config/instances.yml
-      # Data dir for the backup service (used by /backup commands)
-      DATA_DIR: /app/data/backup
+      # Cron schedule applied to all sync instances simultaneously.
+      # All instances start their sync at the same time; there is a single schedule for the whole service.
+      SYNC_SCHEDULE: "0 8,14,21 * * *"
+      # Cron schedule for automatic backup
+      BACKUP_SCHEDULE: "0 3 * * *"
       TZ: "Europe/Berlin"
+      # Note: allow_insecure_ssl must be set in instances.yml (not here as an env var),
+      # since in multi-instance mode it is read from the YAML config by InstancesConfig.load.
     volumes:
-      # Instances YAML — contains credentials for all sync instances (keep secret, never commit)
+      # Instances YAML — contains all credentials for sync, bot, and backup (keep secret, never commit)
       - ./instances.yml:/app/config/instances.yml:ro
-      # Per-instance data dirs — required for 2FA files, logs, and DB reads
-      # Each name must match the instance name in instances.yml
-      - ./1:/app/data/1
-      - ./2:/app/data/2
-      # Backup data dir — required for /backup commands
-      - ./backup:/app/data/backup
+      # Single data volume — per-instance subdirs and backup subdir are managed automatically
+      - ./data:/app/data
