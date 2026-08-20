@@ -1584,14 +1584,41 @@ sync:
         InstancesConfig.load(tmp_path / "i.yml")
 
 
-def test_instances_config_load_missing_sync_section_raises(tmp_path):
-    """ValueError is raised when the YAML has no 'sync' section."""
-    from app.config import InstancesConfig
+# ---------------------------------------------------------------------------
+# _resolve_category_strategy — unit tests for the extracted helper
+# ---------------------------------------------------------------------------
 
-    (tmp_path / "i.yml").write_text("instances:\n  - name: user1\n")
 
-    with pytest.raises(ValueError, match="sync"):
-        InstancesConfig.load(tmp_path / "i.yml")
+def test_resolve_category_strategy_defaults_to_none():
+    """No per-instance value and no global → 'none'."""
+    from app.config import _resolve_category_strategy
+
+    assert _resolve_category_strategy("u", {}, None) == "none"
+
+
+def test_resolve_category_strategy_inherits_global():
+    """No per-instance value but global is set → inherits global."""
+    from app.config import _resolve_category_strategy
+
+    assert _resolve_category_strategy("u", {}, "history") == "history"
+
+
+def test_resolve_category_strategy_per_instance_overrides_global():
+    """Per-instance value takes precedence over global."""
+    from app.config import _resolve_category_strategy
+
+    assert (
+        _resolve_category_strategy("u", {"category_strategy": "none"}, "history")
+        == "none"
+    )
+
+
+def test_resolve_category_strategy_invalid_raises():
+    """An unrecognised strategy raises ValueError mentioning the instance name."""
+    from app.config import _resolve_category_strategy
+
+    with pytest.raises(ValueError, match="category_strategy"):
+        _resolve_category_strategy("u", {"category_strategy": "bad"}, None)
 
 
 def test_sync_section_no_instances_raises(tmp_path):

@@ -392,6 +392,28 @@ def _parse_instance_labels(name: str, raw_inst: dict) -> dict[str, str]:
     return result
 
 
+def _resolve_category_strategy(
+    name: str,
+    raw_inst: dict,
+    global_category_strategy: str | None,
+) -> str:
+    """Resolve ``category_strategy`` for an instance with global inheritance and validation.
+
+    Priority: per-instance → global default → ``"none"``.
+    Raises ``ValueError`` when the resolved value is not in :data:`_VALID_CATEGORY_STRATEGIES`.
+    """
+    raw_cat = raw_inst.get("category_strategy")
+    if raw_cat is None and global_category_strategy is not None:
+        raw_cat = global_category_strategy
+    strategy = str(raw_cat if raw_cat is not None else "none").strip().lower()
+    if strategy not in _VALID_CATEGORY_STRATEGIES:
+        raise ValueError(
+            f"instance '{name}': category_strategy must be one of "
+            f"{sorted(_VALID_CATEGORY_STRATEGIES)}, got: {strategy!r}"
+        )
+    return strategy
+
+
 def _parse_instance(
     raw_inst: object,
     idx: int,
@@ -431,16 +453,9 @@ def _parse_instance(
 
     label_ids = _parse_instance_labels(name, raw_inst)
 
-    # category_strategy: per-instance > global > default "none".
-    raw_cat = raw_inst.get("category_strategy")
-    if raw_cat is None and global_category_strategy is not None:
-        raw_cat = global_category_strategy
-    category_strategy = str(raw_cat if raw_cat is not None else "none").strip().lower()
-    if category_strategy not in _VALID_CATEGORY_STRATEGIES:
-        raise ValueError(
-            f"instance '{name}': category_strategy must be one of "
-            f"{sorted(_VALID_CATEGORY_STRATEGIES)}, got: {category_strategy!r}"
-        )
+    category_strategy = _resolve_category_strategy(
+        name, raw_inst, global_category_strategy
+    )
 
     # schedule: per-instance > global sync.schedule > None.
     raw_schedule = raw_inst.get("schedule")
