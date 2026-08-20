@@ -204,7 +204,9 @@ def _resolve_backup_cfg() -> BackupConfig:
 
     try:
         instances_yaml = InstancesConfig.load(read_instances_config_path())
-    except (ValueError, OSError) as exc:
+    except ValueError:
+        return BackupConfig.from_env()
+    except OSError as exc:
         raise click.UsageError(str(exc)) from exc
     cfg = BackupConfig.from_instances_yaml(instances_yaml)
     if cfg is None:

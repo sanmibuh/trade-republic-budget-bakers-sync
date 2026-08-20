@@ -160,6 +160,48 @@ def test_backup_auto_loads_config_from_instances_yaml(tmp_path):
     mock_auto.assert_called_once()
 
 
+def test_backup_resolve_cfg_falls_back_to_env_when_no_instances_config(
+    tmp_path, monkeypatch
+):
+    """When INSTANCES_CONFIG is not set, _resolve_backup_cfg builds config from env vars."""
+    from app.__main__ import _resolve_backup_cfg
+    from app.config import BackupConfig
+
+    monkeypatch.delenv("INSTANCES_CONFIG", raising=False)
+    monkeypatch.setenv("WALLET_API_KEY", "envkey")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    cfg = _resolve_backup_cfg()
+
+    assert isinstance(cfg, BackupConfig)
+    assert cfg.wallet_api_key == "envkey"
+
+
+def test_backup_resolve_cfg_uses_instances_config_when_set(tmp_path, monkeypatch):
+    """When INSTANCES_CONFIG is set, _resolve_backup_cfg loads config from the YAML."""
+    from app.__main__ import _resolve_backup_cfg
+    from app.config import BackupConfig
+
+    yaml = tmp_path / "instances.yml"
+    yaml.write_text(f"""\
+data_dir: {tmp_path}
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "yamlkey"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "port"
+""")
+    monkeypatch.setenv("INSTANCES_CONFIG", str(yaml))
+
+    cfg = _resolve_backup_cfg()
+
+    assert isinstance(cfg, BackupConfig)
+    assert cfg.wallet_api_key == "yamlkey"
+
+
 # ---------------------------------------------------------------------------
 # backup monthly
 # ---------------------------------------------------------------------------
