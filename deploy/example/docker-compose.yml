@@ -15,7 +15,9 @@ services:
     environment:
       # Path to the instances YAML config (mounted below)
       INSTANCES_CONFIG: /app/config/instances.yml
-      # Cron schedule for all sync instances
+      # Cron schedule for all sync instances.
+      # All instances run at the same time — if you want to avoid parallel TR logins,
+      # run each instance at a different minute (e.g. "0 8,14,21 * * *" and "5 8,14,21 * * *").
       SYNC_SCHEDULE: "0 8,14,21 * * *"
       # Cron schedule for automatic backup
       BACKUP_SCHEDULE: "0 3 * * *"

@@ -19,7 +19,9 @@
 #   Optionally registers the backup job when BACKUP_SCHEDULE is also set.
 #   The MODE env var is ignored in this mode.
 #   After registering cron jobs, starts the cron daemon in the background and
-#   then starts the Telegram bot as the foreground process (PID 1).
+#   then starts the Telegram bot as a background process. The shell remains as
+#   PID 1, traps SIGTERM/INT, and waits for the bot to exit — ensuring both
+#   processes are stopped cleanly when the container is shut down.
 #   All instances log to the shared {DATA_DIR}/logs/sync.log file.
 #
 # CMD override: if set, run a one-shot command and exit regardless of MODE.
@@ -102,7 +104,16 @@ if [ -n "$INSTANCES_CONFIG" ]; then
     fi
 
     log "Starting Telegram bot"
-    exec python -m app bot
+    python -m app bot &
+    BOT_PID=$!
+    # Keep the shell as PID 1 so it can forward signals to both children and
+    # reap them cleanly when the container is stopped.
+    trap 'log "Received signal — stopping cron and bot"; kill "$CRON_PID" "$BOT_PID" 2>/dev/null' TERM INT
+    wait "$BOT_PID"
+    BOT_EXIT=$?
+    kill "$CRON_PID" 2>/dev/null
+    wait "$CRON_PID" 2>/dev/null
+    exit "$BOT_EXIT"
 fi
 
 # ------------------------------------------------------------------

@@ -60,6 +60,16 @@ if [ -z "$COMMAND" ]; then
     usage; exit 1
 fi
 
+# Validate instance names to prevent shell metacharacter injection into CMD.
+_validate_instance() {
+    case "$1" in
+        *[!A-Za-z0-9._-]*)
+            echo "Error: invalid instance name '$1' (allowed characters: A-Z a-z 0-9 . _ -)"
+            exit 1
+            ;;
+    esac
+}
+
 case "$COMMAND" in
     pull)
         docker compose -f "$COMPOSE_FILE" pull "$SERVICE"
@@ -70,6 +80,7 @@ case "$COMMAND" in
             echo "Error: instance name required"
             usage; exit 1
         fi
+        _validate_instance "$INSTANCE"
         docker compose -f "$COMPOSE_FILE" run --rm -it \
             -e CMD="login --instance $INSTANCE" \
             "$SERVICE"
@@ -80,6 +91,7 @@ case "$COMMAND" in
             echo "Error: instance name required"
             usage; exit 1
         fi
+        _validate_instance "$INSTANCE"
         docker compose -f "$COMPOSE_FILE" run --rm \
             -e CMD="sync --instance $INSTANCE" \
             "$SERVICE"
@@ -90,6 +102,7 @@ case "$COMMAND" in
             echo "Error: instance name required"
             usage; exit 1
         fi
+        _validate_instance "$INSTANCE"
         docker compose -f "$COMPOSE_FILE" run --rm -it \
             -e CMD="login --instance $INSTANCE" \
             "$SERVICE"
