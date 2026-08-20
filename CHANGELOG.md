@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [7.0.0] - 2026-08-20
+
+### What's Changed
+* Phase 4: Update docker-compose.yml and deploy docs for single container — [#157](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/157)
+* Phase 3.5: Centralise logging to a shared /data/logs directory — [#156](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/156)
+* Phase 3: Remove Docker SDK from bot — direct in-process calls — [#154](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/154)
+* Phase 2: Single-container cron for N sync instances + backup — [#153](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/153)
+**Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v6.7.0...v7.0.0
+
+
 ## [6.7.0] - 2026-08-17
 
 ### What's Changed
