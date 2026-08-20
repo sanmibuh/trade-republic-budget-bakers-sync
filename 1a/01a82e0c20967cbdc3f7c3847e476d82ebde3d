@@ -1,0 +1,18 @@
+deploy/example/docker-compose.yml
+  h_97a91c9e567f87 18-20
+deploy/example/tr-sync.sh
+  h_97a91c9e567f87 63-72,83,94,105
+docker/app/entrypoint.sh
+  h_97a91c9e567f87 22-24,107-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "1a01a82e0c20967cbdc3f7c3847e476d82ebde3d",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
