@@ -1,0 +1,20 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 203-208
+app/config.py
+  h_97a91c9e567f87 417-419,476-478,513,515-516,519
+docker/app/entrypoint.sh
+  h_97a91c9e567f87 58
+tests/test_config.py
+  h_97a91c9e567f87 1610-1654
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "58205258880da2e10c7e6b985e15a3f8de962685",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
