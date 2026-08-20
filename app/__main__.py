@@ -332,6 +332,48 @@ def list_instances() -> None:
         click.echo(inst.name)
 
 
+@cli.command(name="list-schedules")
+def list_schedules() -> None:
+    """List per-instance sync schedules as 'name<TAB>schedule', one per line.
+
+    Only instances that have a schedule defined (via sync.schedule or a per-instance
+    schedule override) are emitted.  Instances with no schedule are omitted.
+
+    Used by entrypoint.sh to register one cron job per instance with its own
+    schedule in multi-instance mode.
+    """
+    from app.config import InstancesConfig, read_instances_config_path
+
+    try:
+        path = read_instances_config_path()
+        cfg = InstancesConfig.load(path)
+    except (ValueError, OSError) as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    for inst in cfg.instances:
+        if inst.schedule:
+            click.echo(f"{inst.name}\t{inst.schedule}")
+
+
+@cli.command(name="get-backup-schedule")
+def get_backup_schedule() -> None:
+    """Print the backup_schedule from the INSTANCES_CONFIG YAML file, or nothing.
+
+    Exits 0 in both cases (schedule present or absent).  Used by entrypoint.sh
+    to conditionally register the backup cron job.
+    """
+    from app.config import InstancesConfig, read_instances_config_path
+
+    try:
+        path = read_instances_config_path()
+        cfg = InstancesConfig.load(path)
+    except (ValueError, OSError) as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    if cfg.backup_schedule:
+        click.echo(cfg.backup_schedule)
+
+
 @cli.command()
 def bot() -> None:
     """Start the Telegram bot for remote command execution.

@@ -200,8 +200,12 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   - `python -m app check-session` — exits 0 if a valid session exists (non-expired cookie) **and** `auth_state`
     for this instance in `sync.db` is not `failed`/`expired`; exits 1 otherwise. Used by the bot's `/status`
     command to report per-instance auth state without network calls.
-  - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG`, one per line.
-    Used by `entrypoint.sh` in multi-instance mode to enumerate instances for cron registration.
+   - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG`, one per line.
+     Used by `entrypoint.sh` in multi-instance mode to enumerate instances for cron registration.
+   - `python -m app list-schedules` — prints `name<TAB>schedule` for every instance that has a schedule,
+     one per line.  Used by `entrypoint.sh` to register one cron job per instance with its own schedule.
+   - `python -m app get-backup-schedule` — prints the `backup_schedule` from `INSTANCES_CONFIG`, or nothing.
+     Used by `entrypoint.sh` to conditionally register the backup cron job.
 - All imports inside command functions are deferred — startup is fast and dependencies are only loaded when needed.
 - `click.Choice(["auto", "monthly", "yearly"])` provides free input validation and help text.
 - `entrypoint.sh` and `tr-sync.sh` both use `python -m app <subcommand>` — single consistent interface.
@@ -210,9 +214,9 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 - `docker/app/entrypoint.sh`: behaviour controlled by `INSTANCES_CONFIG` (multi-instance) or `MODE` env var (legacy):
 
   **Multi-instance mode** (activated when `INSTANCES_CONFIG` is set — Phase 2/4 of #145):
-  - Calls `python -m app list-instances` to enumerate instance names from the YAML file.
-  - Registers one `SYNC_SCHEDULE` cron job per instance: `python -m app sync --instance <name>`.
-  - Optionally registers `BACKUP_SCHEDULE` cron job for `python -m app backup auto` when `BACKUP_SCHEDULE` is set.
+  - Calls `python -m app list-schedules` to get per-instance `name<TAB>schedule` pairs.
+  - Registers one cron job per instance with its own schedule: `python -m app sync --instance <name>`.
+  - Calls `python -m app get-backup-schedule`; if a schedule is returned, registers a backup cron job.
   - Starts the cron daemon in the background (`cron -f &`), then starts the Telegram bot also in
     the background (`python -m app bot &`). The shell remains as PID 1 and supervises both children:
     if either process exits unexpectedly the shell kills the other and exits non-zero so Docker can
@@ -220,7 +224,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
     `docker stop`.
   - `MODE` env var is ignored in this mode.
   - All instances share one log file: `{DATA_DIR}/logs/sync.log`.
-  - Requires `SYNC_SCHEDULE` to be set; exits with an error if missing.
+  - Exits with an error if no instance has a schedule defined.
 
   **Legacy single-instance mode** (when `INSTANCES_CONFIG` is not set — fully backwards-compatible):
   - `MODE=sync` — registers `SYNC_SCHEDULE` cron job (`python -m app sync`). One-shot if `SYNC_SCHEDULE` not set.
@@ -300,37 +304,55 @@ as direct in-process Python calls.
 
 ```yaml
 # Global shared settings
-data_dir: /app/data          # optional, default /app/data
-telegram_bot_token: "..."    # optional
-telegram_chat_id: "..."      # optional
-allow_insecure_ssl: false    # optional, default false
+data_dir: /app/data           # optional, default /app/data
+telegram_bot_token: "..."     # optional (also accepted via TELEGRAM_BOT_TOKEN env var)
+telegram_chat_id: "..."       # optional (also accepted via TELEGRAM_CHAT_ID env var)
+allow_insecure_ssl: false     # optional, default false
 
-instances:
-  - name: user1              # used as subdirectory name and instance identifier
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "..."
-    wallet_cash_account_id: "..."
-    wallet_portfolio_account_id: "..."
-    owner_name: "User1"      # optional, defaults to name.capitalize()
-    lookback_days: 7         # optional, default 7
-    dedup_ttl_days: 60       # optional, default 60
-    category_strategy: none  # optional, default none
-    labels:                  # optional
-      BANK_TRANSACTION_INCOMING: label-id-123
+backup_schedule: "0 3 * * *"  # optional — cron expression; omit to disable automatic backups
 
-  - name: user2
-    phone: "+34611111111"
-    pin: "5678"
-    wallet_api_key: "..."
-    wallet_cash_account_id: "..."
-    wallet_portfolio_account_id: "..."
+sync:
+  schedule: "0 8,14,21 * * *" # global default; overridable per instance
+  wallet_api_key: "..."        # global default; overridable per instance
+  lookback_days: 7             # global default; overridable per instance
+  category_strategy: history   # global default (none | history); overridable per instance
+
+  instances:
+    - name: user1              # used as subdirectory name and instance identifier
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "..."
+      wallet_portfolio_account_id: "..."
+      owner_name: "User1"      # optional, defaults to name.capitalize()
+      dedup_ttl_days: 60       # optional, default 60
+      labels:                  # optional
+        BANK_TRANSACTION_INCOMING: label-id-123
+      # Per-instance overrides (all optional):
+      # wallet_api_key: "..."
+      # lookback_days: 14
+      # category_strategy: none
+      # schedule: "5 8,14,21 * * *"  # stagger to avoid parallel TR logins
+
+    - name: user2
+      phone: "+34611111111"
+      pin: "5678"
+      wallet_cash_account_id: "..."
+      wallet_portfolio_account_id: "..."
 ```
+
+Flat top-level `instances:` (legacy format without a `sync:` section) is still accepted for
+backward compatibility.  In that layout schedules must be provided externally; `sync_schedule`
+and `backup_schedule` will be `None`.
 
 **Key behaviours:**
 - Each instance gets its own `data_dir/{name}/` subdirectory (session files, `sync.db`, logs).
 - Global `telegram_*` and `allow_insecure_ssl` are inherited by all instances.
+- `sync.*` fields (`wallet_api_key`, `lookback_days`, `category_strategy`, `schedule`) are global
+  defaults; each instance can override any of them individually.
 - `InstancesConfig.to_config(name)` returns a fully populated `Config` ready for `run()`.
+- `InstancesConfig.sync_schedule` — the global schedule (or `None`); individual instances expose it
+  via `InstanceConfig.schedule` after inheritance resolution at load time.
+- `InstancesConfig.backup_schedule` — the backup cron expression (or `None`).
 - `run(cfg=None)` and `run_login(cfg=None)` accept an injected `Config`; `None` falls back to
   `Config.from_env()` — fully backwards-compatible.
 - CLI: `python -m app sync --instance david` and `python -m app login --instance david` resolve

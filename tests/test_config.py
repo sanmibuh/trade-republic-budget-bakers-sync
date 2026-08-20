@@ -1390,3 +1390,196 @@ instances:
 
     with pytest.raises(ValueError, match="dedup_ttl_days"):
         InstancesConfig.load(cfg_file)
+
+
+# ---------------------------------------------------------------------------
+# SyncConfig — nested sync section with global defaults and per-instance overrides
+# ---------------------------------------------------------------------------
+
+_SYNC_SECTION_YAML = """\
+data_dir: /app/data
+telegram_bot_token: "tok"
+telegram_chat_id: "chat"
+
+backup_schedule: "0 3 * * *"
+
+sync:
+  schedule: "0 8,14,21 * * *"
+  wallet_api_key: "shared-key"
+  lookback_days: 14
+  category_strategy: "history"
+  instances:
+    - name: david
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash-david"
+      wallet_portfolio_account_id: "port-david"
+      owner_name: "David"
+    - name: eli
+      phone: "+34611111111"
+      pin: "5678"
+      wallet_cash_account_id: "cash-eli"
+      wallet_portfolio_account_id: "port-eli"
+      owner_name: "Eli"
+      wallet_api_key: "eli-own-key"
+      lookback_days: 30
+      schedule: "5 8,14,21 * * *"
+"""
+
+
+def test_sync_section_instances_are_accessible(tmp_path):
+    """instances come from sync.instances when the sync section is used."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert [i.name for i in cfg.instances] == ["david", "eli"]
+
+
+def test_sync_section_global_wallet_key_inherited(tmp_path):
+    """An instance without wallet_api_key inherits it from sync.*."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[0].wallet_api_key == "shared-key"
+
+
+def test_sync_section_instance_overrides_wallet_key(tmp_path):
+    """An instance with its own wallet_api_key overrides the global default."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[1].wallet_api_key == "eli-own-key"
+
+
+def test_sync_section_global_lookback_days_inherited(tmp_path):
+    """An instance without lookback_days inherits it from sync.*."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[0].lookback_days == 14
+
+
+def test_sync_section_instance_overrides_lookback_days(tmp_path):
+    """An instance with its own lookback_days overrides the global default."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[1].lookback_days == 30
+
+
+def test_sync_section_global_category_strategy_inherited(tmp_path):
+    """An instance without category_strategy inherits it from sync.*."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[0].category_strategy == "history"
+
+
+def test_sync_section_global_schedule(tmp_path):
+    """sync.schedule is exposed on InstancesConfig and each instance."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.sync_schedule == "0 8,14,21 * * *"
+    assert cfg.instances[0].schedule == "0 8,14,21 * * *"
+
+
+def test_sync_section_instance_overrides_schedule(tmp_path):
+    """An instance with its own schedule overrides the global sync.schedule."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[1].schedule == "5 8,14,21 * * *"
+
+
+def test_backup_schedule_from_yaml(tmp_path):
+    """backup_schedule is read from the YAML root."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.backup_schedule == "0 3 * * *"
+
+
+def test_backup_schedule_defaults_to_none(tmp_path):
+    """backup_schedule is None when not set in YAML."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_MINIMAL_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.backup_schedule is None
+
+
+def test_sync_schedule_defaults_to_none(tmp_path):
+    """sync_schedule is None when not set anywhere."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_MINIMAL_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.sync_schedule is None
+    assert cfg.instances[0].schedule is None
+
+
+def test_sync_section_missing_wallet_key_and_no_global_raises(tmp_path):
+    """When neither instance nor sync.* provides wallet_api_key, raise ValueError."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  schedule: "0 8 * * *"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "port"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="wallet_api_key"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+def test_flat_instances_still_work(tmp_path):
+    """Flat top-level instances (old format) continue to load correctly."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_MINIMAL_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert len(cfg.instances) == 1
+    assert cfg.instances[0].name == "user1"
+
+
+def test_sync_section_no_instances_raises(tmp_path):
+    """sync.instances must define at least one instance."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  schedule: "0 8 * * *"
+  instances: []
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="instance"):
+        InstancesConfig.load(tmp_path / "i.yml")

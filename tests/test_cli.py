@@ -1022,3 +1022,142 @@ def test_bot_command_does_not_load_instances_config_twice(tmp_path):
     assert len(load_calls) == 1, (
         f"InstancesConfig.load() called {len(load_calls)} times; expected 1"
     )
+
+
+# ---------------------------------------------------------------------------
+# list-schedules command
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_instances_with_schedules(instances_data: list[tuple[str, str | None]]):
+    """Return a mock InstancesConfig with instances having given (name, schedule) pairs."""
+    from app.config import InstanceConfig, InstancesConfig
+
+    mock_cfg = MagicMock(spec=InstancesConfig)
+    mock_instances = []
+    for name, schedule in instances_data:
+        inst = MagicMock(spec=InstanceConfig)
+        inst.name = name
+        inst.schedule = schedule
+        mock_instances.append(inst)
+    mock_cfg.instances = mock_instances
+    return mock_cfg
+
+
+def test_list_schedules_outputs_name_tab_schedule(tmp_path):
+    """list-schedules prints 'name<TAB>schedule' per instance when all have a schedule."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    mock_cfg = _make_mock_instances_with_schedules(
+        [("david", "0 8,14,21 * * *"), ("eli", "5 8,14,21 * * *")]
+    )
+
+    with patch("app.config.InstancesConfig.load", return_value=mock_cfg):
+        result = _runner().invoke(
+            cli,
+            ["list-schedules"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code == 0
+    lines = result.output.strip().splitlines()
+    assert lines == ["david\t0 8,14,21 * * *", "eli\t5 8,14,21 * * *"]
+
+
+def test_list_schedules_omits_instances_with_no_schedule(tmp_path):
+    """list-schedules skips instances whose schedule is None."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    mock_cfg = _make_mock_instances_with_schedules(
+        [("david", "0 8 * * *"), ("eli", None)]
+    )
+
+    with patch("app.config.InstancesConfig.load", return_value=mock_cfg):
+        result = _runner().invoke(
+            cli,
+            ["list-schedules"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code == 0
+    lines = result.output.strip().splitlines()
+    assert lines == ["david\t0 8 * * *"]
+
+
+def test_list_schedules_missing_instances_config_exits_with_error():
+    """list-schedules with no INSTANCES_CONFIG exits non-zero."""
+    result = _runner().invoke(cli, ["list-schedules"], env={"INSTANCES_CONFIG": ""})
+    assert result.exit_code != 0
+
+
+def test_list_schedules_load_error_shown_as_click_error(tmp_path):
+    """Errors from InstancesConfig.load() are shown as UsageError, not traceback."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with patch("app.config.InstancesConfig.load", side_effect=ValueError("bad")):
+        result = _runner().invoke(
+            cli,
+            ["list-schedules"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code != 0
+    assert "bad" in result.output
+
+
+# ---------------------------------------------------------------------------
+# get-backup-schedule command
+# ---------------------------------------------------------------------------
+
+
+def test_get_backup_schedule_outputs_schedule(tmp_path):
+    """get-backup-schedule prints the backup_schedule and exits 0."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    mock_cfg = MagicMock(spec=InstancesConfig)
+    mock_cfg.backup_schedule = "0 3 * * *"
+
+    with patch("app.config.InstancesConfig.load", return_value=mock_cfg):
+        result = _runner().invoke(
+            cli,
+            ["get-backup-schedule"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code == 0
+    assert result.output.strip() == "0 3 * * *"
+
+
+def test_get_backup_schedule_exits_zero_with_empty_output_when_not_set(tmp_path):
+    """get-backup-schedule exits 0 and prints nothing when backup_schedule is None."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    mock_cfg = MagicMock(spec=InstancesConfig)
+    mock_cfg.backup_schedule = None
+
+    with patch("app.config.InstancesConfig.load", return_value=mock_cfg):
+        result = _runner().invoke(
+            cli,
+            ["get-backup-schedule"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code == 0
+    assert result.output.strip() == ""
+
+
+def test_get_backup_schedule_missing_instances_config_exits_with_error():
+    """get-backup-schedule with no INSTANCES_CONFIG exits non-zero."""
+    result = _runner().invoke(
+        cli, ["get-backup-schedule"], env={"INSTANCES_CONFIG": ""}
+    )
+    assert result.exit_code != 0
