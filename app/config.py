@@ -249,7 +249,7 @@ class BackupConfig:
             wallet_api_key=wallet_api_key or first.wallet_api_key,
             telegram_bot_token=instances_yaml.telegram_bot_token,
             telegram_chat_id=instances_yaml.telegram_chat_id,
-            data_dir=instances_yaml.data_dir / "backup",
+            data_dir=instances_yaml.data_dir,
             allow_insecure_ssl=instances_yaml.allow_insecure_ssl,
         )
 

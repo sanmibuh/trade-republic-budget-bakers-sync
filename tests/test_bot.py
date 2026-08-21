@@ -73,7 +73,7 @@ def _cfg(
         chat_id="42",
         instances=instances,
         backup_cfg=backup_cfg,
-        log_dir=tmp_path / "logs",
+        log_dir=tmp_path,
     )
 
 
@@ -221,7 +221,7 @@ def test_botconfig_from_env_backup_yaml_data_dir_is_backup_subdir(monkeypatch):
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.backup_cfg is not None
-    assert cfg.backup_cfg.data_dir.name == "backup"
+    assert cfg.backup_cfg.data_dir.name == "data"
 
 
 def test_botconfig_from_env_backup_env_key_takes_precedence_over_yaml(monkeypatch):
@@ -369,6 +369,25 @@ def test_botconfig_from_env_allow_insecure_ssl_true_from_yaml(monkeypatch):
     with _mock_instances_load(yaml_with_ssl):
         cfg = BotConfig.from_env()
     assert cfg.allow_insecure_ssl is True
+
+
+def test_botconfig_log_dir_default_is_data_dir(monkeypatch):
+    """BotConfig.log_dir default must be /app/data (not /app/data/logs)."""
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    with _mock_instances_load():
+        cfg = BotConfig.from_env()
+    assert cfg.log_dir == Path("/app/data")
+
+
+def test_botconfig_from_env_log_dir_uses_instances_data_dir(monkeypatch):
+    """BotConfig.log_dir must equal instances_yaml.data_dir (not data_dir / 'logs')."""
+    for k, v in _VALID_ENV.items():
+        monkeypatch.setenv(k, v)
+    yaml_with_data_dir = _YAML_CONTENT.rstrip() + '\ndata_dir: "/custom/data"\n'
+    with _mock_instances_load(yaml_with_data_dir):
+        cfg = BotConfig.from_env()
+    assert cfg.log_dir == Path("/custom/data")
 
 
 # ---------------------------------------------------------------------------

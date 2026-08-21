@@ -109,7 +109,7 @@ class BotConfig:
     instances: dict[str, InstanceConfig] = field(default_factory=dict)
     backup_cfg: BackupConfig | None = None  # None means backup commands are disabled
     telegram_verify_ssl: bool = True
-    log_dir: Path = field(default_factory=lambda: Path("/app/data/logs"))
+    log_dir: Path = field(default_factory=lambda: Path("/app/data"))
     allow_insecure_ssl: bool = False
 
     @classmethod
@@ -158,7 +158,7 @@ class BotConfig:
             instances=instances,
             backup_cfg=backup_cfg,
             telegram_verify_ssl=read_telegram_verify_ssl(),
-            log_dir=instances_yaml.data_dir / "logs",
+            log_dir=instances_yaml.data_dir,
             allow_insecure_ssl=instances_yaml.allow_insecure_ssl,
         )
 

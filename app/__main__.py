@@ -70,10 +70,10 @@ def sync(instance: str | None) -> None:
 
     if instance is not None:
         cfg = _resolve_instance_cfg(instance)
-        log_dir = cfg.data_dir.parent / "logs"
+        log_dir = cfg.data_dir.parent
     else:
         cfg = Config.from_env()
-        log_dir = cfg.data_dir / "logs"
+        log_dir = cfg.data_dir
     setup_logging(log_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run(cfg=cfg))
@@ -99,10 +99,10 @@ def login(instance: str | None) -> None:
 
     if instance is not None:
         cfg = _resolve_instance_cfg(instance)
-        log_dir = cfg.data_dir.parent / "logs"
+        log_dir = cfg.data_dir.parent
     else:
         cfg = Config.from_env()
-        log_dir = cfg.data_dir / "logs"
+        log_dir = cfg.data_dir
     setup_logging(log_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run_login(cfg=cfg))
@@ -293,7 +293,7 @@ def backup(mode: str, param: str | None) -> None:
     from app.wallet_client import WalletClient
 
     cfg = _resolve_backup_cfg()
-    setup_logging(cfg.data_dir / "logs")
+    setup_logging(cfg.data_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     client = WalletClient(api_key=cfg.wallet_api_key)
     notifier = Notifier(
@@ -322,7 +322,7 @@ def resync(date: str) -> None:
     from app.main import run_resync
 
     cfg = Config.from_env()
-    setup_logging(cfg.data_dir / "logs")
+    setup_logging(cfg.data_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run_resync(date, cfg=cfg))
 
@@ -420,7 +420,7 @@ def bot() -> None:
         instances_yaml = InstancesConfig.load(read_instances_config_path())
     except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
-    setup_logging(instances_yaml.data_dir / "logs")
+    setup_logging(instances_yaml.data_dir)
     try:
         run(instances_yaml=instances_yaml)
     except (ValueError, OSError) as exc:

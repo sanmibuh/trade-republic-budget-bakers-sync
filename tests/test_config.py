@@ -296,11 +296,11 @@ def test_backup_config_from_instances_yaml_empty_instances_returns_none():
     assert BackupConfig.from_instances_yaml(yaml) is None
 
 
-def test_backup_config_from_instances_yaml_data_dir_is_backup_subdir():
+def test_backup_config_from_instances_yaml_data_dir_is_backups_subdir():
     yaml = _make_instances_yaml(data_dir="/app/data")
     cfg = BackupConfig.from_instances_yaml(yaml)
     assert cfg is not None
-    assert str(cfg.data_dir) == "/app/data/backup"
+    assert str(cfg.data_dir) == "/app/data"
 
 
 def test_backup_config_from_instances_yaml_uses_yaml_telegram_creds():

@@ -131,7 +131,7 @@ def test_backup_auto_calls_run_auto(tmp_path):
         result = _runner().invoke(cli, ["backup", "auto"])
     assert result.exit_code == 0
     mock_auto.assert_called_once()
-    mock_setup_log.assert_called_once_with(tmp_path / "logs")
+    mock_setup_log.assert_called_once_with(tmp_path)
 
 
 def test_backup_auto_loads_config_from_instances_yaml(tmp_path):
@@ -744,7 +744,7 @@ def test_sync_with_instance_flag_uses_yaml_root_for_logging(tmp_path):
             env={"INSTANCES_CONFIG": str(cfg_file)},
         )
 
-    mock_setup.assert_called_once_with(yaml_root / "logs")
+    mock_setup.assert_called_once_with(yaml_root)
 
 
 def test_login_with_instance_flag_uses_yaml_root_for_logging(tmp_path):
@@ -772,7 +772,7 @@ def test_login_with_instance_flag_uses_yaml_root_for_logging(tmp_path):
             env={"INSTANCES_CONFIG": str(cfg_file)},
         )
 
-    mock_setup.assert_called_once_with(yaml_root / "logs")
+    mock_setup.assert_called_once_with(yaml_root)
 
 
 def test_bot_command_uses_yaml_data_dir_for_logging(tmp_path):
@@ -793,7 +793,7 @@ def test_bot_command_uses_yaml_data_dir_for_logging(tmp_path):
     ):
         _runner().invoke(cli, ["bot"], env={"INSTANCES_CONFIG": str(cfg_file)})
 
-    mock_setup.assert_called_once_with(yaml_root / "logs")
+    mock_setup.assert_called_once_with(yaml_root)
 
 
 def test_bot_missing_instances_config_shows_clean_error():

@@ -194,3 +194,26 @@ Defined in `instances.yml` — **not** in `docker-compose.yml` environment varia
 
 `SYNC_SCHEDULE` and `BACKUP_SCHEDULE` environment variables are **ignored** in
 multi-instance mode; set schedules in `instances.yml` instead.
+
+---
+
+## Migration notes
+
+### Consolidating runtime data under `data/` (v8.0.0+)
+
+The log file now lives directly in `data/` instead of `data/logs/`:
+
+| Path before          | Path after      |
+|----------------------|-----------------|
+| `data/logs/sync.log` | `data/sync.log` |
+
+If you have existing logs, migrate them on the NAS before upgrading:
+
+```sh
+cd /share/docker/tr-sync/data
+mv logs/sync.log sync.log
+rmdir logs   # only if empty
+```
+
+The backup directory structure (`data/backups/monthly/`, `data/backups/yearly/`) is unchanged.
+
