@@ -41,8 +41,35 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/python-trade-republic:latest
             ghcr.io/${{ github.repository_owner }}/python-trade-republic:${{ steps.meta.outputs.version }}
 
-  publish-app:
+  update-base-tag:
     needs: publish-base
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Extract version tag
+        id: meta
+        run: echo "version=${{ github.event.inputs.version || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Update ARG BASE_TAG in app Dockerfile
+        run: |
+          sed -i "s|^ARG BASE_TAG=.*|ARG BASE_TAG=${{ steps.meta.outputs.version }}|" docker/app/Dockerfile
+
+      - name: Commit updated Dockerfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docker/app/Dockerfile
+          git diff --cached --quiet || git commit -m "chore: update BASE_TAG to ${{ steps.meta.outputs.version }} in app Dockerfile"
+          git push
+
+  publish-app:
+    needs: update-base-tag
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -50,6 +77,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
