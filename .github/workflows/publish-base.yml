@@ -66,7 +66,15 @@ jobs:
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
+          if ! grep -qE '^ARG BASE_TAG=' docker/app/Dockerfile; then
+            echo "ERROR: ARG BASE_TAG line not found in docker/app/Dockerfile"
+            exit 1
+          fi
           sed -i "s|^ARG BASE_TAG=.*|ARG BASE_TAG=${VERSION}|" docker/app/Dockerfile
+          if ! grep -qF "ARG BASE_TAG=${VERSION}" docker/app/Dockerfile; then
+            echo "ERROR: sed did not update ARG BASE_TAG to ${VERSION}"
+            exit 1
+          fi
 
       - name: Commit updated Dockerfile
         env:
@@ -74,10 +82,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docker/app/Dockerfile
-          if ! git diff --cached --quiet; then
-            git pull --rebase origin main
+          if ! git diff --quiet docker/app/Dockerfile; then
+            git add docker/app/Dockerfile
             git commit -m "chore: update BASE_TAG to ${VERSION} in app Dockerfile"
+            git pull --rebase origin main
             git push
           fi
 
