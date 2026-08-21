@@ -1807,3 +1807,141 @@ sync:
 
     with pytest.raises(ValueError, match="wallet_api_key"):
         InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# sync.instances type validation
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_instances_not_a_list_raises(tmp_path):
+    """sync.instances with a non-list value must raise ValueError, not TypeError."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text("sync:\n  instances: 1\n")
+
+    with pytest.raises(ValueError, match="instances"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# null wallet_api_key — per-instance and global
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_null_per_instance_wallet_api_key_raises(tmp_path):
+    """wallet_api_key: null per-instance must raise, not silently inherit global key."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  wallet_api_key: "globalkey"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: null
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="wallet_api_key"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+def test_instances_config_load_null_global_wallet_api_key_raises(tmp_path):
+    """sync.wallet_api_key: null must raise, not be treated as absent."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  wallet_api_key: null
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "per-instance-key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="wallet_api_key"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# global lookback_days positive-value constraint
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_global_lookback_days_zero_raises(tmp_path):
+    """sync.lookback_days: 0 must raise even when every instance overrides it."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  lookback_days: 0
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      lookback_days: 7
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="lookback_days"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+def test_instances_config_load_global_lookback_days_negative_raises(tmp_path):
+    """sync.lookback_days: -1 must raise even when every instance overrides it."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  lookback_days: -1
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      lookback_days: 7
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="lookback_days"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# global category_strategy normalization
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_global_category_strategy_uppercase_accepted(tmp_path):
+    """sync.category_strategy: HISTORY must be normalized and accepted like per-instance values."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  category_strategy: HISTORY
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.sync.category_strategy == "history"
+    assert cfg.instances[0].category_strategy == "history"

@@ -414,6 +414,34 @@ def _resolve_category_strategy(
     return strategy
 
 
+def _resolve_instance_wallet_key(
+    name: str,
+    raw_inst: dict,
+    global_wallet_api_key: str | None,
+) -> str:
+    """Resolve ``wallet_api_key`` for a single instance.
+
+    Priority: per-instance → global → error.
+    A present-but-blank or null per-instance key is rejected immediately so it
+    cannot silently inherit the global key.
+    """
+    if "wallet_api_key" in raw_inst:
+        raw = raw_inst["wallet_api_key"]
+        key = str(raw).strip() if raw is not None else ""
+        if not key:
+            raise ValueError(
+                f"instance '{name}' has a blank 'wallet_api_key' — "
+                f"provide a valid key or remove the field to inherit the global key"
+            )
+        return key
+    if not global_wallet_api_key:
+        raise ValueError(
+            f"instance '{name}' is missing required field 'wallet_api_key' "
+            f"(set it per-instance or under sync.wallet_api_key)"
+        )
+    return global_wallet_api_key
+
+
 def _parse_instance(
     raw_inst: object,
     idx: int,
@@ -435,26 +463,7 @@ def _parse_instance(
                 f"instance '{name}' is missing required field '{required}'"
             )
 
-    # wallet_api_key: per-instance takes precedence, then global, then error.
-    # Both values are stripped and blank-checked to match env var handling.
-    # An explicitly-present but blank per-instance key is rejected immediately —
-    # it must not silently inherit the global key.
-    raw_inst_key_raw = raw_inst.get("wallet_api_key")
-    if raw_inst_key_raw is not None:
-        raw_inst_key: str | None = str(raw_inst_key_raw).strip()
-        if not raw_inst_key:
-            raise ValueError(
-                f"instance '{name}' has a blank 'wallet_api_key' — "
-                f"provide a valid key or remove the field to inherit the global key"
-            )
-    else:
-        raw_inst_key = None
-    raw_wallet_key = raw_inst_key or global_wallet_api_key
-    if not raw_wallet_key:
-        raise ValueError(
-            f"instance '{name}' is missing required field 'wallet_api_key' "
-            f"(set it per-instance or under sync.wallet_api_key)"
-        )
+    wallet_api_key = _resolve_instance_wallet_key(name, raw_inst, global_wallet_api_key)
 
     # lookback_days / dedup_ttl_days: merge global default into raw dict before parsing.
     effective_raw = dict(raw_inst)
@@ -478,7 +487,7 @@ def _parse_instance(
         name=name,
         phone=str(raw_inst["phone"]),
         pin=str(raw_inst["pin"]),
-        wallet_api_key=str(raw_wallet_key),
+        wallet_api_key=wallet_api_key,
         wallet_cash_account_id=str(raw_inst["wallet_cash_account_id"]),
         wallet_portfolio_account_id=str(raw_inst["wallet_portfolio_account_id"]),
         owner_name=raw_inst.get("owner_name") or None,
@@ -490,6 +499,65 @@ def _parse_instance(
     )
 
 
+def _parse_global_wallet_key(raw_sync: dict) -> str | None:
+    """Return ``sync.wallet_api_key`` stripped, or ``None`` if the field is absent.
+
+    Raises ``ValueError`` when the field is present but blank or null.
+    """
+    if "wallet_api_key" not in raw_sync:
+        return None
+    raw = raw_sync["wallet_api_key"]
+    key = str(raw).strip() if raw is not None else ""
+    if not key:
+        raise ValueError(
+            "sync.wallet_api_key is present but blank — "
+            "provide a valid key or remove the field"
+        )
+    return key
+
+
+def _parse_global_lookback(raw_sync: dict) -> int | None:
+    """Return ``sync.lookback_days`` as a positive integer, or ``None`` if absent.
+
+    Raises ``ValueError`` for non-integer or non-positive values.
+    """
+    raw_gl = raw_sync.get("lookback_days")
+    if raw_gl is None:
+        return None
+    try:
+        value = int(raw_gl)
+    except (ValueError, TypeError) as err:
+        raise ValueError(
+            f"sync.lookback_days must be an integer, got: {raw_gl!r}"
+        ) from err
+    if value <= 0:
+        raise ValueError(f"sync.lookback_days must be a positive integer, got: {value}")
+    return value
+
+
+def _parse_global_category(raw_sync: dict) -> str | None:
+    """Return ``sync.category_strategy`` normalized to lowercase, or ``None`` if absent.
+
+    Raises ``ValueError`` when the value is blank or not in
+    :data:`_VALID_CATEGORY_STRATEGIES`.
+    """
+    raw_cat = raw_sync.get("category_strategy")
+    if raw_cat is None:
+        return None
+    cat = str(raw_cat).strip().lower()
+    if not cat:
+        raise ValueError(
+            "sync.category_strategy is present but blank — "
+            f"use one of {sorted(_VALID_CATEGORY_STRATEGIES)} or remove the field"
+        )
+    if cat not in _VALID_CATEGORY_STRATEGIES:
+        raise ValueError(
+            f"sync.category_strategy must be one of "
+            f"{sorted(_VALID_CATEGORY_STRATEGIES)}, got: {str(raw_cat).strip()!r}"
+        )
+    return cat
+
+
 def _parse_sync_section(
     raw_sync: dict,
 ) -> tuple[list, str | None, int | None, str | None, str | None]:
@@ -499,39 +567,13 @@ def _parse_sync_section(
     ``(raw_instances_list, global_wallet_key, global_lookback, global_cat, sync_schedule)``
     """
     raw_instances_list = raw_sync.get("instances") or []
-    raw_global_key = raw_sync.get("wallet_api_key")
-    if raw_global_key is not None:
-        global_wallet_key: str | None = str(raw_global_key).strip()
-        if not global_wallet_key:
-            raise ValueError(
-                "sync.wallet_api_key is present but blank — "
-                "provide a valid key or remove the field"
-            )
-    else:
-        global_wallet_key = None
-    global_lookback: int | None = None
-    raw_gl = raw_sync.get("lookback_days")
-    if raw_gl is not None:
-        try:
-            global_lookback = int(raw_gl)
-        except (ValueError, TypeError) as err:
-            raise ValueError(
-                f"sync.lookback_days must be an integer, got: {raw_gl!r}"
-            ) from err
-    global_cat: str | None = None
-    raw_cat = raw_sync.get("category_strategy")
-    if raw_cat is not None:
-        global_cat = str(raw_cat).strip()
-        if not global_cat:
-            raise ValueError(
-                "sync.category_strategy is present but blank — "
-                f"use one of {sorted(_VALID_CATEGORY_STRATEGIES)} or remove the field"
-            )
-        if global_cat not in _VALID_CATEGORY_STRATEGIES:
-            raise ValueError(
-                f"sync.category_strategy must be one of "
-                f"{sorted(_VALID_CATEGORY_STRATEGIES)}, got: {global_cat!r}"
-            )
+    if not isinstance(raw_instances_list, list):
+        raise ValueError(
+            f"sync.instances must be a list, got: {type(raw_instances_list).__name__!r}"
+        )
+    global_wallet_key = _parse_global_wallet_key(raw_sync)
+    global_lookback = _parse_global_lookback(raw_sync)
+    global_cat = _parse_global_category(raw_sync)
     raw_sched = raw_sync.get("schedule")
     sync_schedule: str | None = (
         str(raw_sched).strip() if raw_sched is not None else None

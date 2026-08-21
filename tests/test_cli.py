@@ -1234,3 +1234,19 @@ def test_get_backup_schedule_missing_instances_config_exits_with_error():
         cli, ["get-backup-schedule"], env={"INSTANCES_CONFIG": ""}
     )
     assert result.exit_code != 0
+
+
+def test_backup_resolve_cfg_env_fallback_missing_wallet_key_raises_usage_error(
+    tmp_path, monkeypatch
+):
+    """When INSTANCES_CONFIG is unset and WALLET_API_KEY is also missing, raise UsageError."""
+    import click
+
+    from app.__main__ import _resolve_backup_cfg
+
+    monkeypatch.delenv("INSTANCES_CONFIG", raising=False)
+    monkeypatch.delenv("WALLET_API_KEY", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    with pytest.raises(click.UsageError):
+        _resolve_backup_cfg()
