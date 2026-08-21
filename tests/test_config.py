@@ -2103,3 +2103,133 @@ sync:
     cfg = InstancesConfig.load(tmp_path / "i.yml")
 
     assert cfg.instances[0].lookback_days == 30
+
+
+# ---------------------------------------------------------------------------
+# _validate_cron_schedule — unit tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "* * * * *",
+        "0 8 * * *",
+        "0 8,20 * * *",
+        "*/15 * * * *",
+        "0 8-18/2 * * 1-5",
+        "30 3 1,15 * *",
+        "0 0 * * 0",
+        "59 23 31 12 7",
+    ],
+)
+def test_validate_cron_schedule_valid(expr):
+    """Valid five-field cron expressions must not raise."""
+    from app.config import _validate_cron_schedule
+
+    _validate_cron_schedule("schedule", expr)  # should not raise
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        # Classic cron-field injection (extra fields after schedule)
+        "* * * * * root touch /tmp/pwned #",
+        "0 8 * * * /bin/bash -c 'id'",
+        # Fewer or more pure numeric fields
+        "* * * *",
+        "* * * * * *",
+        # Empty string
+        "",
+        # Letters / shell metacharacters inside a field
+        "* * * * MON",
+        "0 8 * JAN *",
+        "$(id) * * * *",
+        "`id` * * * *",
+        "0;touch /tmp/x * * * *",
+        # Newline / carriage-return (regression: old check)
+        "0 8 * * *\\n0 9 * * *",
+    ],
+)
+def test_validate_cron_schedule_invalid(expr):
+    """Invalid or injected schedule strings must raise ValueError."""
+    from app.config import _validate_cron_schedule
+
+    with pytest.raises(ValueError, match="schedule"):
+        _validate_cron_schedule("schedule", expr)
+
+
+# ---------------------------------------------------------------------------
+# InstancesConfig.load — cron injection via schedule fields
+# ---------------------------------------------------------------------------
+
+_INSTANCE_BLOCK = """\
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+
+
+@pytest.mark.parametrize(
+    "bad_schedule",
+    [
+        "* * * * * root touch /tmp/pwned #",
+        "0 8 * * * /bin/bash -c id",
+        "* * * *",
+        "* * * * * *",
+    ],
+)
+def test_instances_config_load_injection_in_global_schedule_raises(
+    tmp_path, bad_schedule
+):
+    """sync.schedule with injection payload or wrong field count must raise."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"sync:\n  wallet_api_key: key\n  schedule: '{bad_schedule}'\n  instances:\n{_INSTANCE_BLOCK}"
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+@pytest.mark.parametrize(
+    "bad_schedule",
+    [
+        "* * * * * root touch /tmp/pwned #",
+        "0 8 * * * /bin/bash -c id",
+    ],
+)
+def test_instances_config_load_injection_in_per_instance_schedule_raises(
+    tmp_path, bad_schedule
+):
+    """Per-instance schedule with injection payload must raise."""
+    from app.config import InstancesConfig
+
+    inst_block = _INSTANCE_BLOCK.rstrip("\n") + f"\n      schedule: '{bad_schedule}'\n"
+    yaml_content = f"sync:\n  wallet_api_key: key\n  instances:\n{inst_block}"
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+@pytest.mark.parametrize(
+    "bad_schedule",
+    [
+        "* * * * * root touch /tmp/pwned #",
+        "0 3 * * * /bin/bash -c id",
+    ],
+)
+def test_instances_config_load_injection_in_backup_schedule_raises(
+    tmp_path, bad_schedule
+):
+    """backup_schedule with injection payload must raise."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"sync:\n  wallet_api_key: key\n  instances:\n{_INSTANCE_BLOCK}backup_schedule: '{bad_schedule}'\n"
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")

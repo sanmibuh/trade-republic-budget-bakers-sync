@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -487,7 +488,7 @@ def _parse_instance(
                 f"instance '{name}' has a blank 'schedule' — "
                 f"provide a valid cron expression or remove the field to inherit the global schedule"
             )
-        _reject_multiline(f"instance '{name}' schedule", effective_schedule)
+        _validate_cron_schedule(f"instance '{name}' schedule", effective_schedule)
     else:
         effective_schedule = global_schedule
 
@@ -566,18 +567,29 @@ def _parse_global_category(raw_sync: dict) -> str | None:
     return cat
 
 
-def _reject_multiline(field_name: str, value: str) -> None:
-    """Raise ``ValueError`` if *value* contains ``\\n`` or ``\\r``.
+_CRON_FIELD_RE = (
+    r"(?:\*|[0-9]+(?:-[0-9]+)?)(?:/[0-9]+)?(?:,(?:\*|[0-9]+(?:-[0-9]+)?)(?:/[0-9]+)?)*"
+)
+_CRON_SCHEDULE_RE = re.compile(r"^" + r" ".join([_CRON_FIELD_RE] * 5) + r"$")
 
-    Schedule strings are written verbatim into ``/etc/cron.d`` files and into
-    ``list-schedules`` output.  A newline would inject additional cron lines or
-    split a ``name<TAB>schedule`` record, so we reject control-line breaks at
-    parse time before the value reaches any serialization path.
+
+def _validate_cron_schedule(field_name: str, value: str) -> None:
+    """Raise ``ValueError`` if *value* is not a valid five-field cron expression.
+
+    Only the numeric cron syntax is accepted: each of the five fields may
+    contain digits, ``*``, ``-``, ``/``, and ``,``.  Letters, spaces within a
+    field, shell metacharacters, and extra fields are all rejected.
+
+    This prevents cron-line injection: a schedule is written verbatim as the
+    first five columns of a ``/etc/cron.d`` entry followed by a fixed
+    ``root`` user column.  An attacker-controlled extra word (e.g.
+    ``* * * * * root touch /tmp/pwned #``) would shift the ``root`` column
+    and inject an arbitrary command.
     """
-    if "\n" in value or "\r" in value:
+    if not _CRON_SCHEDULE_RE.match(value):
         raise ValueError(
-            f"{field_name} must be a single line — "
-            f"newline characters are not allowed in cron expressions"
+            f"{field_name} must be a valid five-field cron expression "
+            f"(e.g. '0 8 * * *') — got: {value!r}"
         )
 
 
@@ -606,7 +618,7 @@ def _parse_sync_section(
                 "sync.schedule is present but blank — "
                 "provide a valid cron expression or remove the field"
             )
-        _reject_multiline("sync.schedule", sync_schedule)
+        _validate_cron_schedule("sync.schedule", sync_schedule)
     return (
         raw_instances_list,
         global_wallet_key,
@@ -734,7 +746,7 @@ class InstancesConfig:
             str(raw_backup_sched).strip() if raw_backup_sched is not None else None
         ) or None
         if backup_schedule is not None:
-            _reject_multiline("backup_schedule", backup_schedule)
+            _validate_cron_schedule("backup_schedule", backup_schedule)
 
         return cls(
             sync=SyncConfig(
