@@ -1661,8 +1661,31 @@ sync:
         InstancesConfig.load(tmp_path / "i.yml")
 
 
+def test_instances_config_load_blank_per_instance_wallet_api_key_with_global_raises(
+    tmp_path,
+):
+    """A present-but-blank per-instance wallet_api_key must raise, not fall back to global key."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  wallet_api_key: "globalkey"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "   "
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="wallet_api_key"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
 def test_instances_config_load_blank_global_wallet_api_key_raises(tmp_path):
-    """A blank sync.wallet_api_key (global) must raise ValueError, not silently pass."""
+    """A present-but-blank sync.wallet_api_key must raise even when every instance has its own key."""
     from app.config import InstancesConfig
 
     yaml_content = """\
@@ -1672,6 +1695,7 @@ sync:
     - name: user1
       phone: "+34600000000"
       pin: "1234"
+      wallet_api_key: "per-instance-key"
       wallet_cash_account_id: "cash"
       wallet_portfolio_account_id: "portfolio"
 """

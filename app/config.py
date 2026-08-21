@@ -437,7 +437,18 @@ def _parse_instance(
 
     # wallet_api_key: per-instance takes precedence, then global, then error.
     # Both values are stripped and blank-checked to match env var handling.
-    raw_inst_key = str(raw_inst.get("wallet_api_key") or "").strip() or None
+    # An explicitly-present but blank per-instance key is rejected immediately —
+    # it must not silently inherit the global key.
+    raw_inst_key_raw = raw_inst.get("wallet_api_key")
+    if raw_inst_key_raw is not None:
+        raw_inst_key: str | None = str(raw_inst_key_raw).strip()
+        if not raw_inst_key:
+            raise ValueError(
+                f"instance '{name}' has a blank 'wallet_api_key' — "
+                f"provide a valid key or remove the field to inherit the global key"
+            )
+    else:
+        raw_inst_key = None
     raw_wallet_key = raw_inst_key or global_wallet_api_key
     if not raw_wallet_key:
         raise ValueError(
@@ -488,9 +499,16 @@ def _parse_sync_section(
     ``(raw_instances_list, global_wallet_key, global_lookback, global_cat, sync_schedule)``
     """
     raw_instances_list = raw_sync.get("instances") or []
-    global_wallet_key: str | None = (
-        str(raw_sync.get("wallet_api_key") or "").strip() or None
-    )
+    raw_global_key = raw_sync.get("wallet_api_key")
+    if raw_global_key is not None:
+        global_wallet_key: str | None = str(raw_global_key).strip()
+        if not global_wallet_key:
+            raise ValueError(
+                "sync.wallet_api_key is present but blank — "
+                "provide a valid key or remove the field"
+            )
+    else:
+        global_wallet_key = None
     global_lookback: int | None = None
     raw_gl = raw_sync.get("lookback_days")
     if raw_gl is not None:

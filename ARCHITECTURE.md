@@ -295,9 +295,9 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
    are taken from `instances_yaml.telegram_bot_token` / `telegram_chat_id`.
 3. **No instances in YAML** → `backup_cfg` is `None` and `/backup` commands are disabled.
 
-The `backup` CLI command (`python -m app backup`) always loads config exclusively from
-`InstancesConfig` via `_resolve_backup_cfg()`. There is no `WALLET_API_KEY` env fallback for
-the CLI command — `INSTANCES_CONFIG` must be set.
+The `backup` CLI command (`python -m app backup`) loads config via `_resolve_backup_cfg()`:
+- **`INSTANCES_CONFIG` unset or blank** → falls back to `BackupConfig.from_env()` (legacy single-instance `MODE=backup` path; requires `WALLET_API_KEY` env var).
+- **`INSTANCES_CONFIG` set** → loads `InstancesConfig` from the YAML and derives `BackupConfig` from it. Any YAML validation or I/O error surfaces as a `click.UsageError`.
 
 ### Multi-instance YAML config (#145)
 

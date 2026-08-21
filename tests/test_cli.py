@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from app.__main__ import cli
@@ -200,6 +201,24 @@ sync:
 
     assert isinstance(cfg, BackupConfig)
     assert cfg.wallet_api_key == "yamlkey"
+
+
+def test_backup_resolve_cfg_raises_usage_error_when_instances_config_invalid(
+    tmp_path, monkeypatch
+):
+    """When INSTANCES_CONFIG is set but the YAML is invalid, raise UsageError (not env fallback)."""
+    import click
+
+    from app.__main__ import _resolve_backup_cfg
+
+    bad_yaml = tmp_path / "instances.yml"
+    bad_yaml.write_text(
+        "sync:\n  instances: []\n"
+    )  # valid YAML but no instances → ValueError
+    monkeypatch.setenv("INSTANCES_CONFIG", str(bad_yaml))
+
+    with pytest.raises(click.UsageError):
+        _resolve_backup_cfg()
 
 
 # ---------------------------------------------------------------------------
