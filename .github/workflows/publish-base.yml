@@ -51,18 +51,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
+          token: ${{ secrets.PAT_RELEASE }}
 
       - name: Extract version tag
         id: meta
         run: |
           VERSION="${{ github.event.inputs.version || github.ref_name }}"
-          if ! echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "ERROR: invalid version format: $VERSION"
-            exit 1
+          if echo "$VERSION" | grep -qE '^v[0-9]+\.0\.0$'; then
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "is_major=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_major=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Update ARG BASE_TAG in app Dockerfile
+        if: steps.meta.outputs.is_major == 'true'
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
@@ -77,6 +81,7 @@ jobs:
           fi
 
       - name: Commit updated Dockerfile
+        if: steps.meta.outputs.is_major == 'true'
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
