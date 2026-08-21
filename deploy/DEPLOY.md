@@ -185,9 +185,12 @@ Trade Republic sessions expire on a hard 24h cap, so a scheduled sync will event
 
 ## Production schedules
 
-Defined in `docker-compose.yml` under `environment:`.
+Defined in `instances.yml` — **not** in `docker-compose.yml` environment variables.
 
-| Variable          | Value               | Purpose                          |
-|-------------------|---------------------|----------------------------------|
-| `SYNC_SCHEDULE`   | `0 8,14,21 * * *`   | Sync all instances (via cron)    |
-| `BACKUP_SCHEDULE` | `0 3 * * *`         | Automatic daily backup (via cron)|
+| Key in `instances.yml`    | Example value       | Purpose                                          |
+|---------------------------|---------------------|--------------------------------------------------|
+| `sync.schedule`           | `0 8,14,21 * * *`   | Global default sync schedule (overridable per instance) |
+| `backup_schedule`         | `0 3 * * *`         | Automatic daily backup (omit to disable)         |
+
+`SYNC_SCHEDULE` and `BACKUP_SCHEDULE` environment variables are **ignored** in
+multi-instance mode; set schedules in `instances.yml` instead.

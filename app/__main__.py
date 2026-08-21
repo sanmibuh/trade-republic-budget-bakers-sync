@@ -200,7 +200,12 @@ def _resolve_backup_cfg() -> BackupConfig:
     Raises :class:`click.UsageError` for any config or I/O error so the user
     sees a clean message instead of a traceback.
     """
-    from app.config import BackupConfig, InstancesConfig, read_instances_config_path
+    from app.config import (
+        BackupConfig,
+        InstancesConfig,
+        read_instances_config_path,
+        read_optional_wallet_api_key,
+    )
 
     try:
         path = read_instances_config_path()
@@ -210,7 +215,9 @@ def _resolve_backup_cfg() -> BackupConfig:
         instances_yaml = InstancesConfig.load(path)
     except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
-    cfg = BackupConfig.from_instances_yaml(instances_yaml)
+    cfg = BackupConfig.from_instances_yaml(
+        instances_yaml, wallet_api_key=read_optional_wallet_api_key()
+    )
     if cfg is None:
         raise click.UsageError(
             "instances config has no instances — cannot build backup config"

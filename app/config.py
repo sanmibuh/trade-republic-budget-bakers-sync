@@ -518,7 +518,20 @@ def _parse_sync_section(
             raise ValueError(
                 f"sync.lookback_days must be an integer, got: {raw_gl!r}"
             ) from err
-    global_cat: str | None = raw_sync.get("category_strategy") or None
+    global_cat: str | None = None
+    raw_cat = raw_sync.get("category_strategy")
+    if raw_cat is not None:
+        global_cat = str(raw_cat).strip()
+        if not global_cat:
+            raise ValueError(
+                "sync.category_strategy is present but blank — "
+                f"use one of {sorted(_VALID_CATEGORY_STRATEGIES)} or remove the field"
+            )
+        if global_cat not in _VALID_CATEGORY_STRATEGIES:
+            raise ValueError(
+                f"sync.category_strategy must be one of "
+                f"{sorted(_VALID_CATEGORY_STRATEGIES)}, got: {global_cat!r}"
+            )
     raw_sched = raw_sync.get("schedule")
     sync_schedule: str | None = (
         str(raw_sched).strip() if raw_sched is not None else None
@@ -530,6 +543,23 @@ def _parse_sync_section(
         global_cat,
         sync_schedule,
     )
+
+
+@dataclass(frozen=True)
+class SyncConfig:
+    """Global sync defaults and the resolved list of sync instances.
+
+    All fields mirror the corresponding ``sync:`` keys in ``instances.yml``.
+    Per-instance values take precedence over these globals when an instance
+    overrides them; these are the *raw* global values before per-instance
+    resolution.
+    """
+
+    instances: list[InstanceConfig]
+    wallet_api_key: str | None = None
+    lookback_days: int | None = None
+    category_strategy: str | None = None
+    schedule: str | None = None
 
 
 @dataclass(frozen=True)
@@ -552,13 +582,22 @@ class InstancesConfig:
         backup_schedule: "…"     # optional — omit to disable scheduled backups
     """
 
-    instances: list[InstanceConfig]
+    sync: SyncConfig
     data_dir: Path = field(default_factory=lambda: Path(_DEFAULT_DATA_DIR))
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     allow_insecure_ssl: bool = False
-    sync_schedule: str | None = None
     backup_schedule: str | None = None
+
+    @property
+    def instances(self) -> list[InstanceConfig]:
+        """Backward-compatible alias for :attr:`sync.instances`."""
+        return self.sync.instances
+
+    @property
+    def sync_schedule(self) -> str | None:
+        """Backward-compatible alias for :attr:`sync.schedule`."""
+        return self.sync.schedule
 
     @classmethod
     def load(cls, path: Path) -> InstancesConfig:
@@ -622,7 +661,13 @@ class InstancesConfig:
         ) or None
 
         return cls(
-            instances=instances,
+            sync=SyncConfig(
+                instances=instances,
+                wallet_api_key=global_wallet_key,
+                lookback_days=global_lookback,
+                category_strategy=global_cat,
+                schedule=sync_schedule,
+            ),
             data_dir=Path(data.get("data_dir", _DEFAULT_DATA_DIR)),
             telegram_bot_token=data.get("telegram_bot_token")
             or os.getenv("TELEGRAM_BOT_TOKEN")
@@ -631,7 +676,6 @@ class InstancesConfig:
             or os.getenv("TELEGRAM_CHAT_ID")
             or None,
             allow_insecure_ssl=allow_insecure_ssl,
-            sync_schedule=sync_schedule,
             backup_schedule=backup_schedule,
         )
 

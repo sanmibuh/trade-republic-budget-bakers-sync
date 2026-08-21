@@ -7,6 +7,7 @@ from app.config import (
     Config,
     InstanceConfig,
     InstancesConfig,
+    SyncConfig,
     has_valid_session,
     read_instance,
 )
@@ -268,7 +269,7 @@ def _make_instances_yaml(
         ]
     )
     return InstancesConfig(
-        instances=instances,
+        sync=SyncConfig(instances=instances),
         data_dir=Path(data_dir),
         telegram_bot_token=telegram_bot_token,
         telegram_chat_id=telegram_chat_id,
@@ -1634,6 +1635,109 @@ sync:
 
     with pytest.raises(ValueError, match="instance"):
         InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# global category_strategy validation — independent of per-instance overrides
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_invalid_global_category_strategy_raises(tmp_path):
+    """An invalid sync.category_strategy must raise even when every instance overrides it."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  category_strategy: bad_value
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      category_strategy: history
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="category_strategy"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+def test_instances_config_load_blank_global_category_strategy_raises(tmp_path):
+    """A present-but-blank sync.category_strategy must raise, not silently become None."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  category_strategy: "   "
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      category_strategy: history
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="category_strategy"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# SyncConfig — nested sync section exposed on InstancesConfig
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_exposes_sync_field(tmp_path):
+    """InstancesConfig.sync must expose the global sync defaults and instance list."""
+    from app.config import InstancesConfig, SyncConfig
+
+    yaml_content = """\
+sync:
+  wallet_api_key: "globalkey"
+  lookback_days: 14
+  category_strategy: history
+  schedule: "0 8 * * *"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert isinstance(cfg.sync, SyncConfig)
+    assert cfg.sync.wallet_api_key == "globalkey"
+    assert cfg.sync.lookback_days == 14
+    assert cfg.sync.category_strategy == "history"
+    assert cfg.sync.schedule == "0 8 * * *"
+    assert len(cfg.sync.instances) == 1
+    assert cfg.sync.instances[0].name == "user1"
+
+
+def test_instances_config_instances_property_delegates_to_sync(tmp_path):
+    """InstancesConfig.instances must be a backward-compat property over .sync.instances."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  wallet_api_key: "key"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances is cfg.sync.instances
 
 
 # ---------------------------------------------------------------------------

@@ -221,6 +221,32 @@ def test_backup_resolve_cfg_raises_usage_error_when_instances_config_invalid(
         _resolve_backup_cfg()
 
 
+def test_backup_resolve_cfg_env_wallet_key_overrides_yaml(tmp_path, monkeypatch):
+    """When INSTANCES_CONFIG and WALLET_API_KEY are both set, env key overrides YAML key."""
+    from app.__main__ import _resolve_backup_cfg
+    from app.config import BackupConfig
+
+    yaml = tmp_path / "instances.yml"
+    yaml.write_text(f"""\
+data_dir: {tmp_path}
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "yamlkey"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "port"
+""")
+    monkeypatch.setenv("INSTANCES_CONFIG", str(yaml))
+    monkeypatch.setenv("WALLET_API_KEY", "envkey")
+
+    cfg = _resolve_backup_cfg()
+
+    assert isinstance(cfg, BackupConfig)
+    assert cfg.wallet_api_key == "envkey"
+
+
 # ---------------------------------------------------------------------------
 # backup monthly
 # ---------------------------------------------------------------------------
