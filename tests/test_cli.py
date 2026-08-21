@@ -695,9 +695,10 @@ def test_sync_with_instance_flag_loads_from_config_file(tmp_path):
     from app.config import Config, InstancesConfig
 
     mock_cfg = MagicMock(spec=Config)
-    mock_cfg.data_dir = tmp_path / "user1"
+    mock_cfg.data_dir = tmp_path / "sync" / "user1"
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
+    mock_instances.data_dir = tmp_path
 
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text("")
@@ -719,15 +720,16 @@ def test_sync_with_instance_flag_loads_from_config_file(tmp_path):
     mock_run.assert_called_once_with(cfg=mock_cfg)
 
 
-def test_sync_with_instance_flag_uses_yaml_root_for_logging(tmp_path):
-    """sync --instance must call setup_logging with the YAML data_dir root, not DATA_DIR."""
+def test_sync_with_instance_flag_uses_data_dir_for_logging(tmp_path):
+    """sync --instance must call setup_logging with instances_yaml.data_dir (root), not cfg.data_dir."""
     from app.config import Config, InstancesConfig
 
-    yaml_root = tmp_path / "yaml_root"
+    data_dir = tmp_path / "data"
     mock_cfg = MagicMock(spec=Config)
-    mock_cfg.data_dir = yaml_root / "user1"  # per-instance subdir
+    mock_cfg.data_dir = data_dir / "sync" / "user1"
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
+    mock_instances.data_dir = data_dir
 
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text("")
@@ -744,18 +746,19 @@ def test_sync_with_instance_flag_uses_yaml_root_for_logging(tmp_path):
             env={"INSTANCES_CONFIG": str(cfg_file)},
         )
 
-    mock_setup.assert_called_once_with(yaml_root)
+    mock_setup.assert_called_once_with(data_dir)
 
 
-def test_login_with_instance_flag_uses_yaml_root_for_logging(tmp_path):
-    """login --instance must call setup_logging with the YAML data_dir root, not DATA_DIR."""
+def test_login_with_instance_flag_uses_data_dir_for_logging(tmp_path):
+    """login --instance must call setup_logging with instances_yaml.data_dir (root), not cfg.data_dir."""
     from app.config import Config, InstancesConfig
 
-    yaml_root = tmp_path / "yaml_root"
+    data_dir = tmp_path / "data"
     mock_cfg = MagicMock(spec=Config)
-    mock_cfg.data_dir = yaml_root / "user1"
+    mock_cfg.data_dir = data_dir / "sync" / "user1"
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
+    mock_instances.data_dir = data_dir
 
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text("")
@@ -772,7 +775,7 @@ def test_login_with_instance_flag_uses_yaml_root_for_logging(tmp_path):
             env={"INSTANCES_CONFIG": str(cfg_file)},
         )
 
-    mock_setup.assert_called_once_with(yaml_root)
+    mock_setup.assert_called_once_with(data_dir)
 
 
 def test_bot_command_uses_yaml_data_dir_for_logging(tmp_path):
@@ -872,9 +875,10 @@ def test_login_with_instance_flag_loads_from_config_file(tmp_path):
     from app.config import Config, InstancesConfig
 
     mock_cfg = MagicMock(spec=Config)
-    mock_cfg.data_dir = tmp_path / "user1"
+    mock_cfg.data_dir = tmp_path / "sync" / "user1"
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
+    mock_instances.data_dir = tmp_path
 
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text("")

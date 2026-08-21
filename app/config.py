@@ -320,6 +320,10 @@ def _parse_yaml_bool(field_name: str, value: object) -> bool:
     )
 
 
+# Names reserved by the runtime layout — collide with the log file or backup directory.
+_RESERVED_INSTANCE_NAMES: frozenset[str] = frozenset({"sync.log", "backups"})
+
+
 def _validate_instance_name(raw_inst: dict, idx: int) -> str:
     """Extract, coerce, strip, and validate the instance name from a raw dict.
 
@@ -327,6 +331,10 @@ def _validate_instance_name(raw_inst: dict, idx: int) -> str:
     ``[A-Za-z0-9._-]``.  This allowlist ensures names are safe for:
     - filesystem paths (no separators or control chars)
     - shell arguments in cron job lines (no metacharacters)
+
+    A small set of names is also reserved because they collide with files or
+    directories that the runtime writes directly under ``data_dir``:
+    ``sync.log`` (the shared log file) and ``backups`` (the backup directory).
     """
     import re
 
@@ -340,6 +348,10 @@ def _validate_instance_name(raw_inst: dict, idx: int) -> str:
         raise ValueError(
             f"instance name '{name}' contains invalid characters — only ASCII "
             f"alphanumerics, hyphens, underscores, and dots are allowed"
+        )
+    if name in _RESERVED_INSTANCE_NAMES:
+        raise ValueError(
+            f"instance name '{name}' is reserved — choose a different name"
         )
     return name
 
@@ -789,7 +801,7 @@ class InstancesConfig:
             telegram_chat_id=self.telegram_chat_id,
             lookback_days=inst.lookback_days,
             dedup_ttl_days=inst.dedup_ttl_days,
-            data_dir=self.data_dir / inst.name,
+            data_dir=self.data_dir / "sync" / inst.name,
             instance=inst.name,
             allow_insecure_ssl=self.allow_insecure_ssl,
             label_ids=dict(inst.label_ids),

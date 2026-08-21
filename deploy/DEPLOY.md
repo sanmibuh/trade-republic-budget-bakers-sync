@@ -201,19 +201,32 @@ multi-instance mode; set schedules in `instances.yml` instead.
 
 ### Consolidating runtime data under `data/` (v8.0.0+)
 
-The log file now lives directly in `data/` instead of `data/logs/`:
+Runtime paths have changed. Run the following from the compose root (`/share/docker/tr-sync/`) before upgrading:
 
-| Path before          | Path after      |
-|----------------------|-----------------|
-| `data/logs/sync.log` | `data/sync.log` |
-
-If you have existing logs, migrate them on the NAS before upgrading:
+**Instance data** — moved from `data/<name>/` to `data/sync/<name>/`:
 
 ```sh
-cd /share/docker/tr-sync/data
-mv logs/sync.log sync.log
+# From /share/docker/tr-sync/
+mkdir -p data/sync
+# Repeat for each instance (david, eli, …)
+mv data/david data/sync/david
+mv data/eli   data/sync/eli
+```
+
+**Logs** — moved from `logs/` at the compose root into `data/`:
+
+```sh
+# From /share/docker/tr-sync/
+mv logs/sync.log* data/
 rmdir logs   # only if empty
 ```
 
-The backup directory structure (`data/backups/monthly/`, `data/backups/yearly/`) is unchanged.
+**Backups** — moved from `data/backup/backups/` to `data/backups/`:
+
+```sh
+# From /share/docker/tr-sync/
+mkdir -p data/backups
+mv data/backup/backups/* data/backups/
+rmdir data/backup/backups data/backup   # only if empty
+```
 
