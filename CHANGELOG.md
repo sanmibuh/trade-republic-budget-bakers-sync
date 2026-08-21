@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [7.1.0] - 2026-08-21
+
+### What's Changed
+<!-- add release notes here -->
+**Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v7.0.0...v7.1.0
+
+
 ## [7.0.0] - 2026-08-20
 
 ### What's Changed
