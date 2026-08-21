@@ -1,0 +1,26 @@
+app/config.py
+  h_97a91c9e567f87 252
+tests/test_bot.py
+  h_97a91c9e567f87 76,224,374-392
+app/bot.py
+  h_97a91c9e567f87 112,161
+app/__main__.py
+  h_97a91c9e567f87 73,76,102,105,296,325,423
+tests/test_cli.py
+  h_97a91c9e567f87 134,747,775,796
+tests/test_config.py
+  h_97a91c9e567f87 299,303
+deploy/DEPLOY.md
+  h_97a91c9e567f87 197-219
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "db96a7cca68a8f4373fcec1a55d44d122e1507d0",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
