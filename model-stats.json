@@ -118,5 +118,29 @@
     "model": "gemini-2.0-flash-lite",
     "outcome": "nok",
     "reason": "not_available"
+  },
+  {
+    "date": "2026-08-21",
+    "model": "gemini-2.5-pro-preview-06-05",
+    "outcome": "nok",
+    "reason": "not_available"
+  },
+  {
+    "date": "2026-08-21",
+    "model": "gemini-2.5-flash",
+    "outcome": "nok",
+    "reason": "not_available"
+  },
+  {
+    "date": "2026-08-21",
+    "model": "gemini-2.0-flash",
+    "outcome": "nok",
+    "reason": "not_available"
+  },
+  {
+    "date": "2026-08-21",
+    "model": "gemini-2.0-flash-lite",
+    "outcome": "nok",
+    "reason": "not_available"
   }
 ]
