@@ -467,7 +467,7 @@ def _parse_instance(
 
     # lookback_days / dedup_ttl_days: merge global default into raw dict before parsing.
     effective_raw = dict(raw_inst)
-    if "lookback_days" not in effective_raw and global_lookback_days is not None:
+    if effective_raw.get("lookback_days") is None and global_lookback_days is not None:
         effective_raw["lookback_days"] = global_lookback_days
     lookback_days, dedup_ttl_days = _parse_instance_numerics(name, effective_raw)
 
@@ -487,6 +487,7 @@ def _parse_instance(
                 f"instance '{name}' has a blank 'schedule' — "
                 f"provide a valid cron expression or remove the field to inherit the global schedule"
             )
+        _reject_multiline(f"instance '{name}' schedule", effective_schedule)
     else:
         effective_schedule = global_schedule
 
@@ -565,6 +566,21 @@ def _parse_global_category(raw_sync: dict) -> str | None:
     return cat
 
 
+def _reject_multiline(field_name: str, value: str) -> None:
+    """Raise ``ValueError`` if *value* contains ``\\n`` or ``\\r``.
+
+    Schedule strings are written verbatim into ``/etc/cron.d`` files and into
+    ``list-schedules`` output.  A newline would inject additional cron lines or
+    split a ``name<TAB>schedule`` record, so we reject control-line breaks at
+    parse time before the value reaches any serialization path.
+    """
+    if "\n" in value or "\r" in value:
+        raise ValueError(
+            f"{field_name} must be a single line — "
+            f"newline characters are not allowed in cron expressions"
+        )
+
+
 def _parse_sync_section(
     raw_sync: dict,
 ) -> tuple[list, str | None, int | None, str | None, str | None]:
@@ -590,6 +606,7 @@ def _parse_sync_section(
                 "sync.schedule is present but blank — "
                 "provide a valid cron expression or remove the field"
             )
+        _reject_multiline("sync.schedule", sync_schedule)
     return (
         raw_instances_list,
         global_wallet_key,
@@ -716,6 +733,8 @@ class InstancesConfig:
         backup_schedule: str | None = (
             str(raw_backup_sched).strip() if raw_backup_sched is not None else None
         ) or None
+        if backup_schedule is not None:
+            _reject_multiline("backup_schedule", backup_schedule)
 
         return cls(
             sync=SyncConfig(

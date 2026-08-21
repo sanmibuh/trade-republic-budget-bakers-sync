@@ -1993,3 +1993,113 @@ sync:
 
     with pytest.raises(ValueError, match="schedule"):
         InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# schedule newline injection — global, per-instance, backup_schedule
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_schedule", ["0 8 * * *\\n0 9 * * *", "0 8 * * *\\r0 9 * * *"]
+)
+def test_instances_config_load_newline_in_global_schedule_raises(
+    tmp_path, bad_schedule
+):
+    """sync.schedule containing \\n or \\r must raise to prevent cron-line injection."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"""\
+sync:
+  wallet_api_key: "key"
+  schedule: "{bad_schedule}"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+@pytest.mark.parametrize(
+    "bad_schedule", ["0 8 * * *\\n0 9 * * *", "0 8 * * *\\r0 9 * * *"]
+)
+def test_instances_config_load_newline_in_per_instance_schedule_raises(
+    tmp_path, bad_schedule
+):
+    """Per-instance schedule containing \\n or \\r must raise."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"""\
+sync:
+  wallet_api_key: "key"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      schedule: "{bad_schedule}"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+@pytest.mark.parametrize(
+    "bad_schedule", ["0 3 * * *\\n0 4 * * *", "0 3 * * *\\r0 4 * * *"]
+)
+def test_instances_config_load_newline_in_backup_schedule_raises(
+    tmp_path, bad_schedule
+):
+    """backup_schedule containing \\n or \\r must raise to prevent cron-line injection."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"""\
+sync:
+  wallet_api_key: "key"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+backup_schedule: "{bad_schedule}"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="backup_schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# lookback_days: null in instance — must apply global default, not silently use 7
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_null_lookback_days_applies_global(tmp_path):
+    """lookback_days: null in an instance must apply the global default, not the hardcoded 7."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  lookback_days: 30
+  wallet_api_key: "key"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      lookback_days: null
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[0].lookback_days == 30
