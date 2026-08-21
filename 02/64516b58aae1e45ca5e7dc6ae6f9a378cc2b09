@@ -1,0 +1,16 @@
+.github/workflows/publish-base.yml
+  h_97a91c9e567f87 44,47-73,80-81
+docker/app/Dockerfile
+  h_97a91c9e567f87 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "0264516b58aae1e45ca5e7dc6ae6f9a378cc2b09",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
