@@ -478,10 +478,17 @@ def _parse_instance(
     )
 
     # schedule: per-instance > global sync.schedule > None.
+    # A present-but-blank per-instance value is rejected — omit the field to inherit global.
     raw_schedule = raw_inst.get("schedule")
-    effective_schedule: str | None = (
-        str(raw_schedule).strip() if raw_schedule is not None else global_schedule
-    )
+    if raw_schedule is not None:
+        effective_schedule: str | None = str(raw_schedule).strip() or None
+        if effective_schedule is None:
+            raise ValueError(
+                f"instance '{name}' has a blank 'schedule' — "
+                f"provide a valid cron expression or remove the field to inherit the global schedule"
+            )
+    else:
+        effective_schedule = global_schedule
 
     return InstanceConfig(
         name=name,
@@ -575,9 +582,14 @@ def _parse_sync_section(
     global_lookback = _parse_global_lookback(raw_sync)
     global_cat = _parse_global_category(raw_sync)
     raw_sched = raw_sync.get("schedule")
-    sync_schedule: str | None = (
-        str(raw_sched).strip() if raw_sched is not None else None
-    ) or None
+    sync_schedule: str | None = None
+    if raw_sched is not None:
+        sync_schedule = str(raw_sched).strip() or None
+        if sync_schedule is None:
+            raise ValueError(
+                "sync.schedule is present but blank — "
+                "provide a valid cron expression or remove the field"
+            )
     return (
         raw_instances_list,
         global_wallet_key,
@@ -621,7 +633,10 @@ class InstancesConfig:
           category_strategy: history  # optional
           instances:
             - name: …
-        backup_schedule: "…"     # optional — omit to disable scheduled backups
+
+    Optional top-level keys::
+
+        backup_schedule: "…"     # omit to disable scheduled backups
     """
 
     sync: SyncConfig

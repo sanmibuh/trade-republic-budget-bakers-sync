@@ -202,7 +202,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
     command to report per-instance auth state without network calls.
   - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG`, one per line.
   - `python -m app list-schedules` — prints `name<TAB>schedule` for every instance that has a schedule,
-    one per line.  Used by `entrypoint.sh` to register one cron job per instance with its own schedule.
+    one per line. Used by `entrypoint.sh` to register one cron job per instance with its own schedule.
   - `python -m app get-backup-schedule` — prints the `backup_schedule` from `INSTANCES_CONFIG`, or nothing.
     Used by `entrypoint.sh` to conditionally register the backup cron job.
 - All imports inside command functions are deferred — startup is fast and dependencies are only loaded when needed.

@@ -1945,3 +1945,51 @@ sync:
 
     assert cfg.sync.category_strategy == "history"
     assert cfg.instances[0].category_strategy == "history"
+
+
+# ---------------------------------------------------------------------------
+# schedule blank-check — global and per-instance
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_blank_global_schedule_raises(tmp_path):
+    """A present-but-blank sync.schedule must raise, not silently become None."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  schedule: "   "
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+def test_instances_config_load_blank_per_instance_schedule_raises(tmp_path):
+    """A present-but-blank per-instance schedule must raise, not silently disable scheduling."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  schedule: "0 8 * * *"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      schedule: "   "
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
