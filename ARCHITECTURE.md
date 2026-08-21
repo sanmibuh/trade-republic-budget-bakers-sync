@@ -201,7 +201,10 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
     for this instance in `sync.db` is not `failed`/`expired`; exits 1 otherwise. Used by the bot's `/status`
     command to report per-instance auth state without network calls.
   - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG`, one per line.
-    Used by `entrypoint.sh` in multi-instance mode to enumerate instances for cron registration.
+  - `python -m app list-schedules` — prints `name<TAB>schedule` for every instance that has a schedule,
+    one per line. Used by `entrypoint.sh` to register one cron job per instance with its own schedule.
+  - `python -m app get-backup-schedule` — prints the `backup_schedule` from `INSTANCES_CONFIG`, or nothing.
+    Used by `entrypoint.sh` to conditionally register the backup cron job.
 - All imports inside command functions are deferred — startup is fast and dependencies are only loaded when needed.
 - `click.Choice(["auto", "monthly", "yearly"])` provides free input validation and help text.
 - `entrypoint.sh` and `tr-sync.sh` both use `python -m app <subcommand>` — single consistent interface.
@@ -210,9 +213,9 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 - `docker/app/entrypoint.sh`: behaviour controlled by `INSTANCES_CONFIG` (multi-instance) or `MODE` env var (legacy):
 
   **Multi-instance mode** (activated when `INSTANCES_CONFIG` is set — Phase 2/4 of #145):
-  - Calls `python -m app list-instances` to enumerate instance names from the YAML file.
-  - Registers one `SYNC_SCHEDULE` cron job per instance: `python -m app sync --instance <name>`.
-  - Optionally registers `BACKUP_SCHEDULE` cron job for `python -m app backup auto` when `BACKUP_SCHEDULE` is set.
+  - Calls `python -m app list-schedules` to get per-instance `name<TAB>schedule` pairs.
+  - Registers one cron job per instance with its own schedule: `python -m app sync --instance <name>`.
+  - Calls `python -m app get-backup-schedule`; if a schedule is returned, registers a backup cron job.
   - Starts the cron daemon in the background (`cron -f &`), then starts the Telegram bot also in
     the background (`python -m app bot &`). The shell remains as PID 1 and supervises both children:
     if either process exits unexpectedly the shell kills the other and exits non-zero so Docker can
@@ -220,7 +223,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
     `docker stop`.
   - `MODE` env var is ignored in this mode.
   - All instances share one log file: `{DATA_DIR}/logs/sync.log`.
-  - Requires `SYNC_SCHEDULE` to be set; exits with an error if missing.
+  - Exits with an error if no instance has a schedule defined.
 
   **Legacy single-instance mode** (when `INSTANCES_CONFIG` is not set — fully backwards-compatible):
   - `MODE=sync` — registers `SYNC_SCHEDULE` cron job (`python -m app sync`). One-shot if `SYNC_SCHEDULE` not set.
@@ -239,7 +242,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 ### Telegram bot
 - `app/bot.py`: long-polling bot and command handlers; wires `app/bot_keyboards.py`; executes all sync/login/resync/backup operations via direct in-process Python calls (no Docker SDK, no `exec_run`).
 - `app/bot_keyboards.py`: stateless inline keyboard builder functions (backup type/period pickers, instance pickers, resync date picker); no dependency on bot state.
-- `BotConfig` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `INSTANCES_CONFIG` from env. `INSTANCES_CONFIG` is a path to the instances YAML file; backup config is read from `BackupConfig.from_env()`.
+- `BotConfig` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `INSTANCES_CONFIG` from env. `INSTANCES_CONFIG` is a path to the instances YAML file; backup config is derived from `BackupConfig.from_instances_yaml()` with an optional `WALLET_API_KEY` env override via `read_optional_wallet_api_key()`.
 - Each sync instance is represented as `InstanceConfig(name, config: Config)` — the bot calls `main.run()`, `main.run_login()`, and `main.run_resync()` directly with the instance's `Config`.
 - Backup command (`/backup [monthly|yearly] [period]`) uses a two-step inline keyboard: first choose type
   (Monthly / Yearly), then choose the period. Direct args (`/backup monthly 2026-07`) skip the keyboards.
@@ -276,18 +279,24 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   `check-session` which only needs the data directory, not full credentials.
 - `read_instance()` — standalone helper that returns the logical instance name (`INSTANCE` env var, falling
   back to `OWNER_NAME` lowercased); used by `check-session` to look up `auth_state` in `sync.db`.
+- `read_optional_wallet_api_key()` — returns `WALLET_API_KEY` from env or `None`; used by the bot to allow an
+  explicit env override of the YAML wallet key without breaking the "no `os.getenv` outside `config.py`" rule.
 - All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
 ### Backup config derivation
 
 `BotConfig.from_env` builds `backup_cfg` with the following priority:
 
-1. **`WALLET_API_KEY` env var set** → `BackupConfig.from_env()` (backward-compatible path, reads `DATA_DIR` too).
-2. **`WALLET_API_KEY` absent + instances YAML loaded** → `BackupConfig` is derived from the first instance's
-   `wallet_api_key`; `data_dir` is set to `instances_yaml.data_dir / "backup"`; Telegram credentials are taken
-   from `instances_yaml.telegram_bot_token` / `telegram_chat_id` (resolved from YAML or env var by
-   `InstancesConfig.load`). This is the path used in the single-container deployment.
-3. **Neither** → `backup_cfg` is `None` and `/backup` commands are disabled in the bot.
+1. **`WALLET_API_KEY` env var set** → used as override; `BackupConfig` is derived from
+   `BackupConfig.from_instances_yaml(instances_yaml, wallet_api_key=env_key)`.
+2. **`WALLET_API_KEY` absent** → `BackupConfig` is derived from the first instance's
+   `wallet_api_key`; `data_dir` is set to `instances_yaml.data_dir / "backup"`; Telegram credentials
+   are taken from `instances_yaml.telegram_bot_token` / `telegram_chat_id`.
+3. **No instances in YAML** → `backup_cfg` is `None` and `/backup` commands are disabled.
+
+The `backup` CLI command (`python -m app backup`) loads config via `_resolve_backup_cfg()`:
+- **`INSTANCES_CONFIG` unset or blank** → falls back to `BackupConfig.from_env()` (legacy single-instance `MODE=backup` path; requires `WALLET_API_KEY` env var).
+- **`INSTANCES_CONFIG` set** → loads `InstancesConfig` from the YAML and derives `BackupConfig` from it. Any YAML validation or I/O error surfaces as a `click.UsageError`.
 
 ### Multi-instance YAML config (#145)
 
@@ -300,37 +309,54 @@ as direct in-process Python calls.
 
 ```yaml
 # Global shared settings
-data_dir: /app/data          # optional, default /app/data
-telegram_bot_token: "..."    # optional
-telegram_chat_id: "..."      # optional
-allow_insecure_ssl: false    # optional, default false
+data_dir: /app/data           # optional, default /app/data
+telegram_bot_token: "..."     # optional (also accepted via TELEGRAM_BOT_TOKEN env var)
+telegram_chat_id: "..."       # optional (also accepted via TELEGRAM_CHAT_ID env var)
+allow_insecure_ssl: false     # optional, default false
 
-instances:
-  - name: user1              # used as subdirectory name and instance identifier
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "..."
-    wallet_cash_account_id: "..."
-    wallet_portfolio_account_id: "..."
-    owner_name: "User1"      # optional, defaults to name.capitalize()
-    lookback_days: 7         # optional, default 7
-    dedup_ttl_days: 60       # optional, default 60
-    category_strategy: none  # optional, default none
-    labels:                  # optional
-      BANK_TRANSACTION_INCOMING: label-id-123
+backup_schedule: "0 3 * * *"  # optional — cron expression; omit to disable automatic backups
 
-  - name: user2
-    phone: "+34611111111"
-    pin: "5678"
-    wallet_api_key: "..."
-    wallet_cash_account_id: "..."
-    wallet_portfolio_account_id: "..."
+sync:
+  schedule: "0 8,14,21 * * *" # global default; overridable per instance
+  wallet_api_key: "..."        # global default; overridable per instance
+  lookback_days: 7             # global default; overridable per instance
+  category_strategy: history   # global default (none | history); overridable per instance
+
+  instances:
+    - name: user1              # used as subdirectory name and instance identifier
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "..."
+      wallet_portfolio_account_id: "..."
+      owner_name: "User1"      # optional, defaults to name.capitalize()
+      dedup_ttl_days: 60       # optional, default 60
+      labels:                  # optional
+        BANK_TRANSACTION_INCOMING: label-id-123
+      # Per-instance overrides (all optional):
+      # wallet_api_key: "..."
+      # lookback_days: 14
+      # category_strategy: none
+      # schedule: "5 8,14,21 * * *"  # stagger to avoid parallel TR logins
+
+    - name: user2
+      phone: "+34611111111"
+      pin: "5678"
+      wallet_cash_account_id: "..."
+      wallet_portfolio_account_id: "..."
 ```
+
+The `sync:` section is **required** — files without it raise `ValueError` with a clear message
+pointing to `instances.yml.example`.
 
 **Key behaviours:**
 - Each instance gets its own `data_dir/{name}/` subdirectory (session files, `sync.db`, logs).
 - Global `telegram_*` and `allow_insecure_ssl` are inherited by all instances.
+- `sync.*` fields (`wallet_api_key`, `lookback_days`, `category_strategy`, `schedule`) are global
+  defaults; each instance can override any of them individually.
 - `InstancesConfig.to_config(name)` returns a fully populated `Config` ready for `run()`.
+- `InstancesConfig.sync_schedule` — the global schedule (or `None`); individual instances expose it
+  via `InstanceConfig.schedule` after inheritance resolution at load time.
+- `InstancesConfig.backup_schedule` — the backup cron expression (or `None`).
 - `run(cfg=None)` and `run_login(cfg=None)` accept an injected `Config`; `None` falls back to
   `Config.from_env()` — fully backwards-compatible.
 - CLI: `python -m app sync --instance david` and `python -m app login --instance david` resolve

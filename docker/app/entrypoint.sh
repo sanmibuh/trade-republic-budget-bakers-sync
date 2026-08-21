@@ -14,9 +14,9 @@
 #   MODE=bot      Start the Telegram bot for remote command execution.
 #
 # Multi-instance mode (activated when INSTANCES_CONFIG is set):
-#   Reads instance names from the YAML config file and registers one cron job
-#   per instance (python -m app sync --instance <name>) using SYNC_SCHEDULE.
-#   Optionally registers the backup job when BACKUP_SCHEDULE is also set.
+#   Reads instance names and per-instance schedules from the YAML config file
+#   via `python -m app list-schedules` (emits "name<TAB>schedule" per line).
+#   Reads the optional backup schedule via `python -m app get-backup-schedule`.
 #   The MODE env var is ignored in this mode.
 #   After registering cron jobs, starts the cron daemon in the background and
 #   then starts the Telegram bot as a background process. The shell remains as
@@ -46,22 +46,24 @@ fi
 # Multi-instance mode (INSTANCES_CONFIG is set)
 # ------------------------------------------------------------------
 if [ -n "$INSTANCES_CONFIG" ]; then
-    if [ -z "$SYNC_SCHEDULE" ]; then
-        log "ERROR: INSTANCES_CONFIG is set but SYNC_SCHEDULE is empty. Cannot register cron jobs."
-        exit 1
-    fi
-
     log "Multi-instance mode: loading instances from $INSTANCES_CONFIG"
 
-    INSTANCES=$(python -m app list-instances) || {
-        log "ERROR: failed to load instances from $INSTANCES_CONFIG"
+    # Read per-instance schedules from the YAML: each line is "name<TAB>schedule".
+    SCHEDULES=$(python -m app list-schedules) || {
+        log "ERROR: failed to load schedules from $INSTANCES_CONFIG"
         exit 1
     }
 
-    if [ -z "$INSTANCES" ]; then
-        log "ERROR: no instances found in $INSTANCES_CONFIG"
+    if [ -z "$SCHEDULES" ]; then
+        log "ERROR: no sync schedules found in $INSTANCES_CONFIG (set sync.schedule or a per-instance schedule)"
         exit 1
     fi
+
+    # Read optional backup schedule from the YAML.
+    BACKUP_SCHEDULE_YAML=$(python -m app get-backup-schedule) || {
+        log "ERROR: failed to read backup_schedule from $INSTANCES_CONFIG"
+        exit 1
+    }
 
     ENV_FILE=/etc/cron_env
     printenv | while IFS='=' read -r key value; do
@@ -76,16 +78,16 @@ if [ -n "$INSTANCES_CONFIG" ]; then
     CRONTAB_FILE=/etc/cron.d/tr-sync
     printf 'SHELL=/bin/sh\n' > "$CRONTAB_FILE"
 
-    for INSTANCE_NAME in $INSTANCES; do
-        log "Registering sync cron for instance '$INSTANCE_NAME': $SYNC_SCHEDULE"
+    printf '%s\n' "$SCHEDULES" | while IFS=$(printf '\t') read -r INSTANCE_NAME INSTANCE_SCHEDULE; do
+        log "Registering sync cron for instance '$INSTANCE_NAME': $INSTANCE_SCHEDULE"
         printf "%s root . %s; cd /app && python -m app sync --instance '%s' > /proc/1/fd/1 2>/proc/1/fd/2\n" \
-            "$SYNC_SCHEDULE" "$ENV_FILE" "$INSTANCE_NAME" >> "$CRONTAB_FILE"
+            "$INSTANCE_SCHEDULE" "$ENV_FILE" "$INSTANCE_NAME" >> "$CRONTAB_FILE"
     done
 
-    if [ -n "$BACKUP_SCHEDULE" ]; then
-        log "Registering backup cron: $BACKUP_SCHEDULE"
+    if [ -n "$BACKUP_SCHEDULE_YAML" ]; then
+        log "Registering backup cron: $BACKUP_SCHEDULE_YAML"
         printf '%s root . %s; cd /app && python -m app backup auto > /proc/1/fd/1 2>/proc/1/fd/2\n' \
-            "$BACKUP_SCHEDULE" "$ENV_FILE" >> "$CRONTAB_FILE"
+            "$BACKUP_SCHEDULE_YAML" "$ENV_FILE" >> "$CRONTAB_FILE"
     fi
 
     printf '\n' >> "$CRONTAB_FILE"

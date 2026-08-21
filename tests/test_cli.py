@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from app.__main__ import cli
@@ -100,6 +101,17 @@ def _mock_cfg(tmp_path):
     return cfg
 
 
+def _mock_backup_cfg(tmp_path):
+    cfg = MagicMock()
+    cfg.wallet_api_key = "key"
+    cfg.telegram_bot_token = None
+    cfg.telegram_chat_id = None
+    cfg.owner_name = "Test"
+    cfg.data_dir = tmp_path
+    cfg.allow_insecure_ssl = False
+    return cfg
+
+
 # ---------------------------------------------------------------------------
 # backup auto
 # ---------------------------------------------------------------------------
@@ -109,8 +121,8 @@ def test_backup_auto_calls_run_auto(tmp_path):
     with (
         patch("app.__main__.setup_logging") as mock_setup_log,
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -122,56 +134,117 @@ def test_backup_auto_calls_run_auto(tmp_path):
     mock_setup_log.assert_called_once_with(tmp_path / "logs")
 
 
-def test_backup_auto_falls_back_to_instances_config_when_no_wallet_key(tmp_path):
-    """backup auto uses InstancesConfig as fallback when WALLET_API_KEY is not set."""
-    import yaml
-
+def test_backup_auto_loads_config_from_instances_yaml(tmp_path):
+    """backup auto resolves config exclusively from InstancesConfig."""
     from app.config import BackupConfig
 
-    cfg_file = tmp_path / "instances.yml"
-    cfg_file.write_text(
-        yaml.dump(
-            {
-                "data_dir": str(tmp_path),
-                "telegram_bot_token": "tok",
-                "telegram_chat_id": "chat",
-                "instances": [
-                    {
-                        "name": "user1",
-                        "phone": "+34600000000",
-                        "pin": "1234",
-                        "wallet_api_key": "yamlkey",
-                        "wallet_cash_account_id": "cash1",
-                        "wallet_portfolio_account_id": "port1",
-                    }
-                ],
-            }
-        )
-    )
     expected_cfg = BackupConfig(
         owner_name="Backup",
         wallet_api_key="yamlkey",
-        telegram_bot_token="tok",
-        telegram_chat_id="chat",
+        telegram_bot_token=None,
+        telegram_chat_id=None,
         data_dir=tmp_path / "backup",
         allow_insecure_ssl=False,
     )
     with (
         patch("app.__main__.setup_logging"),
-        patch("app.config.BackupConfig.from_env_optional", return_value=None),
         patch(
-            "app.config.BackupConfig.from_instances_yaml", return_value=expected_cfg
-        ) as mock_from_yaml,
+            "app.__main__._resolve_backup_cfg", return_value=expected_cfg
+        ) as mock_resolve,
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
         patch("app.backup.run_auto") as mock_auto,
     ):
-        result = _runner().invoke(
-            cli, ["backup", "auto"], env={"INSTANCES_CONFIG": str(cfg_file)}
-        )
+        result = _runner().invoke(cli, ["backup", "auto"])
     assert result.exit_code == 0, result.output
-    mock_from_yaml.assert_called_once()
+    mock_resolve.assert_called_once()
     mock_auto.assert_called_once()
+
+
+def test_backup_resolve_cfg_falls_back_to_env_when_no_instances_config(
+    tmp_path, monkeypatch
+):
+    """When INSTANCES_CONFIG is not set, _resolve_backup_cfg builds config from env vars."""
+    from app.__main__ import _resolve_backup_cfg
+    from app.config import BackupConfig
+
+    monkeypatch.delenv("INSTANCES_CONFIG", raising=False)
+    monkeypatch.setenv("WALLET_API_KEY", "envkey")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    cfg = _resolve_backup_cfg()
+
+    assert isinstance(cfg, BackupConfig)
+    assert cfg.wallet_api_key == "envkey"
+
+
+def test_backup_resolve_cfg_uses_instances_config_when_set(tmp_path, monkeypatch):
+    """When INSTANCES_CONFIG is set, _resolve_backup_cfg loads config from the YAML."""
+    from app.__main__ import _resolve_backup_cfg
+    from app.config import BackupConfig
+
+    yaml = tmp_path / "instances.yml"
+    yaml.write_text(f"""\
+data_dir: {tmp_path}
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "yamlkey"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "port"
+""")
+    monkeypatch.setenv("INSTANCES_CONFIG", str(yaml))
+
+    cfg = _resolve_backup_cfg()
+
+    assert isinstance(cfg, BackupConfig)
+    assert cfg.wallet_api_key == "yamlkey"
+
+
+def test_backup_resolve_cfg_raises_usage_error_when_instances_config_invalid(
+    tmp_path, monkeypatch
+):
+    """When INSTANCES_CONFIG is set but the YAML is invalid, raise UsageError (not env fallback)."""
+    import click
+
+    from app.__main__ import _resolve_backup_cfg
+
+    bad_yaml = tmp_path / "instances.yml"
+    bad_yaml.write_text(
+        "sync:\n  instances: []\n"
+    )  # valid YAML but no instances → ValueError
+    monkeypatch.setenv("INSTANCES_CONFIG", str(bad_yaml))
+
+    with pytest.raises(click.UsageError):
+        _resolve_backup_cfg()
+
+
+def test_backup_resolve_cfg_env_wallet_key_overrides_yaml(tmp_path, monkeypatch):
+    """When INSTANCES_CONFIG and WALLET_API_KEY are both set, env key overrides YAML key."""
+    from app.__main__ import _resolve_backup_cfg
+    from app.config import BackupConfig
+
+    yaml = tmp_path / "instances.yml"
+    yaml.write_text(f"""\
+data_dir: {tmp_path}
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "yamlkey"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "port"
+""")
+    monkeypatch.setenv("INSTANCES_CONFIG", str(yaml))
+    monkeypatch.setenv("WALLET_API_KEY", "envkey")
+
+    cfg = _resolve_backup_cfg()
+
+    assert isinstance(cfg, BackupConfig)
+    assert cfg.wallet_api_key == "envkey"
 
 
 # ---------------------------------------------------------------------------
@@ -183,8 +256,8 @@ def test_backup_monthly_default_calls_run_monthly(tmp_path):
     with (
         patch("app.__main__.setup_logging"),
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -199,8 +272,8 @@ def test_backup_monthly_with_param(tmp_path):
     with (
         patch("app.__main__.setup_logging"),
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -216,8 +289,8 @@ def test_backup_monthly_invalid_param_exits(tmp_path):
     with (
         patch("app.__main__.setup_logging"),
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -235,8 +308,8 @@ def test_backup_yearly_default_calls_run_yearly(tmp_path):
     with (
         patch("app.__main__.setup_logging"),
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -251,8 +324,8 @@ def test_backup_yearly_with_param(tmp_path):
     with (
         patch("app.__main__.setup_logging"),
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -267,8 +340,8 @@ def test_backup_yearly_invalid_param_exits(tmp_path):
     with (
         patch("app.__main__.setup_logging"),
         patch(
-            "app.config.BackupConfig.from_env_optional",
-            return_value=_mock_cfg(tmp_path),
+            "app.__main__._resolve_backup_cfg",
+            return_value=_mock_backup_cfg(tmp_path),
         ),
         patch("app.wallet_client.WalletClient"),
         patch("app.notifier.Notifier"),
@@ -1022,3 +1095,158 @@ def test_bot_command_does_not_load_instances_config_twice(tmp_path):
     assert len(load_calls) == 1, (
         f"InstancesConfig.load() called {len(load_calls)} times; expected 1"
     )
+
+
+# ---------------------------------------------------------------------------
+# list-schedules command
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_instances_with_schedules(instances_data: list[tuple[str, str | None]]):
+    """Return a mock InstancesConfig with instances having given (name, schedule) pairs."""
+    from app.config import InstanceConfig, InstancesConfig
+
+    mock_cfg = MagicMock(spec=InstancesConfig)
+    mock_instances = []
+    for name, schedule in instances_data:
+        inst = MagicMock(spec=InstanceConfig)
+        inst.name = name
+        inst.schedule = schedule
+        mock_instances.append(inst)
+    mock_cfg.instances = mock_instances
+    return mock_cfg
+
+
+def test_list_schedules_outputs_name_tab_schedule(tmp_path):
+    """list-schedules prints 'name<TAB>schedule' per instance when all have a schedule."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    mock_cfg = _make_mock_instances_with_schedules(
+        [("david", "0 8,14,21 * * *"), ("eli", "5 8,14,21 * * *")]
+    )
+
+    with patch("app.config.InstancesConfig.load", return_value=mock_cfg):
+        result = _runner().invoke(
+            cli,
+            ["list-schedules"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code == 0
+    lines = result.output.strip().splitlines()
+    assert lines == ["david\t0 8,14,21 * * *", "eli\t5 8,14,21 * * *"]
+
+
+def test_list_schedules_omits_instances_with_no_schedule(tmp_path):
+    """list-schedules skips instances whose schedule is None."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    mock_cfg = _make_mock_instances_with_schedules(
+        [("david", "0 8 * * *"), ("eli", None)]
+    )
+
+    with patch("app.config.InstancesConfig.load", return_value=mock_cfg):
+        result = _runner().invoke(
+            cli,
+            ["list-schedules"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code == 0
+    lines = result.output.strip().splitlines()
+    assert lines == ["david\t0 8 * * *"]
+
+
+def test_list_schedules_missing_instances_config_exits_with_error():
+    """list-schedules with no INSTANCES_CONFIG exits non-zero."""
+    result = _runner().invoke(cli, ["list-schedules"], env={"INSTANCES_CONFIG": ""})
+    assert result.exit_code != 0
+
+
+def test_list_schedules_load_error_shown_as_click_error(tmp_path):
+    """Errors from InstancesConfig.load() are shown as UsageError, not traceback."""
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    with patch("app.config.InstancesConfig.load", side_effect=ValueError("bad")):
+        result = _runner().invoke(
+            cli,
+            ["list-schedules"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code != 0
+    assert "bad" in result.output
+
+
+# ---------------------------------------------------------------------------
+# get-backup-schedule command
+# ---------------------------------------------------------------------------
+
+
+def test_get_backup_schedule_outputs_schedule(tmp_path):
+    """get-backup-schedule prints the backup_schedule and exits 0."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    mock_cfg = MagicMock(spec=InstancesConfig)
+    mock_cfg.backup_schedule = "0 3 * * *"
+
+    with patch("app.config.InstancesConfig.load", return_value=mock_cfg):
+        result = _runner().invoke(
+            cli,
+            ["get-backup-schedule"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code == 0
+    assert result.output.strip() == "0 3 * * *"
+
+
+def test_get_backup_schedule_exits_zero_with_empty_output_when_not_set(tmp_path):
+    """get-backup-schedule exits 0 and prints nothing when backup_schedule is None."""
+    from app.config import InstancesConfig
+
+    cfg_file = tmp_path / "instances.yml"
+    cfg_file.write_text("")
+
+    mock_cfg = MagicMock(spec=InstancesConfig)
+    mock_cfg.backup_schedule = None
+
+    with patch("app.config.InstancesConfig.load", return_value=mock_cfg):
+        result = _runner().invoke(
+            cli,
+            ["get-backup-schedule"],
+            env={"INSTANCES_CONFIG": str(cfg_file)},
+        )
+
+    assert result.exit_code == 0
+    assert result.output.strip() == ""
+
+
+def test_get_backup_schedule_missing_instances_config_exits_with_error():
+    """get-backup-schedule with no INSTANCES_CONFIG exits non-zero."""
+    result = _runner().invoke(
+        cli, ["get-backup-schedule"], env={"INSTANCES_CONFIG": ""}
+    )
+    assert result.exit_code != 0
+
+
+def test_backup_resolve_cfg_env_fallback_missing_wallet_key_raises_usage_error(
+    tmp_path, monkeypatch
+):
+    """When INSTANCES_CONFIG is unset and WALLET_API_KEY is also missing, raise UsageError."""
+    import click
+
+    from app.__main__ import _resolve_backup_cfg
+
+    monkeypatch.delenv("INSTANCES_CONFIG", raising=False)
+    monkeypatch.delenv("WALLET_API_KEY", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    with pytest.raises(click.UsageError):
+        _resolve_backup_cfg()

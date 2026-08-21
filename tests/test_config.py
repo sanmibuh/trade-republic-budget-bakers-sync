@@ -7,6 +7,7 @@ from app.config import (
     Config,
     InstanceConfig,
     InstancesConfig,
+    SyncConfig,
     has_valid_session,
     read_instance,
 )
@@ -268,7 +269,7 @@ def _make_instances_yaml(
         ]
     )
     return InstancesConfig(
-        instances=instances,
+        sync=SyncConfig(instances=instances),
         data_dir=Path(data_dir),
         telegram_bot_token=telegram_bot_token,
         telegram_chat_id=telegram_chat_id,
@@ -541,13 +542,14 @@ def test_read_instance_uses_instance_env_var_when_set(monkeypatch):
 # ---------------------------------------------------------------------------
 
 _MINIMAL_YAML = """\
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key-user1"
-    wallet_cash_account_id: "cash-user1"
-    wallet_portfolio_account_id: "portfolio-user1"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key-user1"
+      wallet_cash_account_id: "cash-user1"
+      wallet_portfolio_account_id: "portfolio-user1"
 """
 
 _FULL_YAML = """\
@@ -556,25 +558,26 @@ telegram_bot_token: "bot-token"
 telegram_chat_id: "chat-id"
 allow_insecure_ssl: true
 
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key-user1"
-    wallet_cash_account_id: "cash-user1"
-    wallet_portfolio_account_id: "portfolio-user1"
-    owner_name: "User1"
-    lookback_days: 14
-    dedup_ttl_days: 90
-    category_strategy: history
-    labels:
-      BANK_TRANSACTION_INCOMING: label-abc
-  - name: user2
-    phone: "+34611111111"
-    pin: "5678"
-    wallet_api_key: "key-user2"
-    wallet_cash_account_id: "cash-user2"
-    wallet_portfolio_account_id: "portfolio-user2"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key-user1"
+      wallet_cash_account_id: "cash-user1"
+      wallet_portfolio_account_id: "portfolio-user1"
+      owner_name: "User1"
+      lookback_days: 14
+      dedup_ttl_days: 90
+      category_strategy: history
+      labels:
+        BANK_TRANSACTION_INCOMING: label-abc
+    - name: user2
+      phone: "+34611111111"
+      pin: "5678"
+      wallet_api_key: "key-user2"
+      wallet_cash_account_id: "cash-user2"
+      wallet_portfolio_account_id: "portfolio-user2"
 """
 
 
@@ -671,12 +674,13 @@ def test_instances_config_load_missing_required_instance_field(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: user1
-    phone: "+34600000000"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -701,13 +705,14 @@ def test_instances_config_load_name_dot_raises(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: "."
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - name: "."
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -721,13 +726,14 @@ def test_instances_config_load_name_dotdot_raises(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: ".."
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - name: ".."
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -741,15 +747,16 @@ def test_instances_config_load_labels_numeric_keys_coerced_to_strings(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
-    labels:
-      BANK_TRANSACTION_INCOMING: 12345
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      labels:
+        BANK_TRANSACTION_INCOMING: 12345
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -764,15 +771,16 @@ def test_instances_config_load_labels_blank_value_raises(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
-    labels:
-      BANK_TRANSACTION_INCOMING: ""
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      labels:
+        BANK_TRANSACTION_INCOMING: ""
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -786,15 +794,16 @@ def test_instances_config_load_labels_null_value_raises(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
-    labels:
-      BANK_TRANSACTION_INCOMING: ~
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      labels:
+        BANK_TRANSACTION_INCOMING: ~
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -808,12 +817,13 @@ def test_instances_config_load_missing_name_raises(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -827,14 +837,15 @@ def test_instances_config_load_invalid_category_strategy_raises(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
-    category_strategy: invalid_strategy
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      category_strategy: invalid_strategy
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -848,7 +859,7 @@ def test_instances_config_load_no_instances(tmp_path):
     from app.config import InstancesConfig
 
     cfg_file = tmp_path / "instances.yml"
-    cfg_file.write_text("instances: []\n")
+    cfg_file.write_text("sync:\n  instances: []\n")
 
     with pytest.raises(ValueError, match="instances"):
         InstancesConfig.load(cfg_file)
@@ -859,19 +870,20 @@ def test_instances_config_load_duplicate_instance_names(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "k1"
-    wallet_cash_account_id: "c1"
-    wallet_portfolio_account_id: "p1"
-  - name: user1
-    phone: "+34611111111"
-    pin: "5678"
-    wallet_api_key: "k2"
-    wallet_cash_account_id: "c2"
-    wallet_portfolio_account_id: "p2"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "k1"
+      wallet_cash_account_id: "c1"
+      wallet_portfolio_account_id: "p1"
+    - name: user1
+      phone: "+34611111111"
+      pin: "5678"
+      wallet_api_key: "k2"
+      wallet_cash_account_id: "c2"
+      wallet_portfolio_account_id: "p2"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -912,13 +924,14 @@ def test_instances_config_to_config_data_dir_is_subdirectory(tmp_path):
 
     yaml_content = f"""\
 data_dir: {tmp_path}
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1060,7 +1073,7 @@ def test_instances_config_load_instance_entry_is_not_mapping_raises(tmp_path):
     from app.config import InstancesConfig
 
     cfg_file = tmp_path / "instances.yml"
-    cfg_file.write_text("instances:\n  - just_a_string\n")
+    cfg_file.write_text("sync:\n  instances:\n    - just_a_string\n")
 
     with pytest.raises(ValueError, match="mapping"):
         InstancesConfig.load(cfg_file)
@@ -1071,13 +1084,14 @@ def test_instances_config_load_name_with_path_separator_raises(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: "../tmp"
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - name: "../tmp"
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1106,13 +1120,14 @@ def test_instances_config_load_name_with_invalid_chars_raises(tmp_path, bad_name
     from app.config import InstancesConfig
 
     yaml_content = f"""\
-instances:
-  - name: "{bad_name}"
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - name: "{bad_name}"
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1130,13 +1145,14 @@ def test_instances_config_load_valid_names_accepted(tmp_path, good_name):
     from app.config import InstancesConfig
 
     yaml_content = f"""\
-instances:
-  - name: "{good_name}"
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - name: "{good_name}"
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1150,14 +1166,15 @@ def test_instances_config_load_zero_lookback_days_raises(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
-    lookback_days: 0
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      lookback_days: 0
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1171,14 +1188,15 @@ def test_instances_config_load_negative_dedup_ttl_days_raises(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
-    dedup_ttl_days: -1
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      dedup_ttl_days: -1
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1192,14 +1210,15 @@ def test_instances_config_load_labels_not_mapping_raises(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
-    labels: "not-a-mapping"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      labels: "not-a-mapping"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1214,13 +1233,14 @@ def test_instances_config_load_allow_insecure_ssl_string_false(tmp_path):
 
     yaml_content = """\
 allow_insecure_ssl: "false"
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1236,13 +1256,14 @@ def test_instances_config_load_allow_insecure_ssl_string_true(tmp_path):
 
     yaml_content = """\
 allow_insecure_ssl: "true"
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1258,13 +1279,14 @@ def test_instances_config_load_allow_insecure_ssl_invalid_string_raises(tmp_path
 
     yaml_content = """\
 allow_insecure_ssl: "maybe"
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1313,13 +1335,14 @@ def test_instances_config_load_name_is_integer_coerced_to_string(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: 123
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - name: 123
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1334,13 +1357,14 @@ def test_instances_config_load_name_with_leading_trailing_whitespace_stripped(tm
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: "  user1  "
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
+sync:
+  instances:
+    - name: "  user1  "
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1355,14 +1379,15 @@ def test_instances_config_load_lookback_days_non_integer_raises(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
-    lookback_days: seven
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      lookback_days: seven
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
@@ -1376,17 +1401,835 @@ def test_instances_config_load_dedup_ttl_days_non_integer_raises(tmp_path):
     from app.config import InstancesConfig
 
     yaml_content = """\
-instances:
-  - name: user1
-    phone: "+34600000000"
-    pin: "1234"
-    wallet_api_key: "key"
-    wallet_cash_account_id: "cash"
-    wallet_portfolio_account_id: "portfolio"
-    dedup_ttl_days: sixty
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      dedup_ttl_days: sixty
 """
     cfg_file = tmp_path / "instances.yml"
     cfg_file.write_text(yaml_content)
 
     with pytest.raises(ValueError, match="dedup_ttl_days"):
         InstancesConfig.load(cfg_file)
+
+
+# ---------------------------------------------------------------------------
+# SyncConfig — nested sync section with global defaults and per-instance overrides
+# ---------------------------------------------------------------------------
+
+_SYNC_SECTION_YAML = """\
+data_dir: /app/data
+telegram_bot_token: "tok"
+telegram_chat_id: "chat"
+
+backup_schedule: "0 3 * * *"
+
+sync:
+  schedule: "0 8,14,21 * * *"
+  wallet_api_key: "shared-key"
+  lookback_days: 14
+  category_strategy: "history"
+  instances:
+    - name: david
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash-david"
+      wallet_portfolio_account_id: "port-david"
+      owner_name: "David"
+    - name: eli
+      phone: "+34611111111"
+      pin: "5678"
+      wallet_cash_account_id: "cash-eli"
+      wallet_portfolio_account_id: "port-eli"
+      owner_name: "Eli"
+      wallet_api_key: "eli-own-key"
+      lookback_days: 30
+      schedule: "5 8,14,21 * * *"
+"""
+
+
+def test_sync_section_instances_are_accessible(tmp_path):
+    """instances come from sync.instances when the sync section is used."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert [i.name for i in cfg.instances] == ["david", "eli"]
+
+
+def test_sync_section_global_wallet_key_inherited(tmp_path):
+    """An instance without wallet_api_key inherits it from sync.*."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[0].wallet_api_key == "shared-key"
+
+
+def test_sync_section_instance_overrides_wallet_key(tmp_path):
+    """An instance with its own wallet_api_key overrides the global default."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[1].wallet_api_key == "eli-own-key"
+
+
+def test_sync_section_global_lookback_days_inherited(tmp_path):
+    """An instance without lookback_days inherits it from sync.*."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[0].lookback_days == 14
+
+
+def test_sync_section_instance_overrides_lookback_days(tmp_path):
+    """An instance with its own lookback_days overrides the global default."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[1].lookback_days == 30
+
+
+def test_sync_section_global_category_strategy_inherited(tmp_path):
+    """An instance without category_strategy inherits it from sync.*."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[0].category_strategy == "history"
+
+
+def test_sync_section_global_schedule(tmp_path):
+    """sync.schedule is exposed on InstancesConfig and each instance."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.sync_schedule == "0 8,14,21 * * *"
+    assert cfg.instances[0].schedule == "0 8,14,21 * * *"
+
+
+def test_sync_section_instance_overrides_schedule(tmp_path):
+    """An instance with its own schedule overrides the global sync.schedule."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[1].schedule == "5 8,14,21 * * *"
+
+
+def test_backup_schedule_from_yaml(tmp_path):
+    """backup_schedule is read from the YAML root."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_SYNC_SECTION_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.backup_schedule == "0 3 * * *"
+
+
+def test_backup_schedule_defaults_to_none(tmp_path):
+    """backup_schedule is None when not set in YAML."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_MINIMAL_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.backup_schedule is None
+
+
+def test_sync_schedule_defaults_to_none(tmp_path):
+    """sync_schedule is None when not set anywhere."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text(_MINIMAL_YAML)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.sync_schedule is None
+    assert cfg.instances[0].schedule is None
+
+
+def test_sync_section_missing_wallet_key_and_no_global_raises(tmp_path):
+    """When neither instance nor sync.* provides wallet_api_key, raise ValueError."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  schedule: "0 8 * * *"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "port"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="wallet_api_key"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# _resolve_category_strategy — unit tests for the extracted helper
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_category_strategy_defaults_to_none():
+    """No per-instance value and no global → 'none'."""
+    from app.config import _resolve_category_strategy
+
+    assert _resolve_category_strategy("u", {}, None) == "none"
+
+
+def test_resolve_category_strategy_inherits_global():
+    """No per-instance value but global is set → inherits global."""
+    from app.config import _resolve_category_strategy
+
+    assert _resolve_category_strategy("u", {}, "history") == "history"
+
+
+def test_resolve_category_strategy_per_instance_overrides_global():
+    """Per-instance value takes precedence over global."""
+    from app.config import _resolve_category_strategy
+
+    assert (
+        _resolve_category_strategy("u", {"category_strategy": "none"}, "history")
+        == "none"
+    )
+
+
+def test_resolve_category_strategy_invalid_raises():
+    """An unrecognised strategy raises ValueError mentioning the instance name."""
+    from app.config import _resolve_category_strategy
+
+    with pytest.raises(ValueError, match="category_strategy"):
+        _resolve_category_strategy("u", {"category_strategy": "bad"}, None)
+
+
+def test_sync_section_no_instances_raises(tmp_path):
+    """sync.instances must define at least one instance."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  schedule: "0 8 * * *"
+  instances: []
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="instance"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# global category_strategy validation — independent of per-instance overrides
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_invalid_global_category_strategy_raises(tmp_path):
+    """An invalid sync.category_strategy must raise even when every instance overrides it."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  category_strategy: bad_value
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      category_strategy: history
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="category_strategy"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+def test_instances_config_load_blank_global_category_strategy_raises(tmp_path):
+    """A present-but-blank sync.category_strategy must raise, not silently become None."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  category_strategy: "   "
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      category_strategy: history
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="category_strategy"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# SyncConfig — nested sync section exposed on InstancesConfig
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_exposes_sync_field(tmp_path):
+    """InstancesConfig.sync must expose the global sync defaults and instance list."""
+    from app.config import InstancesConfig, SyncConfig
+
+    yaml_content = """\
+sync:
+  wallet_api_key: "globalkey"
+  lookback_days: 14
+  category_strategy: history
+  schedule: "0 8 * * *"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert isinstance(cfg.sync, SyncConfig)
+    assert cfg.sync.wallet_api_key == "globalkey"
+    assert cfg.sync.lookback_days == 14
+    assert cfg.sync.category_strategy == "history"
+    assert cfg.sync.schedule == "0 8 * * *"
+    assert len(cfg.sync.instances) == 1
+    assert cfg.sync.instances[0].name == "user1"
+
+
+def test_instances_config_instances_property_delegates_to_sync(tmp_path):
+    """InstancesConfig.instances must be a backward-compat property over .sync.instances."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  wallet_api_key: "key"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances is cfg.sync.instances
+
+
+# ---------------------------------------------------------------------------
+# wallet_api_key blank-check — per-instance and global
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_blank_per_instance_wallet_api_key_raises(tmp_path):
+    """A blank per-instance wallet_api_key must raise ValueError, not silently pass."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "   "
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="wallet_api_key"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+def test_instances_config_load_blank_per_instance_wallet_api_key_with_global_raises(
+    tmp_path,
+):
+    """A present-but-blank per-instance wallet_api_key must raise, not fall back to global key."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  wallet_api_key: "globalkey"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "   "
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="wallet_api_key"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+def test_instances_config_load_blank_global_wallet_api_key_raises(tmp_path):
+    """A present-but-blank sync.wallet_api_key must raise even when every instance has its own key."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  wallet_api_key: "   "
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "per-instance-key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="wallet_api_key"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# sync.instances type validation
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_instances_not_a_list_raises(tmp_path):
+    """sync.instances with a non-list value must raise ValueError, not TypeError."""
+    from app.config import InstancesConfig
+
+    (tmp_path / "i.yml").write_text("sync:\n  instances: 1\n")
+
+    with pytest.raises(ValueError, match="instances"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# null wallet_api_key — per-instance and global
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_null_per_instance_wallet_api_key_raises(tmp_path):
+    """wallet_api_key: null per-instance must raise, not silently inherit global key."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  wallet_api_key: "globalkey"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: null
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="wallet_api_key"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+def test_instances_config_load_null_global_wallet_api_key_raises(tmp_path):
+    """sync.wallet_api_key: null must raise, not be treated as absent."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  wallet_api_key: null
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "per-instance-key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="wallet_api_key"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# global lookback_days positive-value constraint
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_global_lookback_days_zero_raises(tmp_path):
+    """sync.lookback_days: 0 must raise even when every instance overrides it."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  lookback_days: 0
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      lookback_days: 7
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="lookback_days"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+def test_instances_config_load_global_lookback_days_negative_raises(tmp_path):
+    """sync.lookback_days: -1 must raise even when every instance overrides it."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  lookback_days: -1
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      lookback_days: 7
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="lookback_days"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# global category_strategy normalization
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_global_category_strategy_uppercase_accepted(tmp_path):
+    """sync.category_strategy: HISTORY must be normalized and accepted like per-instance values."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  category_strategy: HISTORY
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.sync.category_strategy == "history"
+    assert cfg.instances[0].category_strategy == "history"
+
+
+# ---------------------------------------------------------------------------
+# schedule blank-check — global and per-instance
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_blank_global_schedule_raises(tmp_path):
+    """A present-but-blank sync.schedule must raise, not silently become None."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  schedule: "   "
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+def test_instances_config_load_blank_per_instance_schedule_raises(tmp_path):
+    """A present-but-blank per-instance schedule must raise, not silently disable scheduling."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  schedule: "0 8 * * *"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_api_key: "key"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      schedule: "   "
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# schedule newline injection — global, per-instance, backup_schedule
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_schedule", ["0 8 * * *\\n0 9 * * *", "0 8 * * *\\r0 9 * * *"]
+)
+def test_instances_config_load_newline_in_global_schedule_raises(
+    tmp_path, bad_schedule
+):
+    """sync.schedule containing \\n or \\r must raise to prevent cron-line injection."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"""\
+sync:
+  wallet_api_key: "key"
+  schedule: "{bad_schedule}"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+@pytest.mark.parametrize(
+    "bad_schedule", ["0 8 * * *\\n0 9 * * *", "0 8 * * *\\r0 9 * * *"]
+)
+def test_instances_config_load_newline_in_per_instance_schedule_raises(
+    tmp_path, bad_schedule
+):
+    """Per-instance schedule containing \\n or \\r must raise."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"""\
+sync:
+  wallet_api_key: "key"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      schedule: "{bad_schedule}"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+@pytest.mark.parametrize(
+    "bad_schedule", ["0 3 * * *\\n0 4 * * *", "0 3 * * *\\r0 4 * * *"]
+)
+def test_instances_config_load_newline_in_backup_schedule_raises(
+    tmp_path, bad_schedule
+):
+    """backup_schedule containing \\n or \\r must raise to prevent cron-line injection."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"""\
+sync:
+  wallet_api_key: "key"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+backup_schedule: "{bad_schedule}"
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="backup_schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+# ---------------------------------------------------------------------------
+# lookback_days: null in instance — must apply global default, not silently use 7
+# ---------------------------------------------------------------------------
+
+
+def test_instances_config_load_null_lookback_days_applies_global(tmp_path):
+    """lookback_days: null in an instance must apply the global default, not the hardcoded 7."""
+    from app.config import InstancesConfig
+
+    yaml_content = """\
+sync:
+  lookback_days: 30
+  wallet_api_key: "key"
+  instances:
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+      lookback_days: null
+"""
+    (tmp_path / "i.yml").write_text(yaml_content)
+    cfg = InstancesConfig.load(tmp_path / "i.yml")
+
+    assert cfg.instances[0].lookback_days == 30
+
+
+# ---------------------------------------------------------------------------
+# _validate_cron_schedule — unit tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "* * * * *",
+        "0 8 * * *",
+        "0 8,20 * * *",
+        "*/15 * * * *",
+        "0 8-18/2 * * 1-5",
+        "30 3 1,15 * *",
+        "0 0 * * 0",
+        "59 23 31 12 7",
+    ],
+)
+def test_validate_cron_schedule_valid(expr):
+    """Valid five-field cron expressions must not raise."""
+    from app.config import _validate_cron_schedule
+
+    _validate_cron_schedule("schedule", expr)  # should not raise
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        # Classic cron-field injection (extra fields after schedule)
+        "* * * * * root touch /tmp/pwned #",
+        "0 8 * * * /bin/bash -c 'id'",
+        # Fewer or more pure numeric fields
+        "* * * *",
+        "* * * * * *",
+        # Empty string
+        "",
+        # Letters / shell metacharacters inside a field
+        "* * * * MON",
+        "0 8 * JAN *",
+        "$(id) * * * *",
+        "`id` * * * *",
+        "0;touch /tmp/x * * * *",
+        # Newline / carriage-return (regression: old check)
+        "0 8 * * *\\n0 9 * * *",
+    ],
+)
+def test_validate_cron_schedule_invalid(expr):
+    """Invalid or injected schedule strings must raise ValueError."""
+    from app.config import _validate_cron_schedule
+
+    with pytest.raises(ValueError, match="schedule"):
+        _validate_cron_schedule("schedule", expr)
+
+
+# ---------------------------------------------------------------------------
+# InstancesConfig.load — cron injection via schedule fields
+# ---------------------------------------------------------------------------
+
+_INSTANCE_BLOCK = """\
+    - name: user1
+      phone: "+34600000000"
+      pin: "1234"
+      wallet_cash_account_id: "cash"
+      wallet_portfolio_account_id: "portfolio"
+"""
+
+
+@pytest.mark.parametrize(
+    "bad_schedule",
+    [
+        "* * * * * root touch /tmp/pwned #",
+        "0 8 * * * /bin/bash -c id",
+        "* * * *",
+        "* * * * * *",
+    ],
+)
+def test_instances_config_load_injection_in_global_schedule_raises(
+    tmp_path, bad_schedule
+):
+    """sync.schedule with injection payload or wrong field count must raise."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"sync:\n  wallet_api_key: key\n  schedule: '{bad_schedule}'\n  instances:\n{_INSTANCE_BLOCK}"
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+@pytest.mark.parametrize(
+    "bad_schedule",
+    [
+        "* * * * * root touch /tmp/pwned #",
+        "0 8 * * * /bin/bash -c id",
+    ],
+)
+def test_instances_config_load_injection_in_per_instance_schedule_raises(
+    tmp_path, bad_schedule
+):
+    """Per-instance schedule with injection payload must raise."""
+    from app.config import InstancesConfig
+
+    inst_block = _INSTANCE_BLOCK.rstrip("\n") + f"\n      schedule: '{bad_schedule}'\n"
+    yaml_content = f"sync:\n  wallet_api_key: key\n  instances:\n{inst_block}"
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")
+
+
+@pytest.mark.parametrize(
+    "bad_schedule",
+    [
+        "* * * * * root touch /tmp/pwned #",
+        "0 3 * * * /bin/bash -c id",
+    ],
+)
+def test_instances_config_load_injection_in_backup_schedule_raises(
+    tmp_path, bad_schedule
+):
+    """backup_schedule with injection payload must raise."""
+    from app.config import InstancesConfig
+
+    yaml_content = f"sync:\n  wallet_api_key: key\n  instances:\n{_INSTANCE_BLOCK}backup_schedule: '{bad_schedule}'\n"
+    (tmp_path / "i.yml").write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="schedule"):
+        InstancesConfig.load(tmp_path / "i.yml")

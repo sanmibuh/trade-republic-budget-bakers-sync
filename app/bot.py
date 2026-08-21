@@ -60,6 +60,7 @@ from app.config import (
     InstancesConfig,
     has_valid_session,
     read_instances_config_path,
+    read_optional_wallet_api_key,
     read_telegram_verify_ssl,
 )
 from app.main import (
@@ -144,16 +145,12 @@ class BotConfig:
 
         # Always derive backup_cfg from instances_yaml so that Telegram credentials,
         # data_dir, and allow_insecure_ssl are consistent with the sync instances.
-        # wallet_api_key uses WALLET_API_KEY env var when set (backward-compat),
+        # wallet_api_key uses WALLET_API_KEY env var when set (override),
         # otherwise falls back to the first instance's key (single-container path).
-        env_backup = BackupConfig.from_env_optional()
-        env_wallet_key = env_backup.wallet_api_key if env_backup else None
+        env_wallet_key = read_optional_wallet_api_key()
         backup_cfg = BackupConfig.from_instances_yaml(
             instances_yaml, wallet_api_key=env_wallet_key
         )
-        if backup_cfg is None:
-            # No instances in YAML and no env key — backup disabled.
-            backup_cfg = env_backup
 
         return cls(
             bot_token=bot_token,

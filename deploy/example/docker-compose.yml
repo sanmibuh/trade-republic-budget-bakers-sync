@@ -13,16 +13,10 @@ services:
       retries: 3
       start_period: 30s
     environment:
-      # Path to the instances YAML config (mounted below)
+      # Path to the instances YAML config (mounted below).
+      # Sync/backup schedules and all credentials are defined in instances.yml.
       INSTANCES_CONFIG: /app/config/instances.yml
-      # Cron schedule applied to all sync instances simultaneously.
-      # All instances start their sync at the same time; there is a single schedule for the whole service.
-      SYNC_SCHEDULE: "0 8,14,21 * * *"
-      # Cron schedule for automatic backup
-      BACKUP_SCHEDULE: "0 3 * * *"
       TZ: "Europe/Berlin"
-      # Note: allow_insecure_ssl must be set in instances.yml (not here as an env var),
-      # since in multi-instance mode it is read from the YAML config by InstancesConfig.load.
     volumes:
       # Instances YAML — contains all credentials for sync, bot, and backup (keep secret, never commit)
       - ./instances.yml:/app/config/instances.yml:ro

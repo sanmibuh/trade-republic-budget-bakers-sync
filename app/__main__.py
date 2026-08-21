@@ -21,7 +21,7 @@ import click
 from app.logging_setup import setup_logging
 
 if TYPE_CHECKING:
-    from app.config import Config
+    from app.config import BackupConfig, Config
 
 
 def _resolve_instance_cfg(instance: str) -> Config:
@@ -194,6 +194,76 @@ def check_session() -> None:
     sys.exit(0)
 
 
+def _resolve_backup_cfg() -> BackupConfig:
+    """Load ``InstancesConfig`` and return the derived :class:`BackupConfig`.
+
+    Raises :class:`click.UsageError` for any config or I/O error so the user
+    sees a clean message instead of a traceback.
+    """
+    from app.config import (
+        BackupConfig,
+        InstancesConfig,
+        read_instances_config_path,
+        read_optional_wallet_api_key,
+    )
+
+    try:
+        path = read_instances_config_path()
+    except ValueError:
+        try:
+            return BackupConfig.from_env()
+        except ValueError as exc:
+            raise click.UsageError(str(exc)) from exc
+    try:
+        instances_yaml = InstancesConfig.load(path)
+    except (ValueError, OSError) as exc:
+        raise click.UsageError(str(exc)) from exc
+    cfg = BackupConfig.from_instances_yaml(
+        instances_yaml, wallet_api_key=read_optional_wallet_api_key()
+    )
+    if cfg is None:
+        raise click.UsageError(
+            "instances config has no instances — cannot build backup config"
+        )
+    return cfg
+
+
+def _run_backup_mode(
+    client: object,
+    notifier: object,
+    data_dir: object,
+    mode: str,
+    param: str | None,
+) -> None:
+    """Dispatch to the correct backup runner based on *mode*."""
+    from app.backup import (
+        _parse_monthly_param,
+        _parse_yearly_param,
+        run_auto,
+        run_monthly,
+        run_yearly,
+    )
+
+    if mode == "auto":
+        run_auto(client, notifier, data_dir)
+    elif mode == "monthly":
+        try:
+            year, month = _parse_monthly_param(param)
+        except ValueError:
+            raise click.BadParameter(
+                f"Expected YYYY-MM, got {param!r}", param_hint="PARAM"
+            ) from None
+        run_monthly(client, notifier, data_dir, year, month)
+    elif mode == "yearly":
+        try:
+            year = _parse_yearly_param(param)
+        except ValueError:
+            raise click.BadParameter(
+                f"Expected YYYY, got {param!r}", param_hint="PARAM"
+            ) from None
+        run_yearly(client, notifier, data_dir, year)
+
+
 @cli.command()
 @click.argument("mode", type=click.Choice(["auto", "monthly", "yearly"]))
 @click.argument("param", required=False, default=None)
@@ -218,48 +288,11 @@ def backup(mode: str, param: str | None) -> None:
       python -m app backup yearly
       python -m app backup yearly 2025
     """
-
-    import click
-
-    from app.backup import (
-        _parse_monthly_param,
-        _parse_yearly_param,
-        run_auto,
-        run_monthly,
-        run_yearly,
-    )
-    from app.config import BackupConfig, InstancesConfig, read_instances_config_path
     from app.http_client import configure
     from app.notifier import Notifier
     from app.wallet_client import WalletClient
 
-    # Build BackupConfig: prefer env (backward-compat); fall back to InstancesConfig
-    # YAML when WALLET_API_KEY is absent (single-container mode).
-    # If INSTANCES_CONFIG is set but the YAML is invalid or empty, surface that error
-    # rather than silently falling back to a misleading "Missing WALLET_API_KEY" message.
-    env_backup = BackupConfig.from_env_optional()
-    env_wallet_key = env_backup.wallet_api_key if env_backup else None
-    cfg: BackupConfig | None = None
-    try:
-        instances_yaml_path = read_instances_config_path()
-    except ValueError:
-        # INSTANCES_CONFIG not set — use env-only path.
-        cfg = env_backup
-    else:
-        try:
-            instances_yaml = InstancesConfig.load(instances_yaml_path)
-        except (ValueError, OSError) as exc:
-            if env_backup is None:
-                raise click.UsageError(str(exc)) from exc
-            cfg = env_backup
-        else:
-            cfg = BackupConfig.from_instances_yaml(
-                instances_yaml, wallet_api_key=env_wallet_key
-            )
-    if cfg is None:
-        raise click.UsageError(
-            "Missing WALLET_API_KEY: set it in the instances config file or as an environment variable"
-        )
+    cfg = _resolve_backup_cfg()
     setup_logging(cfg.data_dir / "logs")
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     client = WalletClient(api_key=cfg.wallet_api_key)
@@ -268,25 +301,7 @@ def backup(mode: str, param: str | None) -> None:
         chat_id=cfg.telegram_chat_id,
         owner_name=cfg.owner_name,
     )
-
-    if mode == "auto":
-        run_auto(client, notifier, cfg.data_dir)
-    elif mode == "monthly":
-        try:
-            year, month = _parse_monthly_param(param)
-        except ValueError:
-            raise click.BadParameter(
-                f"Expected YYYY-MM, got {param!r}", param_hint="PARAM"
-            ) from None
-        run_monthly(client, notifier, cfg.data_dir, year, month)
-    elif mode == "yearly":
-        try:
-            year = _parse_yearly_param(param)
-        except ValueError:
-            raise click.BadParameter(
-                f"Expected YYYY, got {param!r}", param_hint="PARAM"
-            ) from None
-        run_yearly(client, notifier, cfg.data_dir, year)
+    _run_backup_mode(client, notifier, cfg.data_dir, mode, param)
 
 
 @cli.command()
@@ -330,6 +345,48 @@ def list_instances() -> None:
 
     for inst in cfg.instances:
         click.echo(inst.name)
+
+
+@cli.command(name="list-schedules")
+def list_schedules() -> None:
+    """List per-instance sync schedules as 'name<TAB>schedule', one per line.
+
+    Only instances that have a schedule defined (via sync.schedule or a per-instance
+    schedule override) are emitted.  Instances with no schedule are omitted.
+
+    Used by entrypoint.sh to register one cron job per instance with its own
+    schedule in multi-instance mode.
+    """
+    from app.config import InstancesConfig, read_instances_config_path
+
+    try:
+        path = read_instances_config_path()
+        cfg = InstancesConfig.load(path)
+    except (ValueError, OSError) as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    for inst in cfg.instances:
+        if inst.schedule:
+            click.echo(f"{inst.name}\t{inst.schedule}")
+
+
+@cli.command(name="get-backup-schedule")
+def get_backup_schedule() -> None:
+    """Print the backup_schedule from the INSTANCES_CONFIG YAML file, or nothing.
+
+    Exits 0 in both cases (schedule present or absent).  Used by entrypoint.sh
+    to conditionally register the backup cron job.
+    """
+    from app.config import InstancesConfig, read_instances_config_path
+
+    try:
+        path = read_instances_config_path()
+        cfg = InstancesConfig.load(path)
+    except (ValueError, OSError) as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    if cfg.backup_schedule:
+        click.echo(cfg.backup_schedule)
 
 
 @cli.command()

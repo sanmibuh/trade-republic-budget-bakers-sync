@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -104,6 +105,17 @@ def read_instances_config_path() -> Path:
     if not raw:
         raise ValueError("Missing required environment variable: INSTANCES_CONFIG")
     return Path(raw)
+
+
+def read_optional_wallet_api_key() -> str | None:
+    """Return ``WALLET_API_KEY`` from env, or ``None`` if absent or blank.
+
+    Used by the bot to let an explicit env override take precedence over the
+    key stored in the instances YAML.  All ``os.getenv`` calls must stay in
+    ``config.py``; callers must use this helper instead of calling
+    ``os.getenv`` directly.
+    """
+    return os.getenv("WALLET_API_KEY", "").strip() or None
 
 
 def read_data_dir() -> Path:
@@ -213,19 +225,6 @@ class BackupConfig:
         )
 
     @classmethod
-    def from_env_optional(cls) -> BackupConfig | None:
-        """Return a ``BackupConfig`` from env, or ``None`` if ``WALLET_API_KEY`` is absent.
-
-        Unlike ``from_env()``, this method treats a missing ``WALLET_API_KEY`` as
-        "backup not configured" and returns ``None``.  Any other ``ValueError``
-        (e.g. an invalid ``ALLOW_INSECURE_SSL`` value) is re-raised so that genuine
-        misconfiguration is not silently swallowed.
-        """
-        if not os.getenv("WALLET_API_KEY", "").strip():
-            return None
-        return cls.from_env()
-
-    @classmethod
     def from_instances_yaml(
         cls,
         instances_yaml: InstancesConfig,
@@ -279,7 +278,6 @@ class BotEnv:
 _REQUIRED_INSTANCE_FIELDS: tuple[str, ...] = (
     "phone",
     "pin",
-    "wallet_api_key",
     "wallet_cash_account_id",
     "wallet_portfolio_account_id",
 )
@@ -300,6 +298,7 @@ class InstanceConfig:
     dedup_ttl_days: int = 60
     label_ids: dict[str, str] = field(default_factory=dict)
     category_strategy: str = "none"
+    schedule: str | None = None
 
 
 def _parse_yaml_bool(field_name: str, value: object) -> bool:
@@ -394,7 +393,65 @@ def _parse_instance_labels(name: str, raw_inst: dict) -> dict[str, str]:
     return result
 
 
-def _parse_instance(raw_inst: object, idx: int) -> InstanceConfig:
+def _resolve_category_strategy(
+    name: str,
+    raw_inst: dict,
+    global_category_strategy: str | None,
+) -> str:
+    """Resolve ``category_strategy`` for an instance with global inheritance and validation.
+
+    Priority: per-instance → global default → ``"none"``.
+    Raises ``ValueError`` when the resolved value is not in :data:`_VALID_CATEGORY_STRATEGIES`.
+    """
+    raw_cat = raw_inst.get("category_strategy")
+    if raw_cat is None and global_category_strategy is not None:
+        raw_cat = global_category_strategy
+    strategy = str(raw_cat if raw_cat is not None else "none").strip().lower()
+    if strategy not in _VALID_CATEGORY_STRATEGIES:
+        raise ValueError(
+            f"instance '{name}': category_strategy must be one of "
+            f"{sorted(_VALID_CATEGORY_STRATEGIES)}, got: {strategy!r}"
+        )
+    return strategy
+
+
+def _resolve_instance_wallet_key(
+    name: str,
+    raw_inst: dict,
+    global_wallet_api_key: str | None,
+) -> str:
+    """Resolve ``wallet_api_key`` for a single instance.
+
+    Priority: per-instance → global → error.
+    A present-but-blank or null per-instance key is rejected immediately so it
+    cannot silently inherit the global key.
+    """
+    if "wallet_api_key" in raw_inst:
+        raw = raw_inst["wallet_api_key"]
+        key = str(raw).strip() if raw is not None else ""
+        if not key:
+            raise ValueError(
+                f"instance '{name}' has a blank 'wallet_api_key' — "
+                f"provide a valid key or remove the field to inherit the global key"
+            )
+        return key
+    if not global_wallet_api_key:
+        raise ValueError(
+            f"instance '{name}' is missing required field 'wallet_api_key' "
+            f"(set it per-instance or under sync.wallet_api_key)"
+        )
+    return global_wallet_api_key
+
+
+def _parse_instance(
+    raw_inst: object,
+    idx: int,
+    *,
+    global_wallet_api_key: str | None = None,
+    global_lookback_days: int | None = None,
+    global_category_strategy: str | None = None,
+    global_schedule: str | None = None,
+) -> InstanceConfig:
     """Parse and validate a single instance entry from the YAML file."""
     if not isinstance(raw_inst, dict):
         raise ValueError(
@@ -407,21 +464,39 @@ def _parse_instance(raw_inst: object, idx: int) -> InstanceConfig:
                 f"instance '{name}' is missing required field '{required}'"
             )
 
-    lookback_days, dedup_ttl_days = _parse_instance_numerics(name, raw_inst)
+    wallet_api_key = _resolve_instance_wallet_key(name, raw_inst, global_wallet_api_key)
+
+    # lookback_days / dedup_ttl_days: merge global default into raw dict before parsing.
+    effective_raw = dict(raw_inst)
+    if effective_raw.get("lookback_days") is None and global_lookback_days is not None:
+        effective_raw["lookback_days"] = global_lookback_days
+    lookback_days, dedup_ttl_days = _parse_instance_numerics(name, effective_raw)
+
     label_ids = _parse_instance_labels(name, raw_inst)
 
-    category_strategy = str(raw_inst.get("category_strategy", "none")).strip().lower()
-    if category_strategy not in _VALID_CATEGORY_STRATEGIES:
-        raise ValueError(
-            f"instance '{name}': category_strategy must be one of "
-            f"{sorted(_VALID_CATEGORY_STRATEGIES)}, got: {category_strategy!r}"
-        )
+    category_strategy = _resolve_category_strategy(
+        name, raw_inst, global_category_strategy
+    )
+
+    # schedule: per-instance > global sync.schedule > None.
+    # A present-but-blank per-instance value is rejected — omit the field to inherit global.
+    raw_schedule = raw_inst.get("schedule")
+    if raw_schedule is not None:
+        effective_schedule: str | None = str(raw_schedule).strip() or None
+        if effective_schedule is None:
+            raise ValueError(
+                f"instance '{name}' has a blank 'schedule' — "
+                f"provide a valid cron expression or remove the field to inherit the global schedule"
+            )
+        _validate_cron_schedule(f"instance '{name}' schedule", effective_schedule)
+    else:
+        effective_schedule = global_schedule
 
     return InstanceConfig(
         name=name,
         phone=str(raw_inst["phone"]),
         pin=str(raw_inst["pin"]),
-        wallet_api_key=str(raw_inst["wallet_api_key"]),
+        wallet_api_key=wallet_api_key,
         wallet_cash_account_id=str(raw_inst["wallet_cash_account_id"]),
         wallet_portfolio_account_id=str(raw_inst["wallet_portfolio_account_id"]),
         owner_name=raw_inst.get("owner_name") or None,
@@ -429,7 +504,145 @@ def _parse_instance(raw_inst: object, idx: int) -> InstanceConfig:
         dedup_ttl_days=dedup_ttl_days,
         label_ids=label_ids,
         category_strategy=category_strategy,
+        schedule=effective_schedule or None,
     )
+
+
+def _parse_global_wallet_key(raw_sync: dict) -> str | None:
+    """Return ``sync.wallet_api_key`` stripped, or ``None`` if the field is absent.
+
+    Raises ``ValueError`` when the field is present but blank or null.
+    """
+    if "wallet_api_key" not in raw_sync:
+        return None
+    raw = raw_sync["wallet_api_key"]
+    key = str(raw).strip() if raw is not None else ""
+    if not key:
+        raise ValueError(
+            "sync.wallet_api_key is present but blank — "
+            "provide a valid key or remove the field"
+        )
+    return key
+
+
+def _parse_global_lookback(raw_sync: dict) -> int | None:
+    """Return ``sync.lookback_days`` as a positive integer, or ``None`` if absent.
+
+    Raises ``ValueError`` for non-integer or non-positive values.
+    """
+    raw_gl = raw_sync.get("lookback_days")
+    if raw_gl is None:
+        return None
+    try:
+        value = int(raw_gl)
+    except (ValueError, TypeError) as err:
+        raise ValueError(
+            f"sync.lookback_days must be an integer, got: {raw_gl!r}"
+        ) from err
+    if value <= 0:
+        raise ValueError(f"sync.lookback_days must be a positive integer, got: {value}")
+    return value
+
+
+def _parse_global_category(raw_sync: dict) -> str | None:
+    """Return ``sync.category_strategy`` normalized to lowercase, or ``None`` if absent.
+
+    Raises ``ValueError`` when the value is blank or not in
+    :data:`_VALID_CATEGORY_STRATEGIES`.
+    """
+    raw_cat = raw_sync.get("category_strategy")
+    if raw_cat is None:
+        return None
+    cat = str(raw_cat).strip().lower()
+    if not cat:
+        raise ValueError(
+            "sync.category_strategy is present but blank — "
+            f"use one of {sorted(_VALID_CATEGORY_STRATEGIES)} or remove the field"
+        )
+    if cat not in _VALID_CATEGORY_STRATEGIES:
+        raise ValueError(
+            f"sync.category_strategy must be one of "
+            f"{sorted(_VALID_CATEGORY_STRATEGIES)}, got: {str(raw_cat).strip()!r}"
+        )
+    return cat
+
+
+_CRON_FIELD_RE = (
+    r"(?:\*|[0-9]+(?:-[0-9]+)?)(?:/[0-9]+)?(?:,(?:\*|[0-9]+(?:-[0-9]+)?)(?:/[0-9]+)?)*"
+)
+_CRON_SCHEDULE_RE = re.compile(r"^" + r" ".join([_CRON_FIELD_RE] * 5) + r"$")
+
+
+def _validate_cron_schedule(field_name: str, value: str) -> None:
+    """Raise ``ValueError`` if *value* is not a valid five-field cron expression.
+
+    Only the numeric cron syntax is accepted: each of the five fields may
+    contain digits, ``*``, ``-``, ``/``, and ``,``.  Letters, spaces within a
+    field, shell metacharacters, and extra fields are all rejected.
+
+    This prevents cron-line injection: a schedule is written verbatim as the
+    first five columns of a ``/etc/cron.d`` entry followed by a fixed
+    ``root`` user column.  An attacker-controlled extra word (e.g.
+    ``* * * * * root touch /tmp/pwned #``) would shift the ``root`` column
+    and inject an arbitrary command.
+    """
+    if not _CRON_SCHEDULE_RE.match(value):
+        raise ValueError(
+            f"{field_name} must be a valid five-field cron expression "
+            f"(e.g. '0 8 * * *') — got: {value!r}"
+        )
+
+
+def _parse_sync_section(
+    raw_sync: dict,
+) -> tuple[list, str | None, int | None, str | None, str | None]:
+    """Parse the ``sync:`` mapping and return its five components.
+
+    Returns a tuple of:
+    ``(raw_instances_list, global_wallet_key, global_lookback, global_cat, sync_schedule)``
+    """
+    raw_instances_list = raw_sync.get("instances") or []
+    if not isinstance(raw_instances_list, list):
+        raise ValueError(
+            f"sync.instances must be a list, got: {type(raw_instances_list).__name__!r}"
+        )
+    global_wallet_key = _parse_global_wallet_key(raw_sync)
+    global_lookback = _parse_global_lookback(raw_sync)
+    global_cat = _parse_global_category(raw_sync)
+    raw_sched = raw_sync.get("schedule")
+    sync_schedule: str | None = None
+    if raw_sched is not None:
+        sync_schedule = str(raw_sched).strip() or None
+        if sync_schedule is None:
+            raise ValueError(
+                "sync.schedule is present but blank — "
+                "provide a valid cron expression or remove the field"
+            )
+        _validate_cron_schedule("sync.schedule", sync_schedule)
+    return (
+        raw_instances_list,
+        global_wallet_key,
+        global_lookback,
+        global_cat,
+        sync_schedule,
+    )
+
+
+@dataclass(frozen=True)
+class SyncConfig:
+    """Global sync defaults and the resolved list of sync instances.
+
+    All fields mirror the corresponding ``sync:`` keys in ``instances.yml``.
+    Per-instance values take precedence over these globals when an instance
+    overrides them; these are the *raw* global values before per-instance
+    resolution.
+    """
+
+    instances: list[InstanceConfig]
+    wallet_api_key: str | None = None
+    lookback_days: int | None = None
+    category_strategy: str | None = None
+    schedule: str | None = None
 
 
 @dataclass(frozen=True)
@@ -439,13 +652,38 @@ class InstancesConfig:
     The file path is read from the ``INSTANCES_CONFIG`` environment variable.
     Each instance gets its own ``data_dir`` subdirectory:
     ``{root_data_dir}/{instance.name}/``.
+
+    Required YAML layout::
+
+        sync:
+          schedule: "…"          # global default, overridable per instance (optional)
+          wallet_api_key: "…"    # global default, overridable per instance
+          lookback_days: 7       # optional
+          category_strategy: history  # optional
+          instances:
+            - name: …
+
+    Optional top-level keys::
+
+        backup_schedule: "…"     # omit to disable scheduled backups
     """
 
-    instances: list[InstanceConfig]
+    sync: SyncConfig
     data_dir: Path = field(default_factory=lambda: Path(_DEFAULT_DATA_DIR))
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     allow_insecure_ssl: bool = False
+    backup_schedule: str | None = None
+
+    @property
+    def instances(self) -> list[InstanceConfig]:
+        """Backward-compatible alias for :attr:`sync.instances`."""
+        return self.sync.instances
+
+    @property
+    def sync_schedule(self) -> str | None:
+        """Backward-compatible alias for :attr:`sync.schedule`."""
+        return self.sync.schedule
 
     @classmethod
     def load(cls, path: Path) -> InstancesConfig:
@@ -463,14 +701,37 @@ class InstancesConfig:
                 f"{type(data).__name__ if data is not None else 'empty file'}"
             )
 
-        raw_instances = data.get("instances") or []
-        if not raw_instances:
+        raw_sync = data.get("sync")
+        if raw_sync is None:
+            raise ValueError(
+                "instances config must have a 'sync' section — "
+                "see instances.yml.example for the required format"
+            )
+        if not isinstance(raw_sync, dict):
+            raise ValueError("'sync' must be a YAML mapping")
+
+        (
+            raw_instances_list,
+            global_wallet_key,
+            global_lookback,
+            global_cat,
+            sync_schedule,
+        ) = _parse_sync_section(raw_sync)
+
+        if not raw_instances_list:
             raise ValueError("instances config must define at least one instance")
 
         instances: list[InstanceConfig] = []
         seen_names: set[str] = set()
-        for idx, raw_inst in enumerate(raw_instances):
-            inst = _parse_instance(raw_inst, idx)
+        for idx, raw_inst in enumerate(raw_instances_list):
+            inst = _parse_instance(
+                raw_inst,
+                idx,
+                global_wallet_api_key=global_wallet_key,
+                global_lookback_days=global_lookback,
+                global_category_strategy=global_cat,
+                global_schedule=sync_schedule,
+            )
             if inst.name in seen_names:
                 raise ValueError(f"duplicate instance name: '{inst.name}'")
             seen_names.add(inst.name)
@@ -479,8 +740,22 @@ class InstancesConfig:
         allow_insecure_ssl = _parse_yaml_bool(
             "allow_insecure_ssl", data.get("allow_insecure_ssl", False)
         )
+
+        raw_backup_sched = data.get("backup_schedule")
+        backup_schedule: str | None = (
+            str(raw_backup_sched).strip() if raw_backup_sched is not None else None
+        ) or None
+        if backup_schedule is not None:
+            _validate_cron_schedule("backup_schedule", backup_schedule)
+
         return cls(
-            instances=instances,
+            sync=SyncConfig(
+                instances=instances,
+                wallet_api_key=global_wallet_key,
+                lookback_days=global_lookback,
+                category_strategy=global_cat,
+                schedule=sync_schedule,
+            ),
             data_dir=Path(data.get("data_dir", _DEFAULT_DATA_DIR)),
             telegram_bot_token=data.get("telegram_bot_token")
             or os.getenv("TELEGRAM_BOT_TOKEN")
@@ -489,6 +764,7 @@ class InstancesConfig:
             or os.getenv("TELEGRAM_CHAT_ID")
             or None,
             allow_insecure_ssl=allow_insecure_ssl,
+            backup_schedule=backup_schedule,
         )
 
     def get_instance(self, name: str) -> InstanceConfig:
