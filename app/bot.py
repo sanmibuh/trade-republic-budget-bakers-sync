@@ -11,7 +11,6 @@ Commands (registered via setMyCommands for Telegram autocomplete):
     /sync                              Force a Trade Republic sync — choose instance via inline buttons.
     /backup [monthly|yearly] [period]  Force a Wallet backup — guided by inline buttons if no args given.
     /status                            Show configured instances and backup availability.
-    /help                              Show available commands.
 
 Interaction flow for /sync:
     1. User sends /sync.
@@ -274,9 +273,7 @@ class TelegramBot:
             self._cfg.chat_id,
         )
         self._register_commands()
-        self._send_message(
-            "🤖 *Bot started and ready\\.* Use /help to see available commands\\."
-        )
+        self._send_message("🤖 Bot started and ready\\.")
         while True:
             try:
                 self._poll_once()
@@ -310,7 +307,6 @@ class TelegramBot:
                 "command": "status",
                 "description": "Show instances and backup service availability",
             },
-            {"command": "help", "description": "Show available commands"},
         ]
         if self._cfg.backup_cfg:
             commands[2:2] = [
@@ -380,9 +376,7 @@ class TelegramBot:
             return
 
         if not text.startswith("/"):
-            self._send_message(
-                "⚠️ I only accept commands\\. Use /help to see what's available\\."
-            )
+            self._send_message("⚠️ I only accept commands\\.")
             return
 
         parts = text.split()
@@ -390,7 +384,6 @@ class TelegramBot:
         args = parts[1:]
 
         dispatch = {
-            "help": self._cmd_help,
             "status": self._cmd_status,
             "sync": self._cmd_sync,
             "resync": self._cmd_resync,
@@ -401,7 +394,7 @@ class TelegramBot:
         }
         handler = dispatch.get(raw_cmd)
         if handler is None:
-            self._send_message(f"❓ Unknown command: `{_esc(raw_cmd)}`\\. Use /help\\.")
+            self._send_message(f"❓ Unknown command: `{_esc(raw_cmd)}`\\.")
             return
         handler(args)
 
@@ -527,27 +520,6 @@ class TelegramBot:
     # ------------------------------------------------------------------
     # Command handlers
     # ------------------------------------------------------------------
-
-    def _cmd_help(self, _args: list[str]) -> None:
-        lines = [
-            "🤖 *Available commands*\n",
-            "/sync — Force Trade Republic sync \\(choose instance\\)",
-            "/resync `[YYYY\\-MM\\-DD]` — Force re\\-sync of a specific day, bypassing dedup",
-            "/login — Renew Trade Republic 2FA session \\(choose instance\\)",
-            "/logs — Show today's shared sync log",
-            "/code `<instance> <code>` — Submit an authenticator code \\(or send the 6\\-digit code as a plain message\\)",
-        ]
-        if self._cfg.backup_cfg:
-            lines += [
-                "/backup — Force a Wallet backup \\(guided by inline buttons\\)",
-                "/backup `monthly [YYYY\\-MM]` — Monthly backup, optional period",
-                "/backup `yearly [YYYY]` — Yearly backup, optional year",
-            ]
-        lines += [
-            "/status — Show instances and backup service",
-            "/help — This message",
-        ]
-        self._send_message("\n".join(lines))
 
     def _cmd_status(self, _args: list[str]) -> None:
         if not self._cfg.instances:

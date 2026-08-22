@@ -32,6 +32,11 @@ Never write implementation code without a corresponding test. Coverage should st
 
 ## Documentation
 
+### Update `README.md` when:
+- A bot command is added, removed, or renamed (update the commands table).
+- A new feature or behaviour is introduced that users need to know about.
+- Setup steps, environment variables, or deployment instructions change.
+
 ### Update `ARCHITECTURE.md` when:
 - A new module is added or an existing one is renamed/removed.
 - A key design decision changes (e.g. container naming, env var behaviour, data flow).

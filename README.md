@@ -195,7 +195,6 @@ The built-in Telegram bot lets you trigger sync and backup operations on demand 
 | `/backup monthly [YYYY-MM]` | Monthly backup, optional period (default: previous month) |
 | `/backup yearly [YYYY]` | Yearly backup, optional year (default: previous year) |
 | `/status` | Show all instances and whether backup is available |
-| `/help` | Show available commands |
 
 Backup commands are only available when at least one sync instance is configured (the first instance's `wallet_api_key` is used).
 
