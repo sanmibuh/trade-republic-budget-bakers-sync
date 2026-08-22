@@ -1,0 +1,21 @@
+app/__main__.py
+  s_44fced12a71a5f::t_3d9672ce48a774 170
+app/config.py
+  s_44fced12a71a5f::t_dcaa1f270e722a 7,98-99,108,117,492,532,601-602
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "bc546ea91fc921fa532d6b11f4335f75f0ccc3ca",
+  "prompts": {},
+  "sessions": {
+    "s_44fced12a71a5f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd6b3b3a2ffeaJADA27qv9p4qZ",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
