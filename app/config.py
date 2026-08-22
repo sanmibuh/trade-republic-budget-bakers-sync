@@ -249,7 +249,7 @@ class BackupConfig:
             wallet_api_key=wallet_api_key or first.wallet_api_key,
             telegram_bot_token=instances_yaml.telegram_bot_token,
             telegram_chat_id=instances_yaml.telegram_chat_id,
-            data_dir=instances_yaml.data_dir / "backup",
+            data_dir=instances_yaml.data_dir,
             allow_insecure_ssl=instances_yaml.allow_insecure_ssl,
         )
 
@@ -789,7 +789,7 @@ class InstancesConfig:
             telegram_chat_id=self.telegram_chat_id,
             lookback_days=inst.lookback_days,
             dedup_ttl_days=inst.dedup_ttl_days,
-            data_dir=self.data_dir / inst.name,
+            data_dir=self.data_dir / "sync" / inst.name,
             instance=inst.name,
             allow_insecure_ssl=self.allow_insecure_ssl,
             label_ids=dict(inst.label_ids),

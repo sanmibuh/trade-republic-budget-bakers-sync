@@ -194,3 +194,47 @@ Defined in `instances.yml` — **not** in `docker-compose.yml` environment varia
 
 `SYNC_SCHEDULE` and `BACKUP_SCHEDULE` environment variables are **ignored** in
 multi-instance mode; set schedules in `instances.yml` instead.
+
+---
+
+## Migration notes
+
+### Consolidating runtime data under `data/` (v8.0.0+)
+
+Stop the service before migrating to avoid split writes:
+
+```sh
+cd /share/docker/tr-sync
+./tr-sync.sh down
+```
+
+**Instance data** — moved from `data/<name>/` to `data/sync/<name>/`:
+
+```sh
+mkdir -p data/sync
+# Repeat for each instance (david, eli, …)
+mv data/david data/sync/david
+mv data/eli   data/sync/eli
+```
+
+**Logs** — moved from `logs/` at the compose root into `data/`:
+
+```sh
+mv logs/sync.log* data/
+rmdir logs   # only if empty
+```
+
+**Backups** — moved from `data/backup/backups/` to `data/backups/`:
+
+```sh
+mkdir -p data/backups
+mv data/backup/backups/* data/backups/
+rmdir data/backup/backups data/backup   # only if empty
+```
+
+Then start the service again:
+
+```sh
+./tr-sync.sh upgrade
+```
+

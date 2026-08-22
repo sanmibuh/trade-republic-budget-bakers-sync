@@ -296,11 +296,12 @@ def test_backup_config_from_instances_yaml_empty_instances_returns_none():
     assert BackupConfig.from_instances_yaml(yaml) is None
 
 
-def test_backup_config_from_instances_yaml_data_dir_is_backup_subdir():
+def test_backup_config_from_instances_yaml_data_dir_is_instances_data_dir():
+    """BackupConfig.data_dir must equal instances_yaml.data_dir (the root data dir)."""
     yaml = _make_instances_yaml(data_dir="/app/data")
     cfg = BackupConfig.from_instances_yaml(yaml)
     assert cfg is not None
-    assert str(cfg.data_dir) == "/app/data/backup"
+    assert str(cfg.data_dir) == "/app/data"
 
 
 def test_backup_config_from_instances_yaml_uses_yaml_telegram_creds():
@@ -917,7 +918,7 @@ def test_instances_config_get_instance_not_found(tmp_path):
 
 
 def test_instances_config_to_config_data_dir_is_subdirectory(tmp_path):
-    """to_config() sets data_dir to {root_data_dir}/{instance_name}/."""
+    """to_config() sets data_dir to {root_data_dir}/sync/{instance_name}/."""
     from pathlib import Path
 
     from app.config import InstancesConfig
@@ -938,7 +939,7 @@ sync:
 
     cfg = InstancesConfig.load(cfg_file).to_config("user1")
 
-    assert cfg.data_dir == Path(tmp_path) / "user1"
+    assert cfg.data_dir == Path(tmp_path) / "sync" / "user1"
 
 
 def test_instances_config_load_falls_back_to_env_telegram_creds(tmp_path, monkeypatch):

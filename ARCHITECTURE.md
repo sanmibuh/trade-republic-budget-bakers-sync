@@ -222,7 +222,8 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
     restart the container. A `SIGTERM`/`SIGINT` trap ensures both children are stopped cleanly on
     `docker stop`.
   - `MODE` env var is ignored in this mode.
-  - All instances share one log file: `{DATA_DIR}/logs/sync.log`.
+  - All instances share one log file: `{DATA_DIR}/sync.log`.
+  - Instance data lives under `{DATA_DIR}/sync/{instance_name}/`.
   - Exits with an error if no instance has a schedule defined.
 
   **Legacy single-instance mode** (when `INSTANCES_CONFIG` is not set — fully backwards-compatible):
@@ -290,7 +291,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 1. **`WALLET_API_KEY` env var set** → used as override; `BackupConfig` is derived from
    `BackupConfig.from_instances_yaml(instances_yaml, wallet_api_key=env_key)`.
 2. **`WALLET_API_KEY` absent** → `BackupConfig` is derived from the first instance's
-   `wallet_api_key`; `data_dir` is set to `instances_yaml.data_dir / "backup"`; Telegram credentials
+   `wallet_api_key`; `data_dir` is set to `instances_yaml.data_dir`; Telegram credentials
    are taken from `instances_yaml.telegram_bot_token` / `telegram_chat_id`.
 3. **No instances in YAML** → `backup_cfg` is `None` and `/backup` commands are disabled.
 
@@ -349,7 +350,7 @@ The `sync:` section is **required** — files without it raise `ValueError` with
 pointing to `instances.yml.example`.
 
 **Key behaviours:**
-- Each instance gets its own `data_dir/{name}/` subdirectory (session files, `sync.db`, logs).
+- Each instance gets its own `data_dir/sync/{name}/` subdirectory (session files, `sync.db`).
 - Global `telegram_*` and `allow_insecure_ssl` are inherited by all instances.
 - `sync.*` fields (`wallet_api_key`, `lookback_days`, `category_strategy`, `schedule`) are global
   defaults; each instance can override any of them individually.
@@ -371,14 +372,14 @@ pointing to `instances.yml.example`.
 
 ### Logging (`app/logging_setup.py`)
 - `setup_logging(log_dir)` — called **once at process startup** by each CLI entry point; sets up rotating file handler + console handler. Returns `None`.
-  - **Bot process**: called in the `bot` CLI command with `instances_yaml.data_dir / "logs"` → all in-process sync/login/resync/backup calls share a single `{DATA_DIR}/logs/sync.log`.
-  - **Standalone sync / login**: called with `cfg.data_dir.parent / "logs"` when `--instance` is used (so all instances share the same log directory one level above the instance data dir), or `cfg.data_dir / "logs"` when driven by env vars.
-  - **Standalone resync**: called with `cfg.data_dir / "logs"` (always env-var driven).
-  - **Standalone backup**: called in the `backup` CLI command with `cfg.data_dir / "logs"`.
+  - **Bot process**: called in the `bot` CLI command with `instances_yaml.data_dir` → all in-process sync/login/resync/backup calls share a single `{DATA_DIR}/sync.log`.
+  - **Standalone sync / login**: called with `instances_yaml.data_dir` when `--instance` is used, or `cfg.data_dir` when driven by env vars (single-instance mode, where `cfg.data_dir` is the root data dir).
+  - **Standalone resync**: called with `cfg.data_dir` (always env-var driven, root data dir).
+  - **Standalone backup**: called with `cfg.data_dir` (root data dir).
   - **Short-lived commands** (`submit-code`, `check-pending`, `check-session`, `list-instances`): do not call `setup_logging` — they run without any logging configuration.
 - `configure_logging()` — minimal console-only fallback; not called by any CLI command.
 - Because logging is configured once at startup and never torn down, `_prepare` in `main.py` needs no handler lifecycle management — there is no handler accumulation risk between in-process calls.
-- The `/logs` Telegram command reads today's lines from the shared `{DATA_DIR}/logs/sync.log` directly (no instance picker — all instances write to the same file).
+- The `/logs` Telegram command reads today's lines from the shared `{DATA_DIR}/sync.log` directly (no instance picker — all instances write to the same file).
 
 ### SSL circuit-breaker (`app/http_client.py`)
 - `SSLCircuitBreaker` — class that encapsulates circuit state (`verify`, `allow_insecure`) and policy.
@@ -487,13 +488,13 @@ image publish workflows.
 ## Data volume
 
 `/app/data` (mounted from host) contains:
-- `{name}/sync.db` — SQLite database per instance with `processed_events` and `auth_state` tables
-- `logs/sync.log` — rotating log file shared by all services (bot, sync, backup); written to `{DATA_DIR}/logs/sync.log`
-- `{name}/` — pytr session/cookie files per instance (login state)
-- `{name}/.tr_2fa_pending` — transient marker created by `TelegramCodeProvider` while waiting for a code
-- `{name}/.tr_2fa_code` — transient file where `submit-code` drops the authenticator code
-- `backup/backups/monthly/` — monthly JSON snapshots (permanent)
-- `backup/backups/yearly/` — yearly JSON snapshots (permanent)
+- `sync/{name}/sync.db` — SQLite database per instance with `processed_events` and `auth_state` tables
+- `sync.log` — rotating log file shared by all services (bot, sync, backup); written to `{DATA_DIR}/sync.log`
+- `sync/{name}/` — pytr session/cookie files per instance (login state)
+- `sync/{name}/.tr_2fa_pending` — transient marker created by `TelegramCodeProvider` while waiting for a code
+- `sync/{name}/.tr_2fa_code` — transient file where `submit-code` drops the authenticator code
+- `backups/monthly/` — monthly JSON snapshots (permanent)
+- `backups/yearly/` — yearly JSON snapshots (permanent)
 
 ---
 
