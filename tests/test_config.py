@@ -8,7 +8,6 @@ from app.config import (
     InstancesConfig,
     SyncConfig,
     has_valid_session,
-    read_instance,
 )
 
 # ---------------------------------------------------------------------------
@@ -59,13 +58,6 @@ def test_backup_config_from_instances_yaml_uses_first_instance_wallet_key():
     cfg = BackupConfig.from_instances_yaml(yaml)
     assert cfg is not None
     assert cfg.wallet_api_key == "yamlkey"
-
-
-def test_backup_config_from_instances_yaml_accepts_override_wallet_key():
-    yaml = _make_instances_yaml(wallet_api_key="yamlkey")
-    cfg = BackupConfig.from_instances_yaml(yaml, wallet_api_key="envkey")
-    assert cfg is not None
-    assert cfg.wallet_api_key == "envkey"
 
 
 def test_backup_config_from_instances_yaml_empty_instances_returns_none():
@@ -138,45 +130,6 @@ def test_has_valid_session_true_when_mixed_cookies(tmp_path):
 def test_has_valid_session_false_when_file_corrupt(tmp_path):
     (tmp_path / "cookies.txt").write_text("not a cookie jar at all\x00\xff")
     assert has_valid_session(tmp_path) is False
-
-
-# ---------------------------------------------------------------------------
-# read_data_dir
-# ---------------------------------------------------------------------------
-
-
-def test_read_data_dir_returns_env_value(monkeypatch):
-    """DATA_DIR env var is reflected in the returned Path."""
-    from app.config import read_data_dir
-
-    monkeypatch.setenv("DATA_DIR", "/custom/data")
-    assert read_data_dir() == __import__("pathlib").Path("/custom/data")
-
-
-def test_read_data_dir_defaults_to_app_data(monkeypatch):
-    """When DATA_DIR is unset, the default /app/data is returned."""
-    from app.config import read_data_dir
-
-    monkeypatch.delenv("DATA_DIR", raising=False)
-    assert read_data_dir() == __import__("pathlib").Path("/app/data")
-
-
-def test_read_instance_falls_back_to_default_owner_name(monkeypatch):
-    """read_instance() with no INSTANCE and no OWNER_NAME returns lowercased default."""
-    monkeypatch.delenv("INSTANCE", raising=False)
-    monkeypatch.delenv("OWNER_NAME", raising=False)
-
-    result = read_instance()
-
-    assert result == "backup"
-
-
-def test_read_instance_uses_instance_env_var_when_set(monkeypatch):
-    """read_instance() returns INSTANCE as-is when the env var is set."""
-    monkeypatch.setenv("INSTANCE", "my-account")
-    monkeypatch.setenv("OWNER_NAME", "David")
-
-    assert read_instance() == "my-account"
 
 
 # ---------------------------------------------------------------------------
@@ -581,40 +534,6 @@ sync:
     cfg = InstancesConfig.load(cfg_file).to_config("user1")
 
     assert cfg.data_dir == Path(tmp_path) / "sync" / "user1"
-
-
-def test_instances_config_load_falls_back_to_env_telegram_creds(tmp_path, monkeypatch):
-    """When YAML has no telegram creds, load() falls back to env vars."""
-    from app.config import InstancesConfig
-
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "env-bot-token")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "env-chat-id")
-
-    cfg_file = tmp_path / "instances.yml"
-    cfg_file.write_text(_MINIMAL_YAML)  # no telegram creds in YAML
-
-    cfg = InstancesConfig.load(cfg_file)
-
-    assert cfg.telegram_bot_token == "env-bot-token"
-    assert cfg.telegram_chat_id == "env-chat-id"
-
-
-def test_instances_config_load_yaml_telegram_creds_take_precedence(
-    tmp_path, monkeypatch
-):
-    """YAML telegram creds take precedence over env vars."""
-    from app.config import InstancesConfig
-
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "env-bot-token")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "env-chat-id")
-
-    cfg_file = tmp_path / "instances.yml"
-    cfg_file.write_text(_FULL_YAML)  # _FULL_YAML has telegram_bot_token: "bot-token"
-
-    cfg = InstancesConfig.load(cfg_file)
-
-    assert cfg.telegram_bot_token == "bot-token"
-    assert cfg.telegram_chat_id == "chat-id"
 
 
 def test_instances_config_to_config_inherits_global_telegram(tmp_path):

@@ -202,11 +202,8 @@ def test_botconfig_from_env_instances_have_config_objects(monkeypatch):
     assert cfg.instances["user1"].config.phone_number == "+34600000000"
 
 
-def test_botconfig_from_env_backup_from_yaml_when_env_key_absent(monkeypatch):
-    """When WALLET_API_KEY is not set, backup_cfg is derived from the first instance in YAML."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.delenv("WALLET_API_KEY", raising=False)
+def test_botconfig_from_env_backup_uses_yaml_wallet_key(monkeypatch):
+    """backup_cfg is derived from the first instance's wallet_api_key in YAML."""
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.backup_cfg is not None
@@ -215,56 +212,13 @@ def test_botconfig_from_env_backup_from_yaml_when_env_key_absent(monkeypatch):
 
 def test_botconfig_from_env_backup_yaml_data_dir_is_backup_subdir(monkeypatch):
     """Backup data_dir derived from YAML uses instances data_dir / 'backup'."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.delenv("WALLET_API_KEY", raising=False)
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.backup_cfg is not None
     assert cfg.backup_cfg.data_dir.name == "data"
 
 
-def test_botconfig_from_env_backup_env_key_takes_precedence_over_yaml(monkeypatch):
-    """When WALLET_API_KEY env var is set, it takes precedence over the YAML instance key."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.setenv("WALLET_API_KEY", "envkey")
-    with _mock_instances_load():
-        cfg = BotConfig.from_env()
-    assert cfg.backup_cfg is not None
-    assert cfg.backup_cfg.wallet_api_key == "envkey"
-
-
-def test_botconfig_from_env_backup_uses_yaml_telegram_when_env_wallet_key_set(
-    monkeypatch,
-):
-    """Even when WALLET_API_KEY is set in env, Telegram creds come from instances YAML."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.setenv("WALLET_API_KEY", "envkey")
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-    with _mock_instances_load():
-        cfg = BotConfig.from_env()
-    assert cfg.backup_cfg is not None
-    assert cfg.backup_cfg.telegram_bot_token == "mytoken"
-    assert cfg.backup_cfg.telegram_chat_id == "123"
-
-
-def test_botconfig_from_env_backup_enabled_when_wallet_key_present(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.setenv("WALLET_API_KEY", "mykey")
-    with _mock_instances_load():
-        cfg = BotConfig.from_env()
-    assert cfg.backup_cfg is not None
-    assert cfg.backup_cfg.wallet_api_key == "mykey"
-
-
 def test_botconfig_from_env_missing_token(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     with (
         _mock_instances_load(_YAML_NO_TOKEN),
         pytest.raises(ValueError, match="TELEGRAM_BOT_TOKEN"),
@@ -273,9 +227,6 @@ def test_botconfig_from_env_missing_token(monkeypatch):
 
 
 def test_botconfig_from_env_missing_chat_id(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     with (
         _mock_instances_load(_YAML_NO_CHAT_ID),
         pytest.raises(ValueError, match="TELEGRAM_CHAT_ID"),
@@ -283,11 +234,8 @@ def test_botconfig_from_env_missing_chat_id(monkeypatch):
         BotConfig.from_env()
 
 
-def test_botconfig_from_env_token_from_yaml_only(monkeypatch):
-    """TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID can come from instances.yml without env vars."""
-    monkeypatch.setenv("INSTANCES_CONFIG", "/fake/instances.yml")
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+def test_botconfig_from_env_token_from_yaml(monkeypatch):
+    """TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are read from instances.yml."""
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.bot_token == "mytoken"
@@ -296,9 +244,6 @@ def test_botconfig_from_env_token_from_yaml_only(monkeypatch):
 
 def test_botconfig_from_env_numeric_chat_id_in_yaml(monkeypatch):
     """Unquoted numeric telegram_chat_id in YAML (loaded as int) must not raise AttributeError."""
-    monkeypatch.setenv("INSTANCES_CONFIG", "/fake/instances.yml")
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     with _mock_instances_load(_YAML_NUMERIC_CHAT_ID):
         cfg = BotConfig.from_env()
     assert cfg.chat_id == "123"
@@ -327,31 +272,6 @@ def test_botconfig_from_env_uses_hardcoded_instances_config_path(monkeypatch):
     with _mock_instances_load() as mock_load:
         BotConfig.from_env()
     mock_load.assert_called_once_with(INSTANCES_CONFIG_PATH)
-
-
-def test_botconfig_telegram_verify_ssl_default_true(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    with _mock_instances_load():
-        cfg = BotConfig.from_env()
-    assert cfg.telegram_verify_ssl is True
-
-
-def test_botconfig_telegram_verify_ssl_false(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.setenv("TELEGRAM_VERIFY_SSL", "false")
-    with _mock_instances_load():
-        cfg = BotConfig.from_env()
-    assert cfg.telegram_verify_ssl is False
-
-
-def test_botconfig_telegram_verify_ssl_invalid(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.setenv("TELEGRAM_VERIFY_SSL", "maybe")
-    with _mock_instances_load(), pytest.raises(ValueError, match="TELEGRAM_VERIFY_SSL"):
-        BotConfig.from_env()
 
 
 def test_botconfig_from_env_allow_insecure_ssl_defaults_false(monkeypatch):
@@ -2099,26 +2019,6 @@ def test_cmd_status_checks_each_instance(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# TelegramBot.__init__ — telegram_verify_ssl=False disables urllib3 warnings
-# ---------------------------------------------------------------------------
-
-
-def test_init_disables_urllib3_warnings_when_ssl_verify_false():
-    """When telegram_verify_ssl=False, urllib3 InsecureRequestWarning is suppressed."""
-    import urllib3
-
-    with patch.object(urllib3, "disable_warnings") as mock_dw:
-        TelegramBot(
-            BotConfig(
-                bot_token="tok",
-                chat_id="42",
-                instances={},
-                telegram_verify_ssl=False,
-            )
-        )
-    mock_dw.assert_called_once_with(urllib3.exceptions.InsecureRequestWarning)
-
-
 def test_init_configures_ssl_once_at_startup():
     """TelegramBot.__init__ must call http_client.configure() once with the BotConfig ssl policy."""
     with patch("app.bot.http_client.configure") as mock_configure:

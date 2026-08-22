@@ -179,7 +179,7 @@ CREATE TABLE auth_state (
 missing, detected with `PRAGMA table_info`; new tables are created via `CREATE TABLE IF NOT EXISTS`.
 
 ### Labels
-- `LABEL_<EVENT_TYPE>` env vars (e.g. `LABEL_BANK_TRANSACTION_INCOMING`) are read by `_read_label_ids()` →
+- Per-instance `label_ids` are read from the YAML (`labels:` map under each instance) by `_parse_instance_labels()` →
   `cfg.label_ids: dict[str, str]`.
 - `LABELABLE_EVENT_TYPES` tuple in `config.py` lists all 13 supported types.
 - Labels are applied generically in `build_records_for_event` post-handler — individual handlers don't
@@ -193,14 +193,11 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   - `python -m app sync --instance <name>` — resolves config from `INSTANCES_CONFIG_PATH` YAML and runs sync for that instance
   - `python -m app backup <mode> [param]` — dispatches to `backup.run_auto/run_monthly/run_yearly`
   - `python -m app bot` — starts the Telegram bot
-  - `python -m app login` — runs `main.run_login()`, an on-demand 2FA session renewal
-  - `python -m app submit-code <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting
-    login/sync process to pick up
-  - `python -m app resync YYYY-MM-DD` — runs `main.run_resync(date_str)`, force re-syncing a specific day
-  - `python -m app check-session` — exits 0 if a valid session exists (non-expired cookie) **and** `auth_state`
-    for this instance in `sync.db` is not `failed`/`expired`; exits 1 otherwise. Used by the bot's `/status`
-    command to report per-instance auth state without network calls.
-  - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG_PATH`, one per line.
+   - `python -m app login` — runs `main.run_login()`, an on-demand 2FA session renewal
+   - `python -m app submit-code <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting
+     login/sync process to pick up
+   - `python -m app resync YYYY-MM-DD` — runs `main.run_resync(date_str)`, force re-syncing a specific day
+   - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG_PATH`, one per line.
   - `python -m app list-schedules` — prints `name<TAB>schedule` for every instance that has a schedule,
     one per line. Used by `entrypoint.sh` to register one cron job per instance with its own schedule.
   - `python -m app get-backup-schedule` — prints the `backup_schedule` from `INSTANCES_CONFIG_PATH`, or nothing.
@@ -234,7 +231,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 ### Telegram bot
 - `app/bot.py`: long-polling bot and command handlers; wires `app/bot_keyboards.py`; executes all sync/login/resync/backup operations via direct in-process Python calls (no Docker SDK, no `exec_run`).
 - `app/bot_keyboards.py`: stateless inline keyboard builder functions (backup type/period pickers, instance pickers, resync date picker); no dependency on bot state.
-- `BotConfig` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` from env (with YAML as fallback). `INSTANCES_CONFIG_PATH` (hardcoded) is the path to the instances YAML file; backup config is derived from `BackupConfig.from_instances_yaml()` with an optional `WALLET_API_KEY` env override via `read_optional_wallet_api_key()`.
+- `BotConfig` reads `telegram_bot_token` and `telegram_chat_id` from `instances.yml`. `INSTANCES_CONFIG_PATH` (hardcoded) is the path to the instances YAML file; backup config is derived from `BackupConfig.from_instances_yaml()`.
 - Each sync instance is represented as `InstanceConfig(name, config: Config)` — the bot calls `main.run()`, `main.run_login()`, and `main.run_resync()` directly with the instance's `Config`.
 - Backup command (`/backup [monthly|yearly] [period]`) uses a two-step inline keyboard: first choose type
   (Monthly / Yearly), then choose the period. Direct args (`/backup monthly 2026-07`) skip the keyboards.
@@ -247,43 +244,18 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   `main.run_resync()` in a background thread. With a date arg, jumps straight to the instance picker.
   Callback data format: `resync_pick_date:<instance>` (date picker step) and `resync:<date>:<instance>` (execute step).
 
-### Config — environment variables
-- `Config` — full config for the **sync** command. Constructed directly from `InstancesConfig` YAML
-  (`InstancesConfig.to_config(name)`). No `from_env()` factory — all config comes from `instances.yml`.
-- `BackupConfig` — minimal config for the **backup** command. Derived from `BackupConfig.from_instances_yaml()`.
-- Both share optional fields defined in YAML: `owner_name` (default `"Backup"`), `telegram_bot_token`,
-  `telegram_chat_id`, `data_dir`, `allow_insecure_ssl` (default `false`).
-- `Config.dedup_ttl_days` — controls how many days of processed-event records are retained in `sync.db`.
-  Read from YAML (`dedup_ttl_days`, default `60`). Passed to `EventRepository.purge_old_records(ttl_days=...)`
-  at the start of each normal sync run (`run()`). The resync entry point (`run_resync`) does not purge,
-  as it is a targeted single-day operation.
-- `Config.category_strategy` — controls automatic pre-categorization of Wallet records. Read from YAML
-  (`category_strategy`, default `none`). Accepted values: `none`, `history`. See *Auto-categorization*
-  section for details.
-- `Config.instance` — logical instance name used for the Telegram 2FA prompt/`/code` routing. Always
-  set from the YAML instance name.
+### Config
+- All configuration is read exclusively from `instances.yml` (mounted at `INSTANCES_CONFIG_PATH`).
+- No environment variables are read for credentials or operational config — only `TZ` (timezone for cron) is used at the OS level.
 - `INSTANCES_CONFIG_PATH` — module-level constant in `config.py`; hardcoded to `/app/config/instances.yml`.
-  All services load config from this path; it is not configurable via env var.
-- `BotEnv.from_env()` — reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `TELEGRAM_VERIFY_SSL` from env.
-  Used by `BotConfig.from_env` to allow env-var overrides of Telegram credentials on top of the YAML.
-- `read_data_dir()` — standalone helper that returns the `DATA_DIR` path (default `/app/data`); used by
-  `check-session` which only needs the data directory, not full credentials.
-- `read_instance()` — standalone helper that returns the logical instance name (`INSTANCE` env var, falling
-  back to `OWNER_NAME` lowercased); used by `check-session` to look up `auth_state` in `sync.db`.
-- `read_optional_wallet_api_key()` — returns `WALLET_API_KEY` from env or `None`; used by the bot to allow an
-  explicit env override of the YAML wallet key without breaking the "no `os.getenv` outside `config.py`" rule.
-- All env vars are read exclusively in `config.py` — no `os.getenv` calls in other modules.
 
 ### Backup config derivation
 
-`BotConfig.from_env` builds `backup_cfg` with the following priority:
+`BotConfig.from_env` builds `backup_cfg` from `instances.yml`:
 
-1. **`WALLET_API_KEY` env var set** → used as override; `BackupConfig` is derived from
-   `BackupConfig.from_instances_yaml(instances_yaml, wallet_api_key=env_key)`.
-2. **`WALLET_API_KEY` absent** → `BackupConfig` is derived from the first instance's
-   `wallet_api_key`; `data_dir` is set to `instances_yaml.data_dir`; Telegram credentials
-   are taken from `instances_yaml.telegram_bot_token` / `telegram_chat_id`.
-3. **No instances in YAML** → `backup_cfg` is `None` and `/backup` commands are disabled.
+1. `BackupConfig` is derived from the first instance's `wallet_api_key`; `data_dir` and Telegram
+   credentials are taken from the YAML global fields.
+2. **No instances in YAML** → `backup_cfg` is `None` and `/backup` commands are disabled.
 
 The `backup` CLI command (`python -m app backup`) loads config via `_resolve_backup_cfg()`:
 - Loads `InstancesConfig` from the hardcoded `INSTANCES_CONFIG_PATH` and derives `BackupConfig` from it.
@@ -301,8 +273,8 @@ all operations (sync, login, resync, backup) as direct in-process Python calls.
 ```yaml
 # Global shared settings
 data_dir: /app/data           # optional, default /app/data
-telegram_bot_token: "..."     # optional (also accepted via TELEGRAM_BOT_TOKEN env var)
-telegram_chat_id: "..."       # optional (also accepted via TELEGRAM_CHAT_ID env var)
+telegram_bot_token: "..."     # required
+telegram_chat_id: "..."       # required
 allow_insecure_ssl: false     # optional, default false
 
 backup_schedule: "0 3 * * *"  # optional — cron expression; omit to disable automatic backups
@@ -365,7 +337,7 @@ pointing to `instances.yml.example`.
   - **Standalone sync / login**: called with `instances_yaml.data_dir` when `--instance` is used.
   - **Standalone resync**: called with `cfg.data_dir` (always env-var driven, root data dir).
   - **Standalone backup**: called with `cfg.data_dir` (root data dir).
-  - **Short-lived commands** (`submit-code`, `check-pending`, `check-session`, `list-instances`): do not call `setup_logging` — they run without any logging configuration.
+  - **Short-lived commands** (`submit-code`, `check-pending`, `list-instances`): do not call `setup_logging` — they run without any logging configuration.
 - `configure_logging()` — minimal console-only fallback; not called by any CLI command.
 - Because logging is configured once at startup and never torn down, `_prepare` in `main.py` needs no handler lifecycle management — there is no handler accumulation risk between in-process calls.
 - The `/logs` Telegram command reads today's lines from the shared `{DATA_DIR}/sync.log` directly (no instance picker — all instances write to the same file).
@@ -384,7 +356,7 @@ pointing to `instances.yml.example`.
 - `build_session(headers)` — returns a `requests.Session` with a custom `_SSLCircuitBreakerAdapter` that applies
   the same fallback logic per-request using the shared `breaker` singleton.
 - Both `notifier.py` (Telegram) and `wallet_client.py` (BudgetBakers) use this module — the singleton is shared.
-- Controlled via `ALLOW_INSECURE_SSL` env var (default `false`). Set to `true` only in environments with broken
+- Controlled via `allow_insecure_ssl` in `instances.yml` (default `false`). Set to `true` only in environments with broken
   certificate chains (e.g. corporate VPN).
 
 ### BudgetBakers API — POST (sync)
@@ -401,14 +373,14 @@ pointing to `instances.yml.example`.
 - TR CSV export has raw terminal descriptors (e.g. `"ETAM LINGERIE BUENOS A"`) but the pytr WebSocket API only
   exposes normalized merchant names (e.g. `"Etam"`). No fix possible without combining CSV + API sources.
 
-### Auto-categorization (`CATEGORY_STRATEGY`)
+### Auto-categorization (`category_strategy`)
 
 Records sent via the BudgetBakers API land without a category (Wallet's AI categorization only activates for
-bank-connected syncs).  The `CATEGORY_STRATEGY` env var enables automatic pre-assignment:
+bank-connected syncs).  The `category_strategy` YAML field enables automatic pre-assignment:
 
-| `CATEGORY_STRATEGY` | Behaviour |
+| `category_strategy` | Behaviour |
 |---|---|
-| `none` (default) | No automatic categorization — fully backwards-compatible |
+| `none` (default) | No automatic categorization |
 | `history` | Enables history-based lookup via `HistoryCategorizer` |
 
 > `llm` is planned as a future strategy (LLM as fallback) but is **not implemented yet** — setting it

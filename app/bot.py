@@ -3,10 +3,9 @@
 Usage (via CLI):
     python -m app bot
 
-Environment variables:
-    TELEGRAM_BOT_TOKEN  Required. Bot token from BotFather.
-    TELEGRAM_CHAT_ID    Required. Authorized chat ID (only this chat can issue commands).
-    INSTANCES_CONFIG    Required. Path to the instances YAML config file.
+All configuration is read from ``/app/config/instances.yml``.
+Required fields: ``telegram_bot_token``, ``telegram_chat_id``, at least one
+instance under ``sync.instances``.
 
 Commands (registered via setMyCommands for Telegram autocomplete):
     /sync                              Force a Trade Republic sync — choose instance via inline buttons.
@@ -41,7 +40,6 @@ from pathlib import Path
 from typing import Any
 
 import requests
-import urllib3
 
 from app import backup as backup_module, http_client
 from app.bot_keyboards import (
@@ -60,8 +58,6 @@ from app.config import (
     Config,
     InstancesConfig,
     has_valid_session,
-    read_optional_wallet_api_key,
-    read_telegram_verify_ssl,
 )
 from app.main import (
     run as _main_run,
@@ -108,7 +104,6 @@ class BotConfig:
     chat_id: str
     instances: dict[str, InstanceConfig] = field(default_factory=dict)
     backup_cfg: BackupConfig | None = None  # None means backup commands are disabled
-    telegram_verify_ssl: bool = True
     log_dir: Path = field(default_factory=lambda: Path("/app/data"))
     allow_insecure_ssl: bool = False
 
@@ -117,16 +112,12 @@ class BotConfig:
         if instances_yaml is None:
             instances_yaml = InstancesConfig.load(INSTANCES_CONFIG_PATH)
 
-        # Telegram credentials: InstancesConfig.load already consolidates YAML values
-        # with env-var fallbacks (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID), so
-        # instances_yaml.telegram_bot_token is the resolved value from either source.
-        # Strip whitespace to match the behaviour of _required_env().
         bot_token = str(instances_yaml.telegram_bot_token or "").strip() or None
         chat_id = str(instances_yaml.telegram_chat_id or "").strip() or None
         if not bot_token:
             raise ValueError(
                 "Missing required credential TELEGRAM_BOT_TOKEN "
-                "(set in the instances config file or as an environment variable)"
+                "(set telegram_bot_token in the instances config file)"
             )
         if not chat_id:
             raise ValueError(
@@ -142,21 +133,13 @@ class BotConfig:
                 config=full_cfg,
             )
 
-        # Always derive backup_cfg from instances_yaml so that Telegram credentials,
-        # data_dir, and allow_insecure_ssl are consistent with the sync instances.
-        # wallet_api_key uses WALLET_API_KEY env var when set (override),
-        # otherwise falls back to the first instance's key (single-container path).
-        env_wallet_key = read_optional_wallet_api_key()
-        backup_cfg = BackupConfig.from_instances_yaml(
-            instances_yaml, wallet_api_key=env_wallet_key
-        )
+        backup_cfg = BackupConfig.from_instances_yaml(instances_yaml)
 
         return cls(
             bot_token=bot_token,
             chat_id=chat_id,
             instances=instances,
             backup_cfg=backup_cfg,
-            telegram_verify_ssl=read_telegram_verify_ssl(),
             log_dir=instances_yaml.data_dir,
             allow_insecure_ssl=instances_yaml.allow_insecure_ssl,
         )
@@ -276,8 +259,6 @@ class TelegramBot:
         # Configure SSL once at startup — all in-process sync/login/resync/backup
         # calls share this policy without racing on a per-run configure() call.
         http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
-        if not cfg.telegram_verify_ssl:
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # ------------------------------------------------------------------
     # Public
@@ -339,7 +320,7 @@ class TelegramBot:
                 f"{self._api}/setMyCommands",
                 json={"commands": commands},
                 timeout=10,
-                verify=self._cfg.telegram_verify_ssl,
+                verify=True,
             )
             resp.raise_for_status()
             log.info("Telegram commands registered successfully")
@@ -359,7 +340,7 @@ class TelegramBot:
                 "allowed_updates": ["message", "callback_query"],
             },
             timeout=40,
-            verify=self._cfg.telegram_verify_ssl,
+            verify=True,
         )
         resp.raise_for_status()
         for update in resp.json().get("result", []):
@@ -986,7 +967,7 @@ class TelegramBot:
                 f"{self._api}/sendMessage",
                 json=payload,
                 timeout=20,
-                verify=self._cfg.telegram_verify_ssl,
+                verify=True,
             )
             resp.raise_for_status()
         except requests.RequestException as exc:
@@ -999,7 +980,7 @@ class TelegramBot:
                 f"{self._api}/answerCallbackQuery",
                 json={"callback_query_id": callback_query_id},
                 timeout=10,
-                verify=self._cfg.telegram_verify_ssl,
+                verify=True,
             )
         except requests.RequestException as exc:
             log.warning("Failed to answer callback query: %s", exc)
@@ -1013,7 +994,7 @@ class TelegramBot:
                 f"{self._api}/deleteMessage",
                 json={"chat_id": self._cfg.chat_id, "message_id": message_id},
                 timeout=10,
-                verify=self._cfg.telegram_verify_ssl,
+                verify=True,
             )
         except requests.RequestException as exc:
             log.warning("Failed to delete message %s: %s", message_id, exc)

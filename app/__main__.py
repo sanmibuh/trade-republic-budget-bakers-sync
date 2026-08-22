@@ -151,48 +151,6 @@ def check_pending(instance: str) -> None:
     sys.exit(0 if pending_file.exists() else 1)
 
 
-@cli.command(name="check-session")
-def check_session() -> None:
-    """Exit 0 if a saved Trade Republic session exists, 1 if login is required.
-
-    Used by the Telegram bot to report per-instance authentication state in
-    /status without making any network calls.
-
-    pytr persists the session as cookies.txt (written by save_websession()).
-    The check reads the cookie expiry timestamps so that a file with only
-    expired cookies is correctly reported as needing re-authentication.
-
-    Additionally, if ``sync.db`` contains an ``auth_state`` row for this
-    instance with status ``"failed"`` or ``"expired"``, the command exits 1
-    even when a cookies file is present — this catches the case where a failed
-    login left the old session file in place.
-
-    Exit codes:
-        0 — session valid and auth state is ``ok`` (or no state recorded yet).
-        1 — session missing, expired, or auth state is ``failed``/``expired``.
-        2 — DB could not be read (corrupted/locked); the bot treats this as
-            an unknown/unreachable state rather than a hard auth failure.
-    """
-    from app.config import has_valid_session, read_data_dir, read_instance
-    from app.persistence import EventRepository
-
-    data_dir = read_data_dir()
-    if not has_valid_session(data_dir):
-        sys.exit(1)
-
-    db_path = data_dir / "sync.db"
-    if db_path.exists():
-        try:
-            with EventRepository(db_path) as repo:
-                auth_status = repo.get_auth_state(read_instance())
-        except Exception:
-            sys.exit(2)
-        if auth_status in ("failed", "expired"):
-            sys.exit(1)
-
-    sys.exit(0)
-
-
 def _resolve_backup_cfg() -> BackupConfig:
     """Load ``InstancesConfig`` and return the derived :class:`BackupConfig`.
 
@@ -203,16 +161,13 @@ def _resolve_backup_cfg() -> BackupConfig:
         INSTANCES_CONFIG_PATH,
         BackupConfig,
         InstancesConfig,
-        read_optional_wallet_api_key,
     )
 
     try:
         instances_yaml = InstancesConfig.load(INSTANCES_CONFIG_PATH)
     except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
-    cfg = BackupConfig.from_instances_yaml(
-        instances_yaml, wallet_api_key=read_optional_wallet_api_key()
-    )
+    cfg = BackupConfig.from_instances_yaml(instances_yaml)
     if cfg is None:
         raise click.UsageError(
             "instances config has no instances — cannot build backup config"
