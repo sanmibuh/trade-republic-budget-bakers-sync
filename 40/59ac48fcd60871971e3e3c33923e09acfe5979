@@ -1,0 +1,16 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 123-127,131-132,195-198,230,233,236-237,267,321-322,333-334
+app/twofa.py
+  h_97a91c9e567f87 9-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "4059ac48fcd60871971e3e3c33923e09acfe5979",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
