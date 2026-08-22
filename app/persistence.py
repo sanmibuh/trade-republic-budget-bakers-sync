@@ -28,6 +28,14 @@ def event_id(event: dict[str, Any]) -> str:
     return ""
 
 
+def _resolve_amount(event: dict[str, Any]) -> str:
+    """Return the event amount/value as a string, preserving 0 as ``"0"``."""
+    amount_raw = event.get("amount")
+    if amount_raw is None:
+        amount_raw = event.get("value")
+    return str(amount_raw) if amount_raw is not None else ""
+
+
 def dedup_event_id(event: dict[str, Any]) -> str:
     eid = event_id(event)
     if eid:
@@ -37,7 +45,7 @@ def dedup_event_id(event: dict[str, Any]) -> str:
         [
             extract_event_type(event),
             normalize_event_time(event),
-            str(event.get("amount") or event.get("value") or ""),
+            _resolve_amount(event),
             str(
                 event.get("title")
                 or event.get("name")
@@ -137,10 +145,7 @@ class EventRepository:
         eid = dedup_event_id(event)
         event_type = extract_event_type(event)
         event_timestamp = normalize_event_time(event)
-        amount_raw = event.get("amount")
-        if amount_raw is None:
-            amount_raw = event.get("value")
-        amount = str(amount_raw) if amount_raw is not None else ""
+        amount = _resolve_amount(event)
         try:
             raw = json.dumps(event, ensure_ascii=False, default=str)
         except TypeError:

@@ -88,6 +88,22 @@ def test_dedup_event_id_different_events_produce_different_hashes():
     assert dedup_event_id(e1) != dedup_event_id(e2)
 
 
+def test_dedup_event_id_zero_amount_differs_from_missing_amount():
+    """amount=0 and no amount must produce distinct hashes (0 must not be treated as missing)."""
+    base = {"eventType": "PAYMENT", "timestamp": "2024-06-01T10:00:00Z", "title": "T"}
+    with_zero = {**base, "amount": 0}
+    without_amount = {**base}
+    assert dedup_event_id(with_zero) != dedup_event_id(without_amount)
+
+
+def test_dedup_event_id_zero_value_differs_from_missing_value():
+    """value=0 and no value must produce distinct hashes."""
+    base = {"eventType": "PAYMENT", "timestamp": "2024-06-01T10:00:00Z", "title": "T"}
+    with_zero = {**base, "value": 0}
+    without_value = {**base}
+    assert dedup_event_id(with_zero) != dedup_event_id(without_value)
+
+
 # ---------------------------------------------------------------------------
 # init_db
 # ---------------------------------------------------------------------------
@@ -416,8 +432,6 @@ def test_get_wallet_record_id_returns_none_when_id_is_null(db):
 
 def test_build_event_row_returns_correct_tuple(db):
     """_build_event_row should return a tuple with the expected 8 fields and exact values."""
-    import json
-
     event = {
         "id": "row-evt",
         "timestamp": "2026-07-01T12:00:00Z",
