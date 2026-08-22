@@ -475,6 +475,13 @@ def test_build_event_row_falls_back_to_str_on_type_error(db):
     assert "row-fallback" in raw
 
 
+def test_insert_processed_event_raises_on_invalid_conflict(db):
+    """_insert_processed_event must raise ValueError for unsupported conflict values."""
+    event = {"id": "bad-conflict", "timestamp": "2026-07-01T00:00:00Z"}
+    with EventRepository(db) as repo, pytest.raises(ValueError, match="conflict"):
+        repo._insert_processed_event(event, None, conflict="UPDATE")  # type: ignore[arg-type]
+
+
 # ---------------------------------------------------------------------------
 # EventRepository — mark_processed_force (upsert for resync)
 # ---------------------------------------------------------------------------

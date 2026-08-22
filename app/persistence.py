@@ -132,7 +132,7 @@ class EventRepository:
 
     def _build_event_row(
         self, event: dict[str, Any], wallet_record_id: str | None
-    ) -> tuple:
+    ) -> tuple[str | None, str, str, str | None, str, str, str, str | None]:
         """Build the row tuple shared by :meth:`mark_processed` and :meth:`mark_processed_force`."""
         eid = dedup_event_id(event)
         event_type = extract_event_type(event)
@@ -175,11 +175,14 @@ class EventRepository:
         *,
         conflict: Literal["IGNORE", "REPLACE"],
     ) -> None:
-        sql = (
-            self._SQL_INSERT_IGNORE
-            if conflict == "IGNORE"
-            else self._SQL_INSERT_REPLACE
-        )
+        if conflict == "IGNORE":
+            sql = self._SQL_INSERT_IGNORE
+        elif conflict == "REPLACE":
+            sql = self._SQL_INSERT_REPLACE
+        else:
+            raise ValueError(
+                f"Unsupported conflict mode for processed_events insert: {conflict!r}"
+            )
         self._conn.execute(sql, self._build_event_row(event, wallet_record_id))
 
     def mark_processed(
