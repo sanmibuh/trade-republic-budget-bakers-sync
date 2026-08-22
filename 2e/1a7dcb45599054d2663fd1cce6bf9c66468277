@@ -1,0 +1,18 @@
+README.md
+  h_97a91c9e567f87 184
+deploy/local/instances.yml.template
+  h_97a91c9e567f87 19
+tests/test_bot.py
+  h_97a91c9e567f87 1454-1455
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "2e1a7dcb45599054d2663fd1cce6bf9c66468277",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
