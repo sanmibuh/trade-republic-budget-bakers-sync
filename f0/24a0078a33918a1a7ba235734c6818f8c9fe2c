@@ -1,0 +1,21 @@
+tests/test_config.py
+  s_44fced12a71a5f::t_cc29f668a381f0 1843-1856
+tests/test_main_category_integration.py
+  s_44fced12a71a5f::t_685776dc46f962 10,178-179,183-184,188-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "f024a0078a33918a1a7ba235734c6818f8c9fe2c",
+  "prompts": {},
+  "sessions": {
+    "s_44fced12a71a5f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd6b3b3a2ffeaJADA27qv9p4qZ",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
