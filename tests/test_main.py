@@ -7,6 +7,23 @@ import pytest
 from app.persistence import EventRepository
 
 # ---------------------------------------------------------------------------
+# Module-level DB initialisation
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _init_test_dbs(tmp_path):
+    """Pre-initialise DB paths used by tests in this module.
+
+    Tests call ``main.run()`` / ``main.run_resync()`` directly (bypassing the
+    CLI entry point), so ``init_db`` must be called explicitly here.
+    """
+    from app.persistence import init_db
+
+    init_db(tmp_path / "sync.db")
+
+
+# ---------------------------------------------------------------------------
 # run() — zero-amount events are committed even when no records are posted
 # ---------------------------------------------------------------------------
 
@@ -321,6 +338,7 @@ def test_prepare_creates_data_dir_and_returns_notifier(tmp_path):
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path / "data"
+    cfg.shared_db_path = tmp_path / "sync.db"
     cfg.telegram_bot_token = "tok"
     cfg.telegram_chat_id = "chat"
     cfg.owner_name = "David"

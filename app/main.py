@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from app.config import Config
 from app.notifier import Notifier
-from app.persistence import EventRepository, migrate_legacy_databases
+from app.persistence import EventRepository
 from app.sync_runner import (  # noqa: F401 — re-exported for backward compatibility
     _SYNC_DB,
     AuthenticationError,
@@ -28,6 +28,8 @@ def _prepare(cfg: Config) -> Notifier:
     """Shared bootstrap for the sync entry points.
 
     Ensures the data dir exists and returns a ready-to-use ``Notifier``.
+    Does not initialise the database — callers are responsible for calling
+    :func:`~app.persistence.init_db` before opening any repository.
 
     SSL is configured once at process startup by each CLI entry point or by
     ``TelegramBot.__init__()`` — not here — so repeated in-process calls from
@@ -49,7 +51,6 @@ def _prepare(cfg: Config) -> Notifier:
 def run(cfg: Config) -> int:
     notifier = _prepare(cfg)
     log.info("Starting sync for owner: %s", cfg.owner_name)
-    migrate_legacy_databases(cfg.shared_db_path)
 
     since = datetime.now(UTC) - timedelta(days=cfg.lookback_days)
 
@@ -116,7 +117,6 @@ def run_resync(date_str: str, cfg: Config) -> int:
 
     notifier = _prepare(cfg)
     log.info("Starting force resync for date=%s owner=%s", date_str, cfg.owner_name)
-    migrate_legacy_databases(cfg.shared_db_path)
 
     try:
         with EventRepository(cfg.shared_db_path, instance=cfg.instance) as repo:

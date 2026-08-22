@@ -10,6 +10,25 @@ from app.persistence import EventRepository
 from app.sync_runner import SyncRunner, _Batch
 
 # ---------------------------------------------------------------------------
+# Module-level DB initialisation
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _init_test_dbs(tmp_path):
+    """Pre-initialise all DB paths used by tests in this module.
+
+    Tests open ``EventRepository`` directly against these paths without going
+    through the CLI entry point, so ``init_db`` must be called explicitly here
+    to create the schema before the first repository is opened.
+    """
+    from app.persistence import init_db
+
+    for name in ("test.db", "sync.db", "db"):
+        init_db(tmp_path / name)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

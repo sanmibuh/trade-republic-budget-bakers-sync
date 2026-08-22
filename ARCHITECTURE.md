@@ -141,8 +141,8 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `wallet_record_id` stores the Wallet API record ID returned by `post_records` on success. For events that produce
   multiple records (e.g. investment with cash + portfolio split), IDs are stored comma-separated. NULL for
   zero-amount excluded events. Enables insert-vs-update decisions when reprocessing a date range.
-- Schema migrations are applied automatically on each `EventRepository` open via `PRAGMA table_info` +
-  `ALTER TABLE` — safe to run repeatedly, no migration state needed.
+- Schema is initialised at process startup by `init_db(shared_db_path)`, which executes the
+  idempotent `app/schema.sql`. `EventRepository.__init__` only opens the connection.
 - `EventRepository.mark_processed_force` — `INSERT OR REPLACE` upsert variant; used by the resync path to
   update `wallet_record_id` for already-processed events.
 - Old records without `details` are not retroactively updated (correct by design).
@@ -191,10 +191,11 @@ CREATE TABLE sync_runs (
 
 **Instance scoping**: All `processed_events` queries in `EventRepository` are automatically scoped by the `instance` parameter passed at construction time. Two different instances can share the same `event_id` without conflict (composite primary key).
 
-**Migrations**: applied automatically on `EventRepository` open:
-- New columns are added via `ALTER TABLE` if missing (detected with `PRAGMA table_info`).
-- New tables are created via `CREATE TABLE IF NOT EXISTS`.
-- `migrate_legacy_databases(shared_db_path)` — one-shot migration run on process startup: when the shared `sync.db` does not yet exist but old per-instance `sync/{name}/sync.db` files do, all rows are copied into the shared DB (stamping the `instance` column from the directory name). Old files are left untouched.
+**Schema initialisation**: `init_db(db_path)` in `app/persistence.py` executes `app/schema.sql`
+(idempotent DDL — all statements use `CREATE … IF NOT EXISTS`).  It is called once per process
+startup at the CLI entry point (`app/__main__.py`) at the start of each command that uses the
+database (`sync`, `resync`), and during `TelegramBot.__init__` for the bot path.  This covers all
+execution paths before any `EventRepository` is opened.
 
 ### Labels
 - Per-instance `label_ids` are read from the YAML (`labels:` map under each instance) by `_parse_instance_labels()` →
@@ -475,9 +476,9 @@ image publish workflows.
 - `backups/monthly/` — monthly JSON snapshots (permanent)
 - `backups/yearly/` — yearly JSON snapshots (permanent)
 
-**Legacy layout** (pre-issue #173): each instance had its own `sync/{name}/sync.db`.  On first startup after
-upgrading, `migrate_legacy_databases()` automatically copies rows into the shared `sync.db` and leaves the old
-files in place (read-only, safe to delete manually).
+**Legacy layout** (pre-issue #173): each instance had its own `sync/{name}/sync.db`.  All production
+deployments were migrated to the shared `sync.db` as part of #173.  The old per-instance files can be
+deleted manually if still present.
 
 ---
 
