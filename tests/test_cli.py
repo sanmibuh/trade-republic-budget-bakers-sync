@@ -1304,6 +1304,7 @@ def test_backup_resolve_cfg_does_not_fall_back_to_env(tmp_path, monkeypatch):
         patch(
             "app.config.InstancesConfig.load",
             side_effect=FileNotFoundError("no yaml"),
-        ),pytest.raises(click.UsageError)
+        ),
+        pytest.raises(click.UsageError),
     ):
         _resolve_backup_cfg()
