@@ -1,0 +1,19 @@
+tests/test_main.py
+  s_978145e76d3844::t_274dd1803cc74f 9-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "9c5c6259911b8229108dbaf4547ef6e0caee4e29",
+  "prompts": {},
+  "sessions": {
+    "s_978145e76d3844": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd4ee7f33ffeMEwWX7mWc2CQAz",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
