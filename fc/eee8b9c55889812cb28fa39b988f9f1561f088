@@ -1,0 +1,19 @@
+app/persistence.py
+  s_a233d8ff0d2f2a::t_4b76c5d8332a6e 133-136,146-155,157-159,161,164,167-171,182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "fceee8b9c55889812cb28fa39b988f9f1561f088",
+  "prompts": {},
+  "sessions": {
+    "s_a233d8ff0d2f2a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd4c56f55ffeb5G50cPHlmbCTq",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
