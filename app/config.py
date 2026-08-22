@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -7,10 +8,11 @@ from pathlib import Path
 # Default data directory.
 _DEFAULT_DATA_DIR = "/app/data"
 
-# Hardcoded path to the instances YAML config file (mounted via Docker volume).
-INSTANCES_CONFIG_PATH = Path("/app/config/instances.yml")
+# Path to the instances YAML config file (mounted via Docker volume).
+# Can be overridden by the INSTANCES_CONFIG env var for local development.
+INSTANCES_CONFIG_PATH = Path(os.getenv("INSTANCES_CONFIG", "/app/config/instances.yml"))
 
-# Event types that support optional label assignment via LABEL_<EVENT_TYPE> env vars.
+# Event types that support optional label assignment (configured in instances.yml).
 LABELABLE_EVENT_TYPES: tuple[str, ...] = (
     "BANK_TRANSACTION_INCOMING",
     "BANK_TRANSACTION_OUTGOING",

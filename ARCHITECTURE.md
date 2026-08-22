@@ -16,13 +16,13 @@ and deployment context.
 TRClient.fetch_timeline_events()
   └── pytr Timeline (WebSocket) → event_callback collects events + details
         ↓
-filter_by_lookback()         # drops events older than LOOKBACK_DAYS
+filter_by_lookback()         # drops events older than lookback_days (from instances.yml)
         ↓
 build_records_for_event()    # TR event dict → list[BudgetBakers record dict]
    └── _build_note()          # single source of truth for the note/description
    └── _HANDLERS[event_type]  # per-type handler builds record structure (accounts, payment type, counter-party)
-   └── label applied generically post-handler if LABEL_<EVENT_TYPE> is set
-   └── category_id applied generically post-handler when CATEGORY_STRATEGY=history
+   └── label applied generically post-handler if label is configured in instances.yml
+   └── category_id applied generically post-handler when category_strategy=history (instances.yml)
          ↓
 HistoryCategorizer.get_category_id(note)   # majority-vote lookup from recent Wallet records
    └── CategoryCache.category_ids()         # 24h TTL wrapper around WalletClient.get_categories()
@@ -190,7 +190,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 ### CLI entry point (`app/__main__.py`)
 - Single entry point via `python -m app` using **click** with subcommands:
   - `python -m app sync` — runs `main.run()`
-  - `python -m app sync --instance <name>` — resolves config from `INSTANCES_CONFIG_PATH` YAML and runs sync for that instance
+  - `python -m app sync --instance <name>` — resolves config from `instances.yml` and runs sync for that instance
   - `python -m app backup <mode> [param]` — dispatches to `backup.run_auto/run_monthly/run_yearly`
   - `python -m app bot` — starts the Telegram bot
    - `python -m app login` — runs `main.run_login()`, an on-demand 2FA session renewal
@@ -231,7 +231,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 ### Telegram bot
 - `app/bot.py`: long-polling bot and command handlers; wires `app/bot_keyboards.py`; executes all sync/login/resync/backup operations via direct in-process Python calls (no Docker SDK, no `exec_run`).
 - `app/bot_keyboards.py`: stateless inline keyboard builder functions (backup type/period pickers, instance pickers, resync date picker); no dependency on bot state.
-- `BotConfig` reads `telegram_bot_token` and `telegram_chat_id` from `instances.yml`. `INSTANCES_CONFIG_PATH` (hardcoded) is the path to the instances YAML file; backup config is derived from `BackupConfig.from_instances_yaml()`.
+- `BotConfig` reads `telegram_bot_token` and `telegram_chat_id` from `instances.yml`. `INSTANCES_CONFIG_PATH` is the path to the instances YAML file; backup config is derived from `BackupConfig.from_instances_yaml()`.
 - Each sync instance is represented as `InstanceConfig(name, config: Config)` — the bot calls `main.run()`, `main.run_login()`, and `main.run_resync()` directly with the instance's `Config`.
 - Backup command (`/backup [monthly|yearly] [period]`) uses a two-step inline keyboard: first choose type
   (Monthly / Yearly), then choose the period. Direct args (`/backup monthly 2026-07`) skip the keyboards.
@@ -247,7 +247,8 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 ### Config
 - All configuration is read exclusively from `instances.yml` (mounted at `INSTANCES_CONFIG_PATH`).
 - No environment variables are read for credentials or operational config — only `TZ` (timezone for cron) is used at the OS level.
-- `INSTANCES_CONFIG_PATH` — module-level constant in `config.py`; hardcoded to `/app/config/instances.yml`.
+- `INSTANCES_CONFIG_PATH` — module-level constant in `config.py`; defaults to `/app/config/instances.yml`. Can be overridden via the `INSTANCES_CONFIG` environment variable for local development (without Docker).
+- In Docker, the file is always at `/app/config/instances.yml`; the env var is not set.
 
 ### Backup config derivation
 
@@ -258,14 +259,14 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 2. **No instances in YAML** → `backup_cfg` is `None` and `/backup` commands are disabled.
 
 The `backup` CLI command (`python -m app backup`) loads config via `_resolve_backup_cfg()`:
-- Loads `InstancesConfig` from the hardcoded `INSTANCES_CONFIG_PATH` and derives `BackupConfig` from it.
+- Loads `InstancesConfig` from `INSTANCES_CONFIG_PATH` and derives `BackupConfig` from it.
 - Any YAML validation or I/O error surfaces as a `click.UsageError`.
 
 ### Multi-instance YAML config (#145, #162)
 
 `InstancesConfig` (`app/config.py`) supports loading N sync instances from a single YAML file,
 enabling a single-container deployment without per-instance Docker services. The bot (`app/bot.py`)
-reads this file from `INSTANCES_CONFIG_PATH` (hardcoded to `/app/config/instances.yml`) and dispatches
+reads this file from `INSTANCES_CONFIG_PATH` (defaults to `/app/config/instances.yml`) and dispatches
 all operations (sync, login, resync, backup) as direct in-process Python calls.
 
 **File format** (`instances.yml`):
@@ -322,7 +323,7 @@ pointing to `instances.yml.example`.
 - `InstancesConfig.backup_schedule` — the backup cron expression (or `None`).
 - `run(cfg)` and `run_login(cfg)` require an injected `Config`; there is no fallback to env-var based construction.
 - CLI: `python -m app sync --instance david` and `python -m app login --instance david` resolve
-  config from `INSTANCES_CONFIG_PATH` (`/app/config/instances.yml`).
+  config from `INSTANCES_CONFIG_PATH` (`/app/config/instances.yml` by default, overridable via the `INSTANCES_CONFIG` env var).
 - Validation on load: missing required fields, duplicate names, and invalid `category_strategy`
   all raise `ValueError` with a descriptive message.
 
@@ -404,7 +405,7 @@ If the Wallet API rejects a record due to an invalid `categoryId` (e.g. a catego
 the cache loaded), `SyncRunner._retry_category_failures` invalidates the category cache and retries
 the affected records once without a `categoryId`.
 
-`CATEGORY_STRATEGY` is validated in `config.py`; unknown values raise `ValueError` at startup.
+`category_strategy` is validated in `config.py`; unknown values raise `ValueError` at startup.
 
 ---
 

@@ -14,30 +14,23 @@ Also includes a **wallet backup** feature that saves full JSON snapshots of your
 
 ```sh
 cp deploy/example/docker-compose.yml   docker-compose.yml
-cp deploy/example/wallet.env.example   wallet.env
-cp deploy/example/telegram.env.example telegram.env
-cp deploy/example/sync-1.env.example   sync-1.env
+cp deploy/example/instances.yml.example instances.yml
 ```
 
-Fill in `wallet.env` (Wallet API key), `telegram.env` (Telegram credentials) and `sync-1.env` (Trade Republic phone + PIN). Update `WALLET_CASH_ACCOUNT_ID` and `WALLET_PORTFOLIO_ACCOUNT_ID` in `docker-compose.yml`.
+Fill in `instances.yml` with your Trade Republic credentials, Wallet API key, and account IDs.
+See `deploy/example/instances.yml.example` for the full reference with all available options.
 
 ### 2. First-time login (interactive 2FA)
 
 `pytr` requires an interactive login the first time (or after session expiry):
 
 ```sh
-./tr-sync.sh bootstrap sync-1
+./tr-sync.sh bootstrap <instance-name>
 ```
 
-Approve the push notification in your Trade Republic app (or enter the authenticator code). The session is saved to `./1/` and reused in all future runs.
+Approve the push notification in your Trade Republic app (or enter the authenticator code). The session is saved to the data volume and reused in all future runs.
 
 ### 3. Start the daemon
-
-```sh
-./tr-sync.sh up sync-1
-```
-
-Or start all services at once:
 
 ```sh
 ./tr-sync.sh up
@@ -45,41 +38,83 @@ Or start all services at once:
 
 ---
 
-## Environment variables
+## Configuration
 
-### Required (sync services)
+All configuration lives in a single `instances.yml` file, mounted into the container at `/app/config/instances.yml`.
 
-| Variable | Description |
-|---|---|
-| `PHONE_NUMBER` | Trade Republic account phone number (e.g. `+49123456789`) |
-| `PIN` | Trade Republic account PIN |
-| `WALLET_API_KEY` | BudgetBakers Wallet API key |
-| `WALLET_CASH_ACCOUNT_ID` | BudgetBakers cash account UUID |
-| `WALLET_PORTFOLIO_ACCOUNT_ID` | BudgetBakers portfolio account UUID |
+```yaml
+# Telegram bot credentials (optional — enables notifications and remote control)
+telegram_bot_token: ""
+telegram_chat_id: ""
 
-### Optional
+# Wallet backup config (optional)
+backup:
+  wallet_api_key: ""
 
-| Variable | Default | Description |
+# Cron expression for automatic backups (optional)
+backup_schedule: "0 8 1 * *"
+
+# Override default data directory (optional, default: /app/data)
+# data_dir: /app/data
+
+sync:
+  instances:
+    - name: david
+      phone: "+49123456789"
+      pin: "1234"
+      wallet_api_key: "<Wallet API key>"
+      wallet_cash_account_id: "<UUID>"
+      wallet_portfolio_account_id: "<UUID>"
+      # Optional per-instance overrides:
+      # owner_name: "David"
+      # lookback_days: 7
+      # dedup_ttl_days: 60
+      # schedule: "*/30 * * * *"
+      # category_strategy: history   # auto-categorize from past records
+      # labels:
+      #   BANK_TRANSACTION_INCOMING: "<label-uuid>"
+      #   CARD_TRANSACTION: "<label-uuid>"
+      # allow_insecure_ssl: false
+```
+
+### Per-instance options
+
+| Field | Default | Description |
 |---|---|---|
-| `OWNER_NAME` | `Backup` | Display name used in Telegram notifications |
-| `MODE` | — | `sync`, `backup`, or `bot` — required by entrypoint |
-| `LOOKBACK_DAYS` | `7` | How many days back to fetch and sync |
-| `TZ` | `UTC` | Container timezone — affects cron schedule interpretation (e.g. `Europe/Berlin`) |
-| `SYNC_SCHEDULE` | — | 5-field cron expression for the sync job. If unset, runs once and exits. |
-| `BACKUP_SCHEDULE` | — | 5-field cron expression for the daily backup job (runs `auto` mode). |
-| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for notifications |
-| `TELEGRAM_CHAT_ID` | — | Telegram chat ID for notifications |
-| `LABEL_<EVENT_TYPE>` | — | BudgetBakers label UUID to attach to records of that event type (see below) |
-| `CATEGORY_STRATEGY` | `none` | Auto-categorize new records before sync. Options: `none` (disabled), `history` (majority-vote from past records with the same note) |
+| `name` | — | Unique instance identifier used in CLI commands and bot buttons |
+| `phone` | — | Trade Republic account phone number |
+| `pin` | — | Trade Republic account PIN |
+| `wallet_api_key` | — | BudgetBakers Wallet API key |
+| `wallet_cash_account_id` | — | BudgetBakers cash account UUID |
+| `wallet_portfolio_account_id` | — | BudgetBakers portfolio account UUID |
+| `owner_name` | `name` (capitalized) | Display name used in Telegram notifications |
+| `lookback_days` | `7` | How many days back to fetch and sync |
+| `dedup_ttl_days` | `60` | Days to keep deduplication records in SQLite |
+| `schedule` | — | 5-field cron expression. If unset, the container runs once and exits. |
+| `category_strategy` | `none` | `none` (disabled) or `history` (majority-vote from past records) |
+| `labels` | — | Map of event type → BudgetBakers label UUID (see below) |
+| `allow_insecure_ssl` | `false` | Skip TLS verification (for corporate proxies) |
+
+### Global options
+
+| Field | Default | Description |
+|---|---|---|
+| `telegram_bot_token` | — | Telegram bot token for notifications and remote control |
+| `telegram_chat_id` | — | Telegram chat ID — only this chat can interact with the bot |
+| `backup.wallet_api_key` | — | Wallet API key used by the backup service |
+| `backup_schedule` | — | Cron expression for the backup job |
+| `data_dir` | `/app/data` | Override the data directory inside the container |
+| `TZ` *(env var)* | `UTC` | Container timezone — affects cron schedule interpretation |
 
 ### Labels per event type
 
-Set a `LABEL_` variable for any event type you want to tag automatically:
+Assign a BudgetBakers label UUID to records of a specific event type:
 
 ```yaml
-LABEL_BANK_TRANSACTION_INCOMING: "<uuid>"
-LABEL_BANK_TRANSACTION_OUTGOING: "<uuid>"
-LABEL_CARD_TRANSACTION: "<uuid>"
+labels:
+  BANK_TRANSACTION_INCOMING: "<uuid>"
+  BANK_TRANSACTION_OUTGOING: "<uuid>"
+  CARD_TRANSACTION: "<uuid>"
 ```
 
 Supported event types:
@@ -92,16 +127,15 @@ Supported event types:
 
 ## Services architecture
 
-The recommended setup uses four separate services, each with a single responsibility:
+A typical setup uses a single Docker Compose project with three services:
 
 ```
-sync-1        — syncs account 1 (has TR credentials, no backup schedule)
-sync-2        — syncs account 2 (has TR credentials, no backup schedule)
-backup        — runs daily wallet backups (no TR credentials)
-telegram-bot  — remote control via Telegram (no TR credentials)
+sync         — runs all sync instances defined in instances.yml (cron daemon or one-shot)
+backup       — runs scheduled Wallet backups
+telegram-bot — remote control via Telegram (no TR credentials needed)
 ```
 
-See `deploy/example/docker-compose.yml` for a ready-to-use template.
+All services share the same image and the same `instances.yml`. See `deploy/example/docker-compose.yml` for a ready-to-use template.
 
 ---
 
@@ -140,7 +174,7 @@ The container also exposes a unified CLI:
 
 ```
 python -m app --help
-python -m app sync
+python -m app sync --instance david
 python -m app backup auto
 python -m app backup monthly [YYYY-MM]
 python -m app backup yearly  [YYYY]
@@ -167,7 +201,7 @@ An optional `telegram-bot` service lets you trigger sync and backup operations o
 | `/status` | Show all instances and whether backup is available |
 | `/help` | Show available commands |
 
-Backup commands are only available when `BACKUP_SERVICE` is configured. The bot runs all backup operations on the dedicated backup container — not per sync instance.
+Backup commands are only available when `backup.wallet_api_key` is set in `instances.yml`.
 
 ### Setup
 
@@ -180,23 +214,15 @@ services:
   telegram-bot:
     image: ghcr.io/sanmibuh/tr-wallet-sync:<tag>
     entrypoint: ["python", "-m", "app", "bot"]
-    env_file:
-      - telegram.env
-    environment:
-      # Comma-separated list of sync instance names (without "sync-" prefix)
-      INSTANCES: "1,2"
-      # Must match the Docker Compose project name (name: field above)
-      CONTAINER_PREFIX: "tr-sync"
-      # Name of the backup service (leave empty to disable backup commands)
-      BACKUP_SERVICE: "backup"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ./instances.yml:/app/config/instances.yml:ro
+      - tr-data:/app/data
     restart: unless-stopped
 ```
 
-> **Security:** The bot only responds to messages from `TELEGRAM_CHAT_ID`. All other chats are silently ignored.
+> **Security:** The bot only responds to messages from `telegram_chat_id`. All other chats are silently ignored.
 
-> **How it works:** The bot uses `docker exec` to run commands inside the target containers. The container's own Notifier then sends the result notification to Telegram, just like a scheduled run would.
+> **How it works:** The bot dispatches all operations (sync, login, resync, backup) as direct in-process Python calls — no Docker socket required.
 
 ---
 
@@ -206,8 +232,8 @@ The `tr-sync.sh` script is the main management tool for NAS deployments where `m
 
 ```sh
 ./tr-sync.sh pull      [service]           # pull image(s) — omit for all
-./tr-sync.sh bootstrap <sync-service>      # interactive 2FA login
-./tr-sync.sh sync      <sync-service>      # one-shot sync
+./tr-sync.sh bootstrap <instance-name>     # interactive 2FA login
+./tr-sync.sh sync      <instance-name>     # one-shot sync
 ./tr-sync.sh backup    <mode> [param]      # one-shot backup
 ./tr-sync.sh up        [service]           # start daemon(s)
 ./tr-sync.sh down      [service]           # stop daemon(s)
@@ -222,12 +248,15 @@ The `tr-sync.sh` script is the main management tool for NAS deployments where `m
 For running tests and one-shot commands locally (no Docker):
 
 ```sh
-make test        # run test suite with coverage
-make lint        # run ruff linter
-make run-sync    # one-shot sync (env vars must be set)
-make run-backup  # one-shot backup auto
-make run-bot     # start the Telegram bot
-make clean       # remove __pycache__ and .pytest_cache
+cp deploy/local/instances.yml.template deploy/local/instances.yml
+# fill in deploy/local/instances.yml
+
+make test                        # run test suite with coverage
+make lint                        # run ruff linter
+make run-sync INSTANCE=user1     # one-shot sync
+make run-backup                  # one-shot backup auto
+make run-bot                     # start the Telegram bot
+make clean                       # remove __pycache__ and .pytest_cache
 ```
 
 ---

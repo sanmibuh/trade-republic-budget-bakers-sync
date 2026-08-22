@@ -11,11 +11,11 @@ Use `make` to run sync, backup, or bot commands locally against real credentials
 ### Setup
 
 ```sh
-cp deploy/local/local.env.template deploy/local/local.env
-# fill in WALLET_API_KEY and any other vars you need
+cp deploy/local/instances.yml.template deploy/local/instances.yml
+# fill in credentials and settings
 ```
 
-`deploy/local/local.env` is git-ignored. `deploy/local/data/` (written by local runs) is also ignored.
+`deploy/local/instances.yml` is git-ignored. `deploy/local/data/` (written by local runs) is also ignored.
 
 ### Run commands
 
@@ -23,7 +23,7 @@ cp deploy/local/local.env.template deploy/local/local.env
 make run-backup                        # backup auto
 make run-backup-yearly  PARAM=2025     # backup specific year
 make run-backup-monthly PARAM=2026-07  # backup specific month
-make run-sync                          # one-shot sync
+make run-sync INSTANCE=user1           # one-shot sync
 make run-bot                           # start Telegram bot
 ```
 
@@ -37,8 +37,8 @@ make run-bot                           # start Telegram bot
 deploy/
   DEPLOY.md           # this guide
   local/              # local dev environment
-    local.env.template  # template — copy to local.env and fill in values
-    local.env           # real credentials (never committed)
+    instances.yml.template  # template — copy to instances.yml and fill in values
+    instances.yml           # real credentials (never committed)
     data/               # written by local runs (never committed)
   example/            # example config files (no secrets)
     docker-compose.yml
@@ -192,8 +192,8 @@ Defined in `instances.yml` — **not** in `docker-compose.yml` environment varia
 | `sync.schedule`           | `0 8,14,21 * * *`   | Global default sync schedule (overridable per instance) |
 | `backup_schedule`         | `0 3 * * *`         | Automatic daily backup (omit to disable)         |
 
-`SYNC_SCHEDULE` and `BACKUP_SCHEDULE` environment variables are **ignored** in
-multi-instance mode; set schedules in `instances.yml` instead.
+`SYNC_SCHEDULE` and `BACKUP_SCHEDULE` environment variables are no longer supported;
+set schedules in `instances.yml` instead.
 
 ---
 

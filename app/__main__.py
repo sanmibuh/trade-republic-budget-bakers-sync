@@ -345,9 +345,9 @@ def bot() -> None:
     them directly as in-process Python calls (no Docker SDK required).
 
     \b
-    Required environment variables:
-      TELEGRAM_BOT_TOKEN    Bot token from BotFather.
-      TELEGRAM_CHAT_ID      Authorized chat ID — only this chat can issue commands.
+    Required fields in instances.yml:
+      telegram_bot_token    Bot token from BotFather.
+      telegram_chat_id      Authorized chat ID — only this chat can issue commands.
 
     \b
     Supported Telegram commands:

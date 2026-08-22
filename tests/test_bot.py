@@ -89,10 +89,6 @@ def _bot(
 # BotConfig.from_env
 # ---------------------------------------------------------------------------
 
-_VALID_ENV = {
-    "INSTANCES_CONFIG": "/fake/instances.yml",
-}
-
 _YAML_CONTENT = """
 telegram_bot_token: "mytoken"
 telegram_chat_id: "123"
@@ -173,9 +169,7 @@ def _mock_instances_load(yaml_text: str = _YAML_CONTENT):
     return patch("app.bot.InstancesConfig.load", side_effect=_load)
 
 
-def test_botconfig_from_env_valid(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
+def test_botconfig_from_env_valid():
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.bot_token == "mytoken"
@@ -184,18 +178,14 @@ def test_botconfig_from_env_valid(monkeypatch):
     assert "user2" in cfg.instances
 
 
-def test_botconfig_from_env_instances_have_correct_name(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
+def test_botconfig_from_env_instances_have_correct_name():
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.instances["user1"].name == "user1"
     assert cfg.instances["user2"].name == "user2"
 
 
-def test_botconfig_from_env_instances_have_config_objects(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
+def test_botconfig_from_env_instances_have_config_objects():
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert isinstance(cfg.instances["user1"].config, Config)
@@ -249,10 +239,8 @@ def test_botconfig_from_env_numeric_chat_id_in_yaml(monkeypatch):
     assert cfg.chat_id == "123"
 
 
-def test_botconfig_from_env_invalid_allow_insecure_ssl_raises(monkeypatch):
+def test_botconfig_from_env_invalid_allow_insecure_ssl_raises():
     """A bad allow_insecure_ssl value in the YAML must propagate as ValueError."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
     bad_yaml = _YAML_CONTENT.replace(
         'telegram_bot_token: "mytoken"',
         'allow_insecure_ssl: "not-a-bool"\ntelegram_bot_token: "mytoken"',
@@ -264,48 +252,38 @@ def test_botconfig_from_env_invalid_allow_insecure_ssl_raises(monkeypatch):
         BotConfig.from_env()
 
 
-def test_botconfig_from_env_uses_hardcoded_instances_config_path(monkeypatch):
+def test_botconfig_from_env_uses_instances_config_path():
     from app.config import INSTANCES_CONFIG_PATH
 
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
     with _mock_instances_load() as mock_load:
         BotConfig.from_env()
     mock_load.assert_called_once_with(INSTANCES_CONFIG_PATH)
 
 
-def test_botconfig_from_env_allow_insecure_ssl_defaults_false(monkeypatch):
+def test_botconfig_from_env_allow_insecure_ssl_defaults_false():
     """BotConfig.allow_insecure_ssl must default to False when YAML has no setting."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.allow_insecure_ssl is False
 
 
-def test_botconfig_from_env_allow_insecure_ssl_true_from_yaml(monkeypatch):
+def test_botconfig_from_env_allow_insecure_ssl_true_from_yaml():
     """BotConfig.allow_insecure_ssl must be True when the YAML sets allow_insecure_ssl: true."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
     yaml_with_ssl = _YAML_CONTENT.rstrip() + "\nallow_insecure_ssl: true\n"
     with _mock_instances_load(yaml_with_ssl):
         cfg = BotConfig.from_env()
     assert cfg.allow_insecure_ssl is True
 
 
-def test_botconfig_log_dir_default_is_data_dir(monkeypatch):
+def test_botconfig_log_dir_default_is_data_dir():
     """BotConfig.log_dir default must be /app/data (not /app/data/logs)."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.log_dir == Path("/app/data")
 
 
-def test_botconfig_from_env_log_dir_uses_instances_data_dir(monkeypatch):
+def test_botconfig_from_env_log_dir_uses_instances_data_dir():
     """BotConfig.log_dir must equal instances_yaml.data_dir (not data_dir / 'logs')."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
     yaml_with_data_dir = _YAML_CONTENT.rstrip() + '\ndata_dir: "/custom/data"\n'
     with _mock_instances_load(yaml_with_data_dir):
         cfg = BotConfig.from_env()

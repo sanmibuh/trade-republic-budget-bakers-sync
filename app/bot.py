@@ -122,7 +122,7 @@ class BotConfig:
         if not chat_id:
             raise ValueError(
                 "Missing required credential TELEGRAM_CHAT_ID "
-                "(set in the instances config file or as an environment variable)"
+                "(set telegram_chat_id in the instances config file)"
             )
 
         instances: dict[str, InstanceConfig] = {}
