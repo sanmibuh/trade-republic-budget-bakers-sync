@@ -1,6 +1,6 @@
 {
   "percent": "99",
-  "covered_lines": 2286,
-  "num_statements": 2309,
-  "tests_passed": 903
+  "covered_lines": 2176,
+  "num_statements": 2198,
+  "tests_passed": 840
 }
