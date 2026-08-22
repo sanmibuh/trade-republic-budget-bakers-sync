@@ -61,7 +61,6 @@ from app.config import (
 from app.http_client import build_session as _build_session
 from app.main import (
     run as _main_run,
-    run_login as _main_run_login,
     run_resync as _main_run_resync,
 )
 from app.notifier import Notifier, _escape_markdown as _esc
@@ -253,10 +252,7 @@ class TelegramBot:
         self._cfg = cfg
         self._api = _TELEGRAM_API.format(token=cfg.bot_token)
         self._offset = 0
-        # Instances that have an active login flow waiting for a 2FA code.
-        # Maps instance key (lower-case name) → InstanceConfig.
-        self._pending_login: dict[str, InstanceConfig] = {}
-        # Configure SSL once at startup — all in-process sync/login/resync/backup
+        # Configure SSL once at startup — all in-process sync/resync/backup
         # calls share this policy without racing on a per-run configure() call.
         http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
         # Session for all Telegram API calls — routes through the SSL circuit-breaker
@@ -297,10 +293,6 @@ class TelegramBot:
             {
                 "command": "resync",
                 "description": "Force re-sync of a specific day, bypassing dedup",
-            },
-            {
-                "command": "login",
-                "description": "Renew Trade Republic 2FA session (choose instance)",
             },
             {"command": "logs", "description": "Show today's shared sync log"},
             {
@@ -387,7 +379,6 @@ class TelegramBot:
             "status": self._cmd_status,
             "sync": self._cmd_sync,
             "resync": self._cmd_resync,
-            "login": self._cmd_login,
             "logs": self._cmd_logs,
             "code": self._cmd_code,
             "backup": self._cmd_backup,
@@ -488,7 +479,7 @@ class TelegramBot:
         self._launch_resync(inst, date_str)
 
     def _on_cb_instance_cmd(self, cmd: str, parts: list[str]) -> None:
-        """Handle instance-routed callbacks: sync, login.
+        """Handle instance-routed callbacks: sync.
 
         Also accepts legacy ``logs:<instance>`` callbacks (from chat history
         buttons created before the shared-log migration) and routes them to
@@ -512,8 +503,6 @@ class TelegramBot:
 
         if cmd == "sync":
             self._launch_sync(inst)
-        elif cmd == "login":
-            self._launch_login(inst)
         else:
             log.warning("Unknown callback cmd: %r", cmd)
 
@@ -572,11 +561,6 @@ class TelegramBot:
         self._send_message(
             f"🔁 *Resync {_esc(date_str)}* — Choose instance:",
             keyboard=self._instance_buttons_for_resync(date_str),
-        )
-
-    def _cmd_login(self, _args: list[str]) -> None:
-        self._pick_instance(
-            "login", "🔐 *Login* — Choose instance to re\\-authenticate:"
         )
 
     def _cmd_logs(self, _args: list[str]) -> None:
@@ -723,53 +707,13 @@ class TelegramBot:
                 f"❌ Resync error for *{_esc(inst.name)}* `{_esc(date_str)}`: {_esc(str(exc))}"
             )
 
-    def _launch_login(self, inst: InstanceConfig) -> None:
-        self._send_message(f"🔐 Re\\-authenticating *{_esc(inst.name)}*\\.\\.\\.")
-        self._pending_login[inst.name.lower()] = inst
-        threading.Thread(
-            target=self._run_login_for_instance,
-            args=(inst,),
-            daemon=True,
-        ).start()
-
-    def _run_login_for_instance(self, inst: InstanceConfig) -> None:
-        """Run login for *inst* in-process. Called from a daemon thread."""
-        try:
-            result = _main_run_login(cfg=inst.config)
-        except Exception as exc:
-            log.exception("Login failed for instance %s", inst.name)
-            self._on_login_error(
-                inst, f"❌ Login error for *{_esc(inst.name)}*: {_esc(str(exc))}"
-            )
-            return
-
-        if result == 0:
-            self._on_login_success(inst)
-        else:
-            self._on_login_error(inst, f"❌ Login failed for *{_esc(inst.name)}*\\.")
-
-    def _on_login_success(self, inst: InstanceConfig) -> None:
-        """Called when login completes successfully: notify user then auto-sync."""
-        self._pending_login.pop(inst.name.lower(), None)
-        self._send_message(f"✅ *{_esc(inst.name)}* session is ready\\.")
-        self._launch_sync(inst)
-
-    def _on_login_error(self, inst: InstanceConfig, msg: str) -> None:
-        """Called when login fails: clear pending state and forward the error message."""
-        self._pending_login.pop(inst.name.lower(), None)
-        self._send_message(msg)
-
     def _maybe_submit_pending_code(self, code: str) -> bool:
-        """Submit *code* to the single pending login instance, or prompt if ambiguous.
+        """Submit *code* to the waiting login instance.
 
-        When ``_pending_login`` is empty (login was triggered by a cron sync rather
-        than the ``/login`` Telegram command), falls back to checking each instance's
-        ``data_dir`` for the ``PENDING_FILENAME`` marker to discover which one is
-        actively waiting for a code.
+        For single-instance setups, submits directly.  For multi-instance
+        setups, probes the ``PENDING_FILENAME`` marker in each instance's
+        ``data_dir`` to discover which one is awaiting a code.
         """
-        pending = dict(self._pending_login)  # snapshot before any iteration
-        if pending:
-            return self._submit_code_from_pending(pending, code)
         return self._submit_code_no_pending(code)
 
     def _submit_code_to(self, inst: InstanceConfig, code: str) -> bool:
@@ -790,21 +734,8 @@ class TelegramBot:
             )
             return False
 
-    def _submit_code_from_pending(
-        self, pending: dict[str, InstanceConfig], code: str
-    ) -> bool:
-        """Submit *code* when ``_pending_login`` is non-empty."""
-        if len(pending) == 1:
-            return self._submit_code_to(next(iter(pending.values())), code)
-        names = ", ".join(f"*{_esc(k)}*" for k in sorted(pending))
-        self._send_message(
-            f"⚠️ Multiple logins pending: {names}\\. "
-            "Use `/code <instance> <code>` to specify which one\\."
-        )
-        return False
-
     def _submit_code_no_pending(self, code: str) -> bool:
-        """Submit *code* when ``_pending_login`` is empty.
+        """Submit *code* to the instance currently awaiting a 2FA code.
 
         For a single-instance setup submits directly.  For multi-instance setups,
         probes the ``PENDING_FILENAME`` marker in each instance's ``data_dir`` to

@@ -188,7 +188,6 @@ The built-in Telegram bot lets you trigger sync and backup operations on demand 
 | Command | Description |
 |---|---|
 | `/sync` | Force a Trade Republic sync — choose instance via inline buttons |
-| `/login` | Renew Trade Republic 2FA session — choose instance via inline buttons |
 | `/logs` | Show today's logs for an instance — choose instance via inline buttons |
 | `/code <instance> <code>` | Submit an authenticator code to a waiting login process |
 | `/backup` | Force a Wallet backup — guided by inline buttons (monthly/yearly) |
@@ -206,7 +205,7 @@ See `deploy/example/docker-compose.yml` for the complete deployment template.
 
 > **Security:** The bot only responds to messages from `telegram_chat_id`. All other chats are silently ignored.
 
-> **How it works:** The bot dispatches all operations (sync, login, resync, backup) as direct in-process Python calls — no Docker socket required.
+> **How it works:** The bot dispatches all operations (sync, resync, backup) as direct in-process Python calls — no Docker socket required. When a sync detects an expired session, the 2FA flow is handled automatically in-process.
 
 ---
 

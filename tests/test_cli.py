@@ -308,54 +308,6 @@ def test_backup_yearly_invalid_param_exits(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# login command
-# ---------------------------------------------------------------------------
-
-
-def test_login_help():
-    result = _runner().invoke(cli, ["login", "--help"])
-    assert result.exit_code == 0
-    assert "login" in result.output.lower()
-
-
-def test_login_calls_run_login(tmp_path):
-    from app.config import Config, InstancesConfig
-
-    mock_cfg = MagicMock(spec=Config)
-    mock_cfg.allow_insecure_ssl = False
-    mock_instances = MagicMock(spec=InstancesConfig)
-    mock_instances.to_config.return_value = mock_cfg
-    mock_instances.data_dir = tmp_path
-    with (
-        patch("app.main.run_login", return_value=0) as mock_run,
-        patch("app.__main__.setup_logging"),
-        patch("app.config.InstancesConfig.load", return_value=mock_instances),
-        patch("app.http_client.configure"),
-    ):
-        result = _runner().invoke(cli, ["login", "--instance", "user1"])
-    assert result.exit_code == 0
-    mock_run.assert_called_once()
-
-
-def test_login_exits_with_return_code(tmp_path):
-    from app.config import Config, InstancesConfig
-
-    mock_cfg = MagicMock(spec=Config)
-    mock_cfg.allow_insecure_ssl = False
-    mock_instances = MagicMock(spec=InstancesConfig)
-    mock_instances.to_config.return_value = mock_cfg
-    mock_instances.data_dir = tmp_path
-    with (
-        patch("app.main.run_login", return_value=1),
-        patch("app.__main__.setup_logging"),
-        patch("app.config.InstancesConfig.load", return_value=mock_instances),
-        patch("app.http_client.configure"),
-    ):
-        result = _runner().invoke(cli, ["login", "--instance", "user1"])
-    assert result.exit_code == 1
-
-
-# ---------------------------------------------------------------------------
 # submit-code command
 # ---------------------------------------------------------------------------
 
@@ -542,34 +494,6 @@ def test_sync_with_instance_flag_uses_data_dir_for_logging(tmp_path):
     mock_setup.assert_called_once_with(data_dir)
 
 
-def test_login_with_instance_flag_uses_data_dir_for_logging(tmp_path):
-    """login --instance must call setup_logging with instances_yaml.data_dir (root), not cfg.data_dir."""
-    from app.config import Config, InstancesConfig
-
-    data_dir = tmp_path / "data"
-    mock_cfg = MagicMock(spec=Config)
-    mock_cfg.data_dir = data_dir / "sync" / "user1"
-    mock_instances = MagicMock(spec=InstancesConfig)
-    mock_instances.to_config.return_value = mock_cfg
-    mock_instances.data_dir = data_dir
-
-    cfg_file = tmp_path / "instances.yml"
-    cfg_file.write_text("")
-
-    with (
-        patch("app.config.InstancesConfig.load", return_value=mock_instances),
-        patch("app.main.run_login", return_value=0),
-        patch("app.__main__.setup_logging") as mock_setup,
-        patch("app.http_client.configure"),
-    ):
-        _runner().invoke(
-            cli,
-            ["login", "--instance", "user1"],
-        )
-
-    mock_setup.assert_called_once_with(data_dir)
-
-
 def test_bot_command_uses_yaml_data_dir_for_logging(tmp_path):
     """bot CLI command must derive the setup_logging path from InstancesConfig.data_dir."""
     from app.config import InstancesConfig
@@ -639,40 +563,6 @@ def test_sync_with_instance_flag_missing_instances_config_env(tmp_path):
     assert result.exit_code != 0
 
 
-# ---------------------------------------------------------------------------
-# login --instance flag
-# ---------------------------------------------------------------------------
-
-
-def test_login_with_instance_flag_loads_from_config_file(tmp_path):
-    """login --instance <name> resolves config from InstancesConfig."""
-    from app.config import Config, InstancesConfig
-
-    mock_cfg = MagicMock(spec=Config)
-    mock_cfg.data_dir = tmp_path / "sync" / "user1"
-    mock_instances = MagicMock(spec=InstancesConfig)
-    mock_instances.to_config.return_value = mock_cfg
-    mock_instances.data_dir = tmp_path
-
-    cfg_file = tmp_path / "instances.yml"
-    cfg_file.write_text("")
-
-    with (
-        patch("app.config.InstancesConfig.load", return_value=mock_instances),
-        patch("app.main.run_login", return_value=0) as mock_run,
-        patch("app.__main__.setup_logging"),
-        patch("app.http_client.configure"),
-    ):
-        result = _runner().invoke(
-            cli,
-            ["login", "--instance", "user1"],
-        )
-
-    assert result.exit_code == 0
-    mock_instances.to_config.assert_called_once_with("user1")
-    mock_run.assert_called_once_with(cfg=mock_cfg)
-
-
 def test_sync_with_instance_flag_load_error_shown_as_click_error(tmp_path):
     """Errors from InstancesConfig.load() are shown as a Click UsageError, not a traceback."""
     cfg_file = tmp_path / "instances.yml"
@@ -694,12 +584,6 @@ def test_sync_with_instance_flag_load_error_shown_as_click_error(tmp_path):
 def test_sync_with_blank_instance_flag_exits_with_error():
     """sync --instance '' (blank string) must error out, not silently use env vars."""
     result = _runner().invoke(cli, ["sync", "--instance", ""])
-    assert result.exit_code != 0
-
-
-def test_login_with_blank_instance_flag_exits_with_error():
-    """login --instance '' (blank string) must error out, not silently use env vars."""
-    result = _runner().invoke(cli, ["login", "--instance", ""])
     assert result.exit_code != 0
 
 
@@ -777,23 +661,6 @@ def test_sync_with_instance_flag_permission_error_shown_as_click_error(tmp_path)
         result = _runner().invoke(
             cli,
             ["sync", "--instance", "user1"],
-        )
-
-    assert result.exit_code != 0
-    assert "Traceback" not in result.output
-    assert "denied" in result.output
-
-
-def test_login_with_instance_flag_permission_error_shown_as_click_error(tmp_path):
-    """PermissionError from InstancesConfig.load() in login --instance must show UsageError."""
-
-    with (
-        patch("app.config.InstancesConfig.load", side_effect=PermissionError("denied")),
-        patch("app.__main__.setup_logging"),
-    ):
-        result = _runner().invoke(
-            cli,
-            ["login", "--instance", "user1"],
         )
 
     assert result.exit_code != 0
@@ -964,12 +831,6 @@ def test_get_backup_schedule_file_not_found_exits_with_error():
 def test_sync_without_instance_flag_exits_with_error():
     """sync without --instance must exit with an error (no env-var fallback)."""
     result = _runner().invoke(cli, ["sync"])
-    assert result.exit_code != 0
-
-
-def test_login_without_instance_flag_exits_with_error():
-    """login without --instance must exit with an error (no env-var fallback)."""
-    result = _runner().invoke(cli, ["login"])
     assert result.exit_code != 0
 
 

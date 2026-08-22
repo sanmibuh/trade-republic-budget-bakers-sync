@@ -3,7 +3,6 @@
 Usage:
     python -m app                                    # shows help
     python -m app sync --instance user1             # one-shot TR → Wallet sync
-    python -m app login --instance user1            # re-authenticate
     python -m app resync --instance user1 DATE      # force re-sync for a date
     python -m app submit-code --instance user1 CODE # deliver 2FA code
     python -m app check-pending --instance user1    # check if 2FA is waiting
@@ -72,29 +71,6 @@ def sync(instance: str) -> None:
     setup_logging(log_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run(cfg=cfg))
-
-
-@cli.command()
-@click.option(
-    "--instance",
-    required=True,
-    metavar="NAME",
-    help="Instance name from the instances YAML config file.",
-)
-def login(instance: str) -> None:
-    """Re-authenticate with Trade Republic on demand (renew the 2FA session).
-
-    Resumes the saved session if still valid; otherwise runs the full login.
-    For authenticator accounts the code is requested via Telegram (reply with
-    /code <instance> <code>); for push accounts, approve the request in the app.
-    """
-    from app.http_client import configure
-    from app.main import run_login
-
-    cfg, log_dir = _resolve_instance_cfg(instance)
-    setup_logging(log_dir)
-    configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
-    sys.exit(run_login(cfg=cfg))
 
 
 @cli.command(name="submit-code")
@@ -353,7 +329,6 @@ def bot() -> None:
     Supported Telegram commands:
       /status
       /sync              (shows an inline keyboard to pick the instance)
-      /login             (shows an inline keyboard to pick the instance)
       /resync [YYYY-MM-DD]
       /logs              (shows today's shared sync log)
       /code <instance> <code>  (or send the 6-digit code as a plain message)
