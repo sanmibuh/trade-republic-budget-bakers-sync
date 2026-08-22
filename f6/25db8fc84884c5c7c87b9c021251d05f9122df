@@ -1,0 +1,20 @@
+README.md
+  h_97a91c9e567f87 208
+app/bot.py
+  h_97a91c9e567f87 255,482,711,713-715,738
+app/main.py
+  h_97a91c9e567f87 23,28
+tests/test_bot.py
+  h_97a91c9e567f87 328,889,893-894,898,929-932,934-936,994-995,1018,1031-1032,1041
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "f625db8fc84884c5c7c87b9c021251d05f9122df",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
