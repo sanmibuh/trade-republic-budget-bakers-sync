@@ -132,7 +132,7 @@ class EventRepository:
 
     def _build_event_row(
         self, event: dict[str, Any], wallet_record_id: str | None
-    ) -> tuple[str | None, str, str, str | None, str, str, str, str | None]:
+    ) -> tuple[str, str, str, str, str, str, str, str | None]:
         """Build the row tuple shared by :meth:`mark_processed` and :meth:`mark_processed_force`."""
         eid = dedup_event_id(event)
         event_type = extract_event_type(event)
