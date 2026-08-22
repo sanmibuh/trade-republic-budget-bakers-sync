@@ -291,6 +291,24 @@ def test_botconfig_from_env_log_dir_uses_instances_data_dir():
 
 
 # ---------------------------------------------------------------------------
+# TelegramBot — SSL circuit-breaker session
+# ---------------------------------------------------------------------------
+
+
+def test_telegrambot_creates_session_via_build_session(tmp_path):
+    """TelegramBot must build its Telegram session through http_client.build_session
+    so that allow_insecure_ssl applies to bot traffic too."""
+    import requests as req_lib
+
+    from app import http_client
+
+    with patch("app.bot._build_session", wraps=http_client.build_session) as mock_build:
+        bot = _bot(tmp_path=tmp_path)
+    mock_build.assert_called_once()
+    assert isinstance(bot._session, req_lib.Session)
+
+
+# ---------------------------------------------------------------------------
 # TelegramBot._register_commands
 # ---------------------------------------------------------------------------
 
@@ -299,7 +317,7 @@ def test_register_commands_includes_backup_when_configured(tmp_path):
     bot = _bot(backup_cfg=_make_backup_config(tmp_path), tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._register_commands()
     commands = mock_post.call_args.kwargs["json"]["commands"]
     cmd_names = [c["command"] for c in commands]
@@ -314,7 +332,7 @@ def test_register_commands_excludes_backup_when_not_configured(tmp_path):
     bot = _bot(backup_cfg=None, tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._register_commands()
     commands = mock_post.call_args.kwargs["json"]["commands"]
     cmd_names = [c["command"] for c in commands]
@@ -327,7 +345,7 @@ def test_register_commands_logs_description_does_not_mention_instance(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._register_commands()
     commands = mock_post.call_args.kwargs["json"]["commands"]
     logs_cmd = next(c for c in commands if c["command"] == "logs")
@@ -336,7 +354,9 @@ def test_register_commands_logs_description_does_not_mention_instance(tmp_path):
 
 def test_register_commands_does_not_raise_on_failure(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch("app.bot.requests.post", side_effect=requests.RequestException("fail")):
+    with patch.object(
+        bot._session, "post", side_effect=requests.RequestException("fail")
+    ):
         bot._register_commands()  # must not raise
 
 
@@ -414,7 +434,7 @@ def test_handle_message_does_not_delete_non_code_commands(tmp_path):
 
 def test_delete_message_calls_telegram_api(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch("app.bot.requests.post") as mock_post:
+    with patch.object(bot._session, "post") as mock_post:
         bot._delete_message(555)
     mock_post.assert_called_once()
     payload = mock_post.call_args.kwargs["json"]
@@ -424,13 +444,15 @@ def test_delete_message_calls_telegram_api(tmp_path):
 
 def test_delete_message_does_not_raise_on_failure(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch("app.bot.requests.post", side_effect=requests.RequestException("fail")):
+    with patch.object(
+        bot._session, "post", side_effect=requests.RequestException("fail")
+    ):
         bot._delete_message(555)  # must not raise
 
 
 def test_delete_message_ignores_missing_id(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch("app.bot.requests.post") as mock_post:
+    with patch.object(bot._session, "post") as mock_post:
         bot._delete_message(None)
     mock_post.assert_not_called()
 
@@ -1405,7 +1427,7 @@ def test_send_message_posts_to_telegram(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._send_message("hello")
     url = mock_post.call_args.args[0]
     assert "sendMessage" in url
@@ -1420,7 +1442,7 @@ def test_send_message_with_keyboard_includes_reply_markup(tmp_path):
     keyboard = [[{"text": "A", "callback_data": "a"}]]
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._send_message("pick", keyboard=keyboard)
     payload = mock_post.call_args.kwargs["json"]
     assert "reply_markup" in payload
@@ -1443,7 +1465,7 @@ def test_send_message_does_not_raise_on_request_exception(tmp_path):
 def test_answer_callback_query_calls_api(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._answer_callback_query("cq123")
     url = mock_post.call_args.args[0]
     assert "answerCallbackQuery" in url
@@ -1452,7 +1474,9 @@ def test_answer_callback_query_calls_api(tmp_path):
 
 def test_answer_callback_query_does_not_raise_on_failure(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch("app.bot.requests.post", side_effect=requests.RequestException("fail")):
+    with patch.object(
+        bot._session, "post", side_effect=requests.RequestException("fail")
+    ):
         bot._answer_callback_query("cq1")  # must not raise
 
 
@@ -1778,7 +1802,7 @@ def test_register_commands_includes_logs(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._register_commands()
     commands = mock_post.call_args.kwargs["json"]["commands"]
     cmd_names = [c["command"] for c in commands]
@@ -1794,7 +1818,7 @@ def test_send_message_default_parse_mode_is_markdownv2(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._send_message("hello")
     payload = mock_post.call_args.kwargs["json"]
     assert payload.get("parse_mode") == "MarkdownV2"
@@ -1804,7 +1828,7 @@ def test_send_message_no_parse_mode_omits_field(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._send_message("plain text", parse_mode=None)
     payload = mock_post.call_args.kwargs["json"]
     assert "parse_mode" not in payload
@@ -2056,7 +2080,7 @@ def test_poll_once_dispatches_update(tmp_path):
         "result": [{"update_id": 10, "message": {"chat": {"id": 42}, "text": "/help"}}]
     }
     with (
-        patch("app.bot.requests.get", return_value=mock_resp),
+        patch.object(bot._session, "get", return_value=mock_resp),
         patch.object(bot, "_handle_update") as mock_handle,
     ):
         bot._poll_once()
@@ -2076,7 +2100,7 @@ def test_poll_once_advances_offset_for_multiple_updates(tmp_path):
         ]
     }
     with (
-        patch("app.bot.requests.get", return_value=mock_resp),
+        patch.object(bot._session, "get", return_value=mock_resp),
         patch.object(bot, "_handle_update"),
     ):
         bot._poll_once()
@@ -2102,7 +2126,7 @@ def test_poll_once_continues_on_handle_update_exception(tmp_path):
             raise RuntimeError("boom")
 
     with (
-        patch("app.bot.requests.get", return_value=mock_resp),
+        patch.object(bot._session, "get", return_value=mock_resp),
         patch.object(bot, "_handle_update", side_effect=flaky_handle),
     ):
         bot._poll_once()
@@ -2371,7 +2395,7 @@ def test_run_resync_for_instance_calls_main_run_resync(tmp_path):
 
 def test_register_commands_includes_resync(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch("app.bot.requests.post") as mock_post:
+    with patch.object(bot._session, "post") as mock_post:
         mock_post.return_value = MagicMock(raise_for_status=MagicMock())
         bot._register_commands()
     payload = mock_post.call_args.kwargs["json"]

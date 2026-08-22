@@ -43,18 +43,14 @@ Approve the push notification in your Trade Republic app (or enter the authentic
 All configuration lives in a single `instances.yml` file, mounted into the container at `/app/config/instances.yml`.
 
 ```yaml
-# Telegram bot credentials (optional — enables notifications and remote control)
+# Required: Telegram bot credentials (the bot always runs alongside the sync daemon)
 telegram_bot_token: ""
 telegram_chat_id: ""
 
-# Wallet backup config (optional)
-backup:
-  wallet_api_key: ""
-
-# Cron expression for automatic backups (optional)
+# Optional: cron expression for automatic backups
 backup_schedule: "0 8 1 * *"
 
-# Override default data directory (optional, default: /app/data)
+# Optional: override default data directory (default: /app/data)
 # data_dir: /app/data
 
 sync:
@@ -74,7 +70,6 @@ sync:
       # labels:
       #   BANK_TRANSACTION_INCOMING: "<label-uuid>"
       #   CARD_TRANSACTION: "<label-uuid>"
-      # allow_insecure_ssl: false
 ```
 
 ### Per-instance options
@@ -93,18 +88,19 @@ sync:
 | `schedule` | — | 5-field cron expression. If unset, the container runs once and exits. |
 | `category_strategy` | `none` | `none` (disabled) or `history` (majority-vote from past records) |
 | `labels` | — | Map of event type → BudgetBakers label UUID (see below) |
-| `allow_insecure_ssl` | `false` | Skip TLS verification (for corporate proxies) |
 
 ### Global options
 
 | Field | Default | Description |
 |---|---|---|
-| `telegram_bot_token` | — | Telegram bot token for notifications and remote control |
-| `telegram_chat_id` | — | Telegram chat ID — only this chat can interact with the bot |
-| `backup.wallet_api_key` | — | Wallet API key used by the backup service |
+| `telegram_bot_token` | — | **Required.** Telegram bot token for notifications and remote control |
+| `telegram_chat_id` | — | **Required.** Telegram chat ID — only this chat can interact with the bot |
 | `backup_schedule` | — | Cron expression for the backup job |
 | `data_dir` | `/app/data` | Override the data directory inside the container |
+| `allow_insecure_ssl` | `false` | Skip TLS verification (for corporate proxies with broken CA chains) |
 | `TZ` *(env var)* | `UTC` | Container timezone — affects cron schedule interpretation |
+
+> **Note:** The first instance's `wallet_api_key` is also used for the backup service. A dedicated backup key is not currently supported.
 
 ### Labels per event type
 
@@ -127,15 +123,15 @@ Supported event types:
 
 ## Services architecture
 
-A typical setup uses a single Docker Compose project with three services:
+A single Docker Compose service runs sync, backup, and the Telegram bot together:
 
 ```
-sync         — runs all sync instances defined in instances.yml (cron daemon or one-shot)
-backup       — runs scheduled Wallet backups
-telegram-bot — remote control via Telegram (no TR credentials needed)
+tr-sync  — cron daemon (sync + backup) + Telegram bot, all in one container
 ```
 
-All services share the same image and the same `instances.yml`. See `deploy/example/docker-compose.yml` for a ready-to-use template.
+The `entrypoint.sh` starts both a cron daemon (with per-instance and backup schedules derived from `instances.yml`) and the Telegram bot process side-by-side. A healthcheck monitors both.
+
+See `deploy/example/docker-compose.yml` for a ready-to-use template.
 
 ---
 
@@ -201,24 +197,13 @@ An optional `telegram-bot` service lets you trigger sync and backup operations o
 | `/status` | Show all instances and whether backup is available |
 | `/help` | Show available commands |
 
-Backup commands are only available when `backup.wallet_api_key` is set in `instances.yml`.
+Backup commands are only available when at least one sync instance is configured (the first instance's `wallet_api_key` is used).
 
 ### Setup
 
-Add the `telegram-bot` service to your `docker-compose.yml`:
+The bot starts automatically alongside the sync cron daemon — no separate service needed. Just set `telegram_bot_token` and `telegram_chat_id` in `instances.yml`.
 
-```yaml
-name: tr-sync
-
-services:
-  telegram-bot:
-    image: ghcr.io/sanmibuh/tr-wallet-sync:<tag>
-    entrypoint: ["python", "-m", "app", "bot"]
-    volumes:
-      - ./instances.yml:/app/config/instances.yml:ro
-      - tr-data:/app/data
-    restart: unless-stopped
-```
+See `deploy/example/docker-compose.yml` for the complete deployment template.
 
 > **Security:** The bot only responds to messages from `telegram_chat_id`. All other chats are silently ignored.
 

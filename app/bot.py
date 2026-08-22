@@ -59,6 +59,7 @@ from app.config import (
     InstancesConfig,
     has_valid_session,
 )
+from app.http_client import build_session as _build_session
 from app.main import (
     run as _main_run,
     run_login as _main_run_login,
@@ -259,6 +260,9 @@ class TelegramBot:
         # Configure SSL once at startup — all in-process sync/login/resync/backup
         # calls share this policy without racing on a per-run configure() call.
         http_client.configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
+        # Session for all Telegram API calls — routes through the SSL circuit-breaker
+        # so allow_insecure_ssl applies to bot traffic too.
+        self._session = _build_session()
 
     # ------------------------------------------------------------------
     # Public
@@ -316,11 +320,10 @@ class TelegramBot:
                 },
             ]
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self._api}/setMyCommands",
                 json={"commands": commands},
                 timeout=10,
-                verify=True,
             )
             resp.raise_for_status()
             log.info("Telegram commands registered successfully")
@@ -332,7 +335,7 @@ class TelegramBot:
     # ------------------------------------------------------------------
 
     def _poll_once(self) -> None:
-        resp = requests.get(
+        resp = self._session.get(
             f"{self._api}/getUpdates",
             params={
                 "offset": self._offset,
@@ -340,7 +343,6 @@ class TelegramBot:
                 "allowed_updates": ["message", "callback_query"],
             },
             timeout=40,
-            verify=True,
         )
         resp.raise_for_status()
         for update in resp.json().get("result", []):
@@ -963,11 +965,10 @@ class TelegramBot:
         if keyboard is not None:
             payload["reply_markup"] = {"inline_keyboard": keyboard}
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self._api}/sendMessage",
                 json=payload,
                 timeout=20,
-                verify=True,
             )
             resp.raise_for_status()
         except requests.RequestException as exc:
@@ -976,11 +977,10 @@ class TelegramBot:
     def _answer_callback_query(self, callback_query_id: str) -> None:
         """Acknowledge the callback query to remove the loading spinner on the button."""
         try:
-            requests.post(
+            self._session.post(
                 f"{self._api}/answerCallbackQuery",
                 json={"callback_query_id": callback_query_id},
                 timeout=10,
-                verify=True,
             )
         except requests.RequestException as exc:
             log.warning("Failed to answer callback query: %s", exc)
@@ -990,11 +990,10 @@ class TelegramBot:
         if message_id is None:
             return
         try:
-            requests.post(
+            self._session.post(
                 f"{self._api}/deleteMessage",
                 json={"chat_id": self._cfg.chat_id, "message_id": message_id},
                 timeout=10,
-                verify=True,
             )
         except requests.RequestException as exc:
             log.warning("Failed to delete message %s: %s", message_id, exc)

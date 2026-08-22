@@ -118,10 +118,9 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `submit-code` (`python -m app submit-code <code>`) checks for `.tr_2fa_pending` before writing the code file; if
   the marker is absent (no login in progress), it exits 1 with "No active login request for this instance" so stale
   `/code` submissions are rejected cleanly.
-- Cross-container hand-off: in the legacy multi-container setup the bot and the sync containers do **not** share
-  the data volume. The `/code` bot command runs `python -m app submit-code <code>` inside the target container via
-  the Docker SDK `exec_run`. In the **single-container deployment** (Phase 4 of #145) all services share the same
-  process space and data volume — the bot writes the code file directly, no Docker SDK needed.
+- Code delivery: the `/code` bot command calls `python -m app submit-code --instance <name> <code>` in-process
+  (no Docker SDK, no `exec_run`). All services share the same data volume, so the file written by `submit-code`
+  is immediately visible to the blocked login/sync process.
 - On-demand renewal: `/login` (bot) → `python -m app login` → `main.run_login()` triggers the 2FA flow explicitly.
   Scheduled cron syncs that hit an expired session trigger the same flow automatically (Eli via push, David via
   `/code`).
@@ -328,15 +327,14 @@ pointing to `instances.yml.example`.
   all raise `ValueError` with a descriptive message.
 
 ### OWNER_NAME
-- `OWNER_NAME` is optional — defaults to `"Backup"` when not set.
-- Sync services (`sync-david`, `sync-eli`) set it explicitly for per-owner notifications.
-- The backup service omits it; notifications show `"Backup"` as the owner.
+- `owner_name` is optional per-instance — defaults to the instance `name` (capitalized).
+- Used in Telegram notifications to identify whose sync/backup triggered the message.
 
 ### Logging (`app/logging_setup.py`)
 - `setup_logging(log_dir)` — called **once at process startup** by each CLI entry point; sets up rotating file handler + console handler. Returns `None`.
   - **Bot process**: called in the `bot` CLI command with `instances_yaml.data_dir` → all in-process sync/login/resync/backup calls share a single `{DATA_DIR}/sync.log`.
   - **Standalone sync / login**: called with `instances_yaml.data_dir` when `--instance` is used.
-  - **Standalone resync**: called with `cfg.data_dir` (always env-var driven, root data dir).
+  - **Standalone resync**: called with `cfg.data_dir` when `--instance` is used.
   - **Standalone backup**: called with `cfg.data_dir` (root data dir).
   - **Short-lived commands** (`submit-code`, `check-pending`, `list-instances`): do not call `setup_logging` — they run without any logging configuration.
 - `configure_logging()` — minimal console-only fallback; not called by any CLI command.
@@ -351,12 +349,13 @@ pointing to `instances.yml.example`.
   - `allow_insecure` property — whether the circuit is allowed to open on `SSLError`.
 - `breaker` — module-level singleton instance shared across all HTTP calls.
 - `configure(allow_insecure_ssl)` — module-level convenience that delegates to `breaker.configure()`.
-  Called once at startup from `main.run()` and the `backup` CLI command.
+  Called once at startup from `main.run()`, the `backup` CLI command, and `TelegramBot.__init__` (bot process).
 - `http_post(url, **kwargs)` — wraps `requests.post`; on `SSLError`, only falls back to `verify=False` when
   `breaker.allow_insecure` is `True`. Otherwise the error propagates.
 - `build_session(headers)` — returns a `requests.Session` with a custom `_SSLCircuitBreakerAdapter` that applies
   the same fallback logic per-request using the shared `breaker` singleton.
-- Both `notifier.py` (Telegram) and `wallet_client.py` (BudgetBakers) use this module — the singleton is shared.
+- `notifier.py` (Wallet + Telegram notifications), `wallet_client.py` (BudgetBakers API), and `TelegramBot`
+  (Telegram polling + commands) all use this module — the singleton is shared.
 - Controlled via `allow_insecure_ssl` in `instances.yml` (default `false`). Set to `true` only in environments with broken
   certificate chains (e.g. corporate VPN).
 
