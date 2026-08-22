@@ -113,8 +113,7 @@ def check_pending(instance: str) -> None:
 
     Used by the Telegram bot to detect which containers are blocked on
     authenticator input, so plain-digit replies can be routed automatically
-    even when the login was triggered by a cron sync rather than the /login
-    command.
+    when a sync-triggered 2FA flow is waiting for a code.
 
     Exit codes:
         0 — the pending-login marker file is present (container awaiting code).

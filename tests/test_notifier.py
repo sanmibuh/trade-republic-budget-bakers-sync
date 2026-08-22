@@ -501,11 +501,11 @@ def test_notifier_login_code_timeout_contains_timeout_indicator():
     assert "imeout" in msg or "expired" in msg.lower() or "⏱" in msg
 
 
-def test_notifier_login_code_timeout_suggests_login_command():
+def test_notifier_login_code_timeout_suggests_sync_command():
     with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
         _make_notifier().login_code_timeout("david")
     msg = mock_send.call_args.kwargs["message"]
-    assert "/login" in msg
+    assert "/sync" in msg
 
 
 def test_notifier_login_code_timeout_returns_false_when_no_credentials():
