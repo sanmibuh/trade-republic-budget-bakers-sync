@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from app.config import Config
 from app.notifier import Notifier
-from app.persistence import EventRepository, init_db
+from app.persistence import EventRepository
 from app.sync_runner import (  # noqa: F401 — re-exported for backward compatibility
     _SYNC_DB,
     AuthenticationError,
@@ -49,7 +49,6 @@ def _prepare(cfg: Config) -> Notifier:
 
 
 def run(cfg: Config) -> int:
-    init_db(cfg.shared_db_path)
     notifier = _prepare(cfg)
     log.info("Starting sync for owner: %s", cfg.owner_name)
 
@@ -116,7 +115,6 @@ def run_resync(date_str: str, cfg: Config) -> int:
         log.error("Invalid date for resync: %r (expected YYYY-MM-DD)", date_str)
         return 1
 
-    init_db(cfg.shared_db_path)
     notifier = _prepare(cfg)
     log.info("Starting force resync for date=%s owner=%s", date_str, cfg.owner_name)
 

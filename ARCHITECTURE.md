@@ -141,8 +141,8 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `wallet_record_id` stores the Wallet API record ID returned by `post_records` on success. For events that produce
   multiple records (e.g. investment with cash + portfolio split), IDs are stored comma-separated. NULL for
   zero-amount excluded events. Enables insert-vs-update decisions when reprocessing a date range.
-- Schema is initialised at process startup by `init_db(shared_db_path)` (called from `main._prepare`),
-  which executes the idempotent `app/schema.sql`. `EventRepository.__init__` only opens the connection.
+- Schema is initialised at process startup by `init_db(shared_db_path)`, which executes the
+  idempotent `app/schema.sql`. `EventRepository.__init__` only opens the connection.
 - `EventRepository.mark_processed_force` — `INSERT OR REPLACE` upsert variant; used by the resync path to
   update `wallet_record_id` for already-processed events.
 - Old records without `details` are not retroactively updated (correct by design).
@@ -192,9 +192,10 @@ CREATE TABLE sync_runs (
 **Instance scoping**: All `processed_events` queries in `EventRepository` are automatically scoped by the `instance` parameter passed at construction time. Two different instances can share the same `event_id` without conflict (composite primary key).
 
 **Schema initialisation**: `init_db(db_path)` in `app/persistence.py` executes `app/schema.sql`
-(idempotent DDL — all statements use `CREATE … IF NOT EXISTS`) and is called once per process
-startup from `main._prepare()` before any `EventRepository` is opened. This covers all execution
-paths: regular sync, resync, and bot-triggered operations.
+(idempotent DDL — all statements use `CREATE … IF NOT EXISTS`).  It is called once per process
+startup at the CLI entry point (`app/__main__.py`) at the start of each command that uses the
+database (`sync`, `resync`), and during `TelegramBot.__init__` for the bot path.  This covers all
+execution paths before any `EventRepository` is opened.
 
 ### Labels
 - Per-instance `label_ids` are read from the YAML (`labels:` map under each instance) by `_parse_instance_labels()` →

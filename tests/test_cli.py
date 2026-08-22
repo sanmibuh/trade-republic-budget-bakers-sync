@@ -56,6 +56,7 @@ def test_sync_calls_run(tmp_path):
         patch("app.__main__.setup_logging"),
         patch("app.config.InstancesConfig.load", return_value=mock_instances),
         patch("app.http_client.configure"),
+        patch("app.persistence.init_db"),
     ):
         result = _runner().invoke(cli, ["sync", "--instance", "user1"])
     assert result.exit_code == 0
@@ -75,6 +76,7 @@ def test_sync_exits_with_run_return_code(tmp_path):
         patch("app.__main__.setup_logging"),
         patch("app.config.InstancesConfig.load", return_value=mock_instances),
         patch("app.http_client.configure"),
+        patch("app.persistence.init_db"),
     ):
         result = _runner().invoke(cli, ["sync", "--instance", "user1"])
     assert result.exit_code == 1
@@ -455,6 +457,7 @@ def test_sync_with_instance_flag_loads_from_config_file(tmp_path):
         patch("app.main.run", return_value=0) as mock_run,
         patch("app.__main__.setup_logging"),
         patch("app.http_client.configure"),
+        patch("app.persistence.init_db"),
     ):
         result = _runner().invoke(
             cli,
@@ -485,6 +488,7 @@ def test_sync_with_instance_flag_uses_data_dir_for_logging(tmp_path):
         patch("app.main.run", return_value=0),
         patch("app.__main__.setup_logging") as mock_setup,
         patch("app.http_client.configure"),
+        patch("app.persistence.init_db"),
     ):
         _runner().invoke(
             cli,
@@ -849,6 +853,7 @@ def test_resync_with_instance_flag_calls_run_resync(tmp_path):
         patch("app.main.run_resync", return_value=0) as mock_run,
         patch("app.__main__.setup_logging"),
         patch("app.http_client.configure"),
+        patch("app.persistence.init_db"),
     ):
         result = _runner().invoke(cli, ["resync", "--instance", "user1", "2026-07-15"])
 

@@ -7,6 +7,23 @@ import pytest
 from app.persistence import EventRepository
 
 # ---------------------------------------------------------------------------
+# Module-level DB initialisation
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _init_test_dbs(tmp_path):
+    """Pre-initialise DB paths used by tests in this module.
+
+    Tests call ``main.run()`` / ``main.run_resync()`` directly (bypassing the
+    CLI entry point), so ``init_db`` must be called explicitly here.
+    """
+    from app.persistence import init_db
+
+    init_db(tmp_path / "sync.db")
+
+
+# ---------------------------------------------------------------------------
 # run() — zero-amount events are committed even when no records are posted
 # ---------------------------------------------------------------------------
 

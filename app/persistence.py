@@ -62,8 +62,10 @@ def init_db(db_path: Path) -> None:
     against *db_path*, creating the file if it does not yet exist.  Safe to
     call multiple times — all statements use ``CREATE … IF NOT EXISTS``.
 
-    Call this once at process startup (e.g. from ``main._prepare``) before
-    any :class:`EventRepository` is opened.
+    Call this once at process startup before any :class:`EventRepository` is
+    opened.  The CLI entry point (``app/__main__.py``) calls it at the start
+    of each command that uses the database (``sync``, ``resync``).  The
+    Telegram bot calls it during ``TelegramBot.__init__``.
 
     Args:
         db_path: Filesystem path for the SQLite database file.

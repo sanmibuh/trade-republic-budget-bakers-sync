@@ -66,10 +66,12 @@ def sync(instance: str) -> None:
     """Run a one-shot Trade Republic → Wallet sync."""
     from app.http_client import configure
     from app.main import run
+    from app.persistence import init_db
 
     cfg, log_dir = _resolve_instance_cfg(instance)
     setup_logging(log_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
+    init_db(cfg.shared_db_path)
     sys.exit(run(cfg=cfg))
 
 
@@ -247,10 +249,12 @@ def resync(instance: str, date: str) -> None:
     """
     from app.http_client import configure
     from app.main import run_resync
+    from app.persistence import init_db
 
     cfg, log_dir = _resolve_instance_cfg(instance)
     setup_logging(log_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
+    init_db(cfg.shared_db_path)
     sys.exit(run_resync(date, cfg=cfg))
 
 
