@@ -2199,6 +2199,26 @@ def test_register_commands_includes_resync(tmp_path):
     assert "resync" in commands
 
 
+def test_register_commands_order_without_backup(tmp_path):
+    """Commands must be registered in order: sync, status, logs, resync (no backup)."""
+    bot = _bot(backup_cfg=None, tmp_path=tmp_path)
+    with patch.object(bot._session, "post") as mock_post:
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock())
+        bot._register_commands()
+    commands = [c["command"] for c in mock_post.call_args.kwargs["json"]["commands"]]
+    assert commands == ["sync", "status", "logs", "resync"]
+
+
+def test_register_commands_order_with_backup(tmp_path):
+    """Commands must be registered in order: sync, status, logs, backup, resync."""
+    bot = _bot(backup_cfg=_make_backup_config(tmp_path), tmp_path=tmp_path)
+    with patch.object(bot._session, "post") as mock_post:
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock())
+        bot._register_commands()
+    commands = [c["command"] for c in mock_post.call_args.kwargs["json"]["commands"]]
+    assert commands == ["sync", "status", "logs", "backup", "resync"]
+
+
 # ---------------------------------------------------------------------------
 # Wiring — TelegramBot delegates to collaborators
 # ---------------------------------------------------------------------------

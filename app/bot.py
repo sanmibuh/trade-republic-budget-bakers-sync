@@ -291,17 +291,17 @@ class TelegramBot:
                 "description": "Force Trade Republic sync (choose instance)",
             },
             {
-                "command": "resync",
-                "description": "Force re-sync of a specific day, bypassing dedup",
-            },
-            {"command": "logs", "description": "Show today's shared sync log"},
-            {
                 "command": "status",
                 "description": "Show instances and backup service availability",
             },
+            {"command": "logs", "description": "Show today's shared sync log"},
+            {
+                "command": "resync",
+                "description": "Force re-sync of a specific day, bypassing dedup",
+            },
         ]
         if self._cfg.backup_cfg:
-            commands[2:2] = [
+            commands[3:3] = [
                 {
                     "command": "backup",
                     "description": "Force a Wallet backup (monthly or yearly)",
