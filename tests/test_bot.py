@@ -795,6 +795,24 @@ def test_callback_query_sync_dispatches_launch_sync(tmp_path):
     assert mock_sync.call_args.args[0].name == "User1"
 
 
+def test_callback_query_legacy_login_routes_to_sync(tmp_path):
+    """Legacy ``login:<instance>`` callbacks from old chat history trigger a sync."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_launch_sync") as mock_sync,
+    ):
+        bot._handle_callback_query(
+            {"id": "cq1", "data": "login:user1", "message": {"chat": {"id": 42}}}
+        )
+    mock_sync.assert_called_once()
+    assert mock_sync.call_args.args[0].name == "User1"
+    # User should receive a deprecation notice
+    assert mock_send.call_count == 1
+    assert "/login" in mock_send.call_args.args[0]
+
+
 def test_callback_query_unknown_instance_replies(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     with (

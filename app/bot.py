@@ -503,6 +503,15 @@ class TelegramBot:
 
         if cmd == "sync":
             self._launch_sync(inst)
+        elif cmd == "login":
+            # Legacy callback from buttons created before /login was removed.
+            # Route to sync — the 2FA flow is now handled automatically in-process.
+            self._send_message(
+                f"ℹ️ `/login` has been removed\\. "
+                f"Starting a sync for *{_esc(inst.name)}* instead — "
+                "re\\-authentication happens automatically if needed\\."
+            )
+            self._launch_sync(inst)
         else:
             log.warning("Unknown callback cmd: %r", cmd)
 
@@ -708,7 +717,7 @@ class TelegramBot:
             )
 
     def _maybe_submit_pending_code(self, code: str) -> bool:
-        """Submit *code* to the waiting login instance.
+        """Submit *code* to the instance awaiting 2FA during a sync.
 
         For single-instance setups, submits directly.  For multi-instance
         setups, probes the ``PENDING_FILENAME`` marker in each instance's
