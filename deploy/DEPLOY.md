@@ -101,7 +101,7 @@ mkdir -p data
 ```
 
 Approve the push notification in the Trade Republic app (or enter the authenticator code).
-The session is saved to the data volume and reused automatically.
+The session is saved to the data volume, reused automatically, and an initial sync runs immediately.
 
 ### 5. Start the container
 
@@ -163,16 +163,15 @@ Then copy the new version contents into a fresh `current/` when preparing the ne
 
 ---
 
-## Session expired (re-login)
+## Session expired (re-authentication)
 
-Trade Republic sessions expire on a hard 24h cap, so a scheduled sync will eventually fail with a session-expired error. Two ways to renew:
+Trade Republic sessions expire on a hard 24h cap. When a scheduled sync detects an expired session, it triggers the 2FA flow automatically in-process — no manual intervention needed in most cases.
 
 **From Telegram (no SSH needed):**
 
-1. Send `/login` to the bot and pick the instance (or wait for the automatic prompt when a cron sync bails out).
-2. The bot replies asking for the authenticator code. Reply with the 6-digit code as a plain message.
+1. The bot will send a prompt asking for the authenticator code. Reply with the 6-digit code as a plain message.
    Push-approval accounts (no authenticator) just approve in the app — no code needed.
-3. If multiple logins are pending simultaneously (unlikely), the bot will ask you to disambiguate.
+2. If multiple instances are awaiting a code simultaneously (unlikely), the bot will ask you to disambiguate.
    In that case use the explicit form: `/code <instance> <code>` — e.g. `/code user1 123456`.
 
 **From the NAS (interactive bootstrap):**

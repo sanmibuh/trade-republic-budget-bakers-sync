@@ -215,7 +215,7 @@ The `tr-sync.sh` script is the main management tool for NAS deployments where `m
 
 ```sh
 ./tr-sync.sh pull      [service]           # pull image(s) — omit for all
-./tr-sync.sh bootstrap <instance-name>     # interactive 2FA login
+./tr-sync.sh bootstrap <instance-name>     # interactive 2FA login + initial sync
 ./tr-sync.sh sync      <instance-name>     # one-shot sync
 ./tr-sync.sh backup    <mode> [param]      # one-shot backup
 ./tr-sync.sh up        [service]           # start daemon(s)
