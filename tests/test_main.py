@@ -36,6 +36,8 @@ def test_run_excluded_events_not_reprocessed_on_next_run(tmp_path):
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
+        cfg.shared_db_path = tmp_path / "sync.db"
+        cfg.instance = ""
         cfg.lookback_days = 7
         cfg.dedup_ttl_days = 60
 
@@ -97,6 +99,8 @@ def test_run_returns_zero_on_success(tmp_path):
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
+        cfg.shared_db_path = tmp_path / "sync.db"
+        cfg.instance = ""
         cfg.lookback_days = 7
         cfg.dedup_ttl_days = 60
 
@@ -137,6 +141,8 @@ def test_run_returns_zero_when_no_new_events(tmp_path):
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
+        cfg.shared_db_path = tmp_path / "sync.db"
+        cfg.instance = ""
         cfg.lookback_days = 7
         cfg.dedup_ttl_days = 60
 
@@ -194,6 +200,8 @@ def test_run_wallet_error_notifies_and_reraises(tmp_path):
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
+        cfg.shared_db_path = tmp_path / "sync.db"
+        cfg.instance = ""
         cfg.lookback_days = 7
         cfg.dedup_ttl_days = 60
 
@@ -222,6 +230,8 @@ def test_run_logs_warning_when_sync_complete_not_sent(tmp_path):
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
+        cfg.shared_db_path = tmp_path / "sync.db"
+        cfg.instance = ""
         cfg.lookback_days = 7
         cfg.dedup_ttl_days = 60
 
@@ -271,6 +281,8 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
+        cfg.shared_db_path = tmp_path / "sync.db"
+        cfg.instance = ""
         cfg.lookback_days = 7
         cfg.dedup_ttl_days = 60
 
@@ -333,6 +345,8 @@ def test_run_resync_returns_zero_on_success(tmp_path):
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
+    cfg.shared_db_path = tmp_path / "sync.db"
+    cfg.instance = ""
 
     with (
         patch("app.main.Notifier"),
@@ -367,6 +381,8 @@ def test_run_resync_calls_resync_day_with_date(tmp_path):
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
+    cfg.shared_db_path = tmp_path / "sync.db"
+    cfg.instance = ""
 
     with (
         patch("app.main.Notifier"),
@@ -395,6 +411,8 @@ def test_run_resync_exception_returns_one(tmp_path):
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
+    cfg.shared_db_path = tmp_path / "sync.db"
+    cfg.instance = ""
 
     with (
         patch("app.main.Notifier"),

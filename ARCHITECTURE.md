@@ -133,9 +133,11 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
   `AuthenticationError` for backward compatibility.
 
 ### Deduplication
-- `processed_events` table in SQLite:
-  `(event_id, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id)`.
+- `processed_events` table in the shared SQLite `sync.db`:
+  `(event_id, instance, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id)`.
+  Primary key is `(event_id, instance)` — same event_id can exist independently per instance.
 - `INSERT OR IGNORE` — idempotent. Re-running never creates duplicate records in BudgetBakers.
+- All queries are scoped by `instance` via `EventRepository(db_path, instance=name)`.
 - `wallet_record_id` stores the Wallet API record ID returned by `post_records` on success. For events that produce
   multiple records (e.g. investment with cash + portfolio split), IDs are stored comma-separated. NULL for
   zero-amount excluded events. Enables insert-vs-update decisions when reprocessing a date range.
@@ -149,17 +151,21 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 
 ## Database schema
 
-### `sync.db` — dedup database (`app/persistence.py`)
+### `sync.db` — shared dedup database (`app/persistence.py`)
+
+Stored at `{DATA_DIR}/sync.db` (root-level, shared across all instances).
 
 ```sql
 CREATE TABLE processed_events (
-    event_id         TEXT PRIMARY KEY,   -- TR native ID or hash:<sha256> fallback
+    event_id         TEXT NOT NULL,
+    instance         TEXT NOT NULL DEFAULT '',   -- logical instance name (e.g. "david")
     event_type       TEXT NOT NULL DEFAULT '',
     event_timestamp  TEXT NOT NULL DEFAULT '',
     amount           TEXT NOT NULL DEFAULT '',
-    raw              TEXT NOT NULL DEFAULT '',  -- full TR event JSON for auditing
-    synced_at        TEXT NOT NULL,             -- UTC ISO timestamp of sync
-    wallet_record_id TEXT  -- Wallet API record ID(s); comma-separated for multi-record events; NULL for excluded
+    raw              TEXT NOT NULL DEFAULT '',   -- full TR event JSON for auditing
+    synced_at        TEXT NOT NULL,              -- UTC ISO timestamp of sync
+    wallet_record_id TEXT,                       -- Wallet API record ID(s); comma-separated; NULL for excluded
+    PRIMARY KEY (event_id, instance)
 );
 
 CREATE INDEX idx_synced_at ON processed_events (synced_at);
@@ -169,13 +175,26 @@ CREATE TABLE auth_state (
     status      TEXT NOT NULL,      -- 'ok' | 'failed' | 'expired'
     updated_at  TEXT NOT NULL       -- UTC ISO timestamp of last status change
 );
+
+CREATE TABLE sync_runs (
+    instance  TEXT PRIMARY KEY,
+    status    TEXT NOT NULL,        -- 'success' | 'partial' | 'failed'
+    ran_at    TEXT NOT NULL,        -- UTC ISO timestamp of the run
+    saved     INTEGER NOT NULL DEFAULT 0,
+    failed    INTEGER NOT NULL DEFAULT 0,
+    excluded  INTEGER NOT NULL DEFAULT 0
+);
 ```
 
-**TTL**: `processed_events` records older than 60 days are purged on each sync run (`purge_old_records`).
+**TTL**: `processed_events` records older than 60 days are purged on each sync run (`purge_old_records`), scoped to the calling instance.
 `auth_state` rows are upserted on every connect — one row per instance, no TTL.
 
-**Migrations**: applied automatically on `EventRepository` open — new columns are added via `ALTER TABLE` if
-missing, detected with `PRAGMA table_info`; new tables are created via `CREATE TABLE IF NOT EXISTS`.
+**Instance scoping**: All `processed_events` queries in `EventRepository` are automatically scoped by the `instance` parameter passed at construction time. Two different instances can share the same `event_id` without conflict (composite primary key).
+
+**Migrations**: applied automatically on `EventRepository` open:
+- New columns are added via `ALTER TABLE` if missing (detected with `PRAGMA table_info`).
+- New tables are created via `CREATE TABLE IF NOT EXISTS`.
+- `migrate_legacy_databases(shared_db_path)` — one-shot migration run on process startup: when the shared `sync.db` does not yet exist but old per-instance `sync/{name}/sync.db` files do, all rows are copied into the shared DB (stamping the `instance` column from the directory name). Old files are left untouched.
 
 ### Labels
 - Per-instance `label_ids` are read from the YAML (`labels:` map under each instance) by `_parse_instance_labels()` →
@@ -310,7 +329,8 @@ The `sync:` section is **required** — files without it raise `ValueError` with
 pointing to `instances.yml.example`.
 
 **Key behaviours:**
-- Each instance gets its own `data_dir/sync/{name}/` subdirectory (session files, `sync.db`).
+- Each instance gets its own `data_dir/sync/{name}/` subdirectory (session files, 2FA markers).
+- All instances share a single `data_dir/sync.db` (the shared database; see Database schema section).
 - Global `telegram_*` and `allow_insecure_ssl` are inherited by all instances.
 - `sync.*` fields (`wallet_api_key`, `lookback_days`, `category_strategy`, `schedule`) are global
   defaults; each instance can override any of them individually.
@@ -447,13 +467,17 @@ image publish workflows.
 ## Data volume
 
 `/app/data` (mounted from host) contains:
-- `sync/{name}/sync.db` — SQLite database per instance with `processed_events` and `auth_state` tables
+- `sync.db` — shared SQLite database for all instances with `processed_events`, `auth_state`, and `sync_runs` tables
 - `sync.log` — rotating log file shared by all services (bot, sync, backup); written to `{DATA_DIR}/sync.log`
 - `sync/{name}/` — pytr session/cookie files per instance (login state)
 - `sync/{name}/.tr_2fa_pending` — transient marker created by `TelegramCodeProvider` while waiting for a code
 - `sync/{name}/.tr_2fa_code` — transient file where `submit-code` drops the authenticator code
 - `backups/monthly/` — monthly JSON snapshots (permanent)
 - `backups/yearly/` — yearly JSON snapshots (permanent)
+
+**Legacy layout** (pre-issue #173): each instance had its own `sync/{name}/sync.db`.  On first startup after
+upgrading, `migrate_legacy_databases()` automatically copies rows into the shared `sync.db` and leaves the old
+files in place (read-only, safe to delete manually).
 
 ---
 

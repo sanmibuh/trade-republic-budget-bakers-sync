@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from app.config import Config
 from app.notifier import Notifier
-from app.persistence import EventRepository
+from app.persistence import EventRepository, migrate_legacy_databases
 from app.sync_runner import (  # noqa: F401 — re-exported for backward compatibility
     _SYNC_DB,
     AuthenticationError,
@@ -49,10 +49,11 @@ def _prepare(cfg: Config) -> Notifier:
 def run(cfg: Config) -> int:
     notifier = _prepare(cfg)
     log.info("Starting sync for owner: %s", cfg.owner_name)
+    migrate_legacy_databases(cfg.shared_db_path)
 
     since = datetime.now(UTC) - timedelta(days=cfg.lookback_days)
 
-    with EventRepository(cfg.data_dir / _SYNC_DB) as repo:
+    with EventRepository(cfg.shared_db_path, instance=cfg.instance) as repo:
         repo.purge_old_records(ttl_days=cfg.dedup_ttl_days)
         runner = SyncRunner(cfg, notifier)
         events = runner.fetch_events(since)
@@ -115,9 +116,10 @@ def run_resync(date_str: str, cfg: Config) -> int:
 
     notifier = _prepare(cfg)
     log.info("Starting force resync for date=%s owner=%s", date_str, cfg.owner_name)
+    migrate_legacy_databases(cfg.shared_db_path)
 
     try:
-        with EventRepository(cfg.data_dir / _SYNC_DB) as repo:
+        with EventRepository(cfg.shared_db_path, instance=cfg.instance) as repo:
             runner = SyncRunner(cfg, notifier)
             wallet_client = WalletClient(api_key=cfg.wallet_api_key)
             counts = runner.resync_day(date_str, repo, wallet_client)

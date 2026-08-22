@@ -173,11 +173,13 @@ def _format_sync_timestamp(raw: str) -> str:
         return raw
 
 
-def _check_session_direct(data_dir: Path, instance: str) -> bool | None:
+def _check_session_direct(
+    data_dir: Path, shared_db_path: Path, instance: str
+) -> bool | None:
     """Return True/False/None for the session state of *instance*.
 
-    Reads cookie file expiry and ``auth_state`` from ``sync.db`` directly
-    without any network calls.
+    Reads cookie file expiry and ``auth_state`` from the shared ``sync.db``
+    directly without any network calls.
 
     Returns:
         True  — session valid and ``auth_state`` is ``ok`` (or no state yet).
@@ -189,10 +191,9 @@ def _check_session_direct(data_dir: Path, instance: str) -> bool | None:
     if not has_valid_session(data_dir):
         return False
 
-    db_path = data_dir / "sync.db"
-    if db_path.exists():
+    if shared_db_path.exists():
         try:
-            with EventRepository(db_path) as repo:
+            with EventRepository(shared_db_path, instance=instance) as repo:
                 auth_status = repo.get_auth_state(instance)
         except Exception:
             return None
@@ -201,16 +202,15 @@ def _check_session_direct(data_dir: Path, instance: str) -> bool | None:
     return True
 
 
-def _last_sync_summary_direct(data_dir: Path, instance: str) -> str | None:
+def _last_sync_summary_direct(shared_db_path: Path, instance: str) -> str | None:
     """Return a human-readable summary of the most recent sync run from the DB."""
     from app.persistence import EventRepository
 
-    db_path = data_dir / "sync.db"
-    if not db_path.exists():
+    if not shared_db_path.exists():
         return None
 
     try:
-        with EventRepository(db_path) as repo:
+        with EventRepository(shared_db_path, instance=instance) as repo:
             run_info = repo.get_sync_run(instance)
     except Exception:
         return None
@@ -258,6 +258,13 @@ class TelegramBot:
         # Session for all Telegram API calls — routes through the SSL circuit-breaker
         # so allow_insecure_ssl applies to bot traffic too.
         self._session = _build_session()
+        # Migrate legacy per-instance databases to the shared DB on first startup.
+        if cfg.instances:
+            from app.persistence import migrate_legacy_databases
+
+            first_inst = next(iter(cfg.instances.values()))
+            shared_db_path = first_inst.config.shared_db_path
+            migrate_legacy_databases(shared_db_path)
 
     # ------------------------------------------------------------------
     # Public
@@ -537,9 +544,13 @@ class TelegramBot:
 
     def _instance_status_line(self, inst: InstanceConfig) -> str:
         """Build a Telegram-formatted status line for a single sync instance."""
-        auth = _check_session_direct(inst.config.data_dir, inst.config.instance)
+        auth = _check_session_direct(
+            inst.config.data_dir,
+            inst.config.shared_db_path,
+            inst.config.instance,
+        )
         last_sync = _last_sync_summary_direct(
-            inst.config.data_dir, inst.config.instance
+            inst.config.shared_db_path, inst.config.instance
         )
         auth_icon = _auth_icon(auth)
         return (

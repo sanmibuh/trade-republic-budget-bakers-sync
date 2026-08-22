@@ -533,6 +533,7 @@ def test_connect_writes_ok_auth_state_on_success(tmp_path):
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
+    cfg.shared_db_path = tmp_path / "sync.db"
     cfg.instance = "david"
     notifier = MagicMock()
     runner = SyncRunner(cfg, notifier)
@@ -552,6 +553,7 @@ def test_connect_writes_failed_auth_state_on_login_failed(tmp_path):
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
+    cfg.shared_db_path = tmp_path / "sync.db"
     cfg.instance = "david"
     notifier = MagicMock()
     runner = SyncRunner(cfg, notifier)
@@ -573,6 +575,7 @@ def test_connect_writes_expired_auth_state_on_session_expired(tmp_path):
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
+    cfg.shared_db_path = tmp_path / "sync.db"
     cfg.instance = "david"
     notifier = MagicMock()
     runner = SyncRunner(cfg, notifier)
@@ -594,6 +597,7 @@ def test_connect_writes_failed_auth_state_on_authentication_error(tmp_path):
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
+    cfg.shared_db_path = tmp_path / "sync.db"
     cfg.instance = "david"
     notifier = MagicMock()
     runner = SyncRunner(cfg, notifier)
@@ -626,7 +630,8 @@ def test_resync_day_fetches_events_for_exact_date():
 
     since = mock_fetch.call_args[0][0]
     assert since.date() == date(2026, 7, 15)
-    assert since.hour == 0 and since.minute == 0
+    assert since.hour == 0
+    assert since.minute == 0
 
 
 def test_resync_day_skips_dedup_filter(tmp_path):
@@ -1238,6 +1243,7 @@ def test_fetch_events_persists_failed_sync_run_on_login_error(tmp_path):
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
+    cfg.shared_db_path = tmp_path / "sync.db"
     cfg.instance = "david"
     notifier = MagicMock()
     runner = SyncRunner(cfg, notifier)
@@ -1262,6 +1268,7 @@ def test_fetch_events_persists_failed_sync_run_on_auth_error(tmp_path):
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path
+    cfg.shared_db_path = tmp_path / "sync.db"
     cfg.instance = "david"
     notifier = MagicMock()
     runner = SyncRunner(cfg, notifier)
