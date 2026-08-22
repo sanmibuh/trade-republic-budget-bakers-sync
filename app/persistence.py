@@ -137,7 +137,10 @@ class EventRepository:
         eid = dedup_event_id(event)
         event_type = extract_event_type(event)
         event_timestamp = normalize_event_time(event)
-        amount = str(event.get("amount") or event.get("value") or "")
+        amount_raw = event.get("amount")
+        if amount_raw is None:
+            amount_raw = event.get("value")
+        amount = str(amount_raw) if amount_raw is not None else ""
         try:
             raw = json.dumps(event, ensure_ascii=False, default=str)
         except TypeError:

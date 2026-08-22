@@ -415,10 +415,15 @@ def test_get_wallet_record_id_returns_none_when_id_is_null(db):
 
 
 def test_build_event_row_returns_correct_tuple(db):
-    """_build_event_row should return a tuple with the expected 8 fields."""
+    """_build_event_row should return a tuple with the expected 8 fields and exact values."""
     import json
 
-    event = {"id": "row-evt", "timestamp": "2026-07-01T12:00:00Z", "amount": 42.5}
+    event = {
+        "id": "row-evt",
+        "timestamp": "2026-07-01T12:00:00Z",
+        "amount": 42.5,
+        "type": "payment",
+    }
     wallet_record_id = "wid-row"
     with EventRepository(db, instance="test-instance") as repo:
         row = repo._build_event_row(event, wallet_record_id)
@@ -427,13 +432,23 @@ def test_build_event_row_returns_correct_tuple(db):
     eid, instance, event_type, event_timestamp, amount, raw, synced_at, wrid = row
     assert eid == "row-evt"
     assert instance == "test-instance"
-    assert event_type is not None
-    assert event_timestamp is not None
+    assert event_type == "PAYMENT"
+    assert event_timestamp == "2026-07-01T12:00:00Z"
     assert amount == "42.5"
     parsed = json.loads(raw)
     assert parsed["id"] == "row-evt"
     assert synced_at is not None
     assert wrid == "wid-row"
+
+
+def test_build_event_row_zero_amount_stored_as_zero_string(db):
+    """_build_event_row must store '0' for amount=0, not an empty string."""
+    event = {"id": "zero-amt", "timestamp": "2026-07-01T12:00:00Z", "amount": 0}
+    with EventRepository(db) as repo:
+        row = repo._build_event_row(event, None)
+
+    amount = row[4]
+    assert amount == "0"
 
 
 def test_build_event_row_wallet_record_id_none(db):
