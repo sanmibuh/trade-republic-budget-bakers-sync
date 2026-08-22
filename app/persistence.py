@@ -6,7 +6,7 @@ import logging
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from app.tr_mapper import extract_event_type, normalize_event_time
 
@@ -155,7 +155,11 @@ class EventRepository:
         )
 
     def _insert_processed_event(
-        self, event: dict[str, Any], wallet_record_id: str | None, *, conflict: str
+        self,
+        event: dict[str, Any],
+        wallet_record_id: str | None,
+        *,
+        conflict: Literal["IGNORE", "REPLACE"],
     ) -> None:
         self._conn.execute(
             f"INSERT OR {conflict} INTO processed_events "

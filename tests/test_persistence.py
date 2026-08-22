@@ -420,13 +420,13 @@ def test_build_event_row_returns_correct_tuple(db):
 
     event = {"id": "row-evt", "timestamp": "2026-07-01T12:00:00Z", "amount": 42.5}
     wallet_record_id = "wid-row"
-    with EventRepository(db) as repo:
+    with EventRepository(db, instance="test-instance") as repo:
         row = repo._build_event_row(event, wallet_record_id)
 
     assert len(row) == 8
     eid, instance, event_type, event_timestamp, amount, raw, synced_at, wrid = row
     assert eid == "row-evt"
-    assert instance == ""
+    assert instance == "test-instance"
     assert event_type is not None
     assert event_timestamp is not None
     assert amount == "42.5"
