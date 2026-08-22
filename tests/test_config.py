@@ -1162,28 +1162,6 @@ sync:
     assert cfg.instances[0].name == good_name
 
 
-@pytest.mark.parametrize("reserved_name", ["sync.log", "backups"])
-def test_instances_config_load_reserved_name_raises(tmp_path, reserved_name):
-    """Instance names that collide with reserved runtime paths are rejected."""
-    from app.config import InstancesConfig
-
-    yaml_content = f"""\
-sync:
-  instances:
-    - name: "{reserved_name}"
-      phone: "+34600000000"
-      pin: "1234"
-      wallet_api_key: "key"
-      wallet_cash_account_id: "cash"
-      wallet_portfolio_account_id: "portfolio"
-"""
-    cfg_file = tmp_path / "instances.yml"
-    cfg_file.write_text(yaml_content)
-
-    with pytest.raises(ValueError, match="reserved"):
-        InstancesConfig.load(cfg_file)
-
-
 def test_instances_config_load_zero_lookback_days_raises(tmp_path):
     """ValueError when lookback_days is zero."""
     from app.config import InstancesConfig

@@ -379,7 +379,7 @@ pointing to `instances.yml.example`.
   - **Short-lived commands** (`submit-code`, `check-pending`, `check-session`, `list-instances`): do not call `setup_logging` — they run without any logging configuration.
 - `configure_logging()` — minimal console-only fallback; not called by any CLI command.
 - Because logging is configured once at startup and never torn down, `_prepare` in `main.py` needs no handler lifecycle management — there is no handler accumulation risk between in-process calls.
-- The `/logs` Telegram command reads today's lines from the shared `{DATA_DIR}/logs/sync.log` directly (no instance picker — all instances write to the same file).
+- The `/logs` Telegram command reads today's lines from the shared `{DATA_DIR}/sync.log` directly (no instance picker — all instances write to the same file).
 
 ### SSL circuit-breaker (`app/http_client.py`)
 - `SSLCircuitBreaker` — class that encapsulates circuit state (`verify`, `allow_insecure`) and policy.
@@ -488,13 +488,13 @@ image publish workflows.
 ## Data volume
 
 `/app/data` (mounted from host) contains:
-- `{name}/sync.db` — SQLite database per instance with `processed_events` and `auth_state` tables
-- `logs/sync.log` — rotating log file shared by all services (bot, sync, backup); written to `{DATA_DIR}/logs/sync.log`
-- `{name}/` — pytr session/cookie files per instance (login state)
-- `{name}/.tr_2fa_pending` — transient marker created by `TelegramCodeProvider` while waiting for a code
-- `{name}/.tr_2fa_code` — transient file where `submit-code` drops the authenticator code
-- `backup/backups/monthly/` — monthly JSON snapshots (permanent)
-- `backup/backups/yearly/` — yearly JSON snapshots (permanent)
+- `sync/{name}/sync.db` — SQLite database per instance with `processed_events` and `auth_state` tables
+- `sync.log` — rotating log file shared by all services (bot, sync, backup); written to `{DATA_DIR}/sync.log`
+- `sync/{name}/` — pytr session/cookie files per instance (login state)
+- `sync/{name}/.tr_2fa_pending` — transient marker created by `TelegramCodeProvider` while waiting for a code
+- `sync/{name}/.tr_2fa_code` — transient file where `submit-code` drops the authenticator code
+- `backups/monthly/` — monthly JSON snapshots (permanent)
+- `backups/yearly/` — yearly JSON snapshots (permanent)
 
 ---
 
