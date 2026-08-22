@@ -621,3 +621,374 @@ def test_set_sync_run_stores_ran_at_timestamp(tmp_path):
     conn.close()
     assert row is not None
     assert row[0]
+
+
+# ---------------------------------------------------------------------------
+# EventRepository — instance scoping (shared DB, issue #173)
+# ---------------------------------------------------------------------------
+
+
+def test_repo_instance_scopes_filter_unprocessed(tmp_path):
+    """Two instances sharing a DB must not see each other's processed events."""
+    db = tmp_path / "shared.db"
+    event = {"id": "shared-evt", "timestamp": "2024-01-01T00:00:00Z"}
+
+    with EventRepository(db, instance="alice") as repo_a:
+        repo_a.mark_processed(event)
+        repo_a.commit()
+
+    # bob has not processed the same event — must appear as unprocessed for him
+    with EventRepository(db, instance="bob") as repo_b:
+        unprocessed = repo_b.filter_unprocessed([event])
+    assert len(unprocessed) == 1
+
+
+def test_repo_instance_scopes_is_processed(tmp_path):
+    """is_processed must return True only for the owning instance."""
+    db = tmp_path / "shared.db"
+    event = {"id": "scope-evt", "timestamp": "2024-01-01T00:00:00Z"}
+
+    with EventRepository(db, instance="alice") as repo_a:
+        repo_a.mark_processed(event)
+        repo_a.commit()
+        assert repo_a.is_processed("scope-evt")
+
+    with EventRepository(db, instance="bob") as repo_b:
+        assert not repo_b.is_processed("scope-evt")
+
+
+def test_repo_same_event_id_two_instances(tmp_path):
+    """Same event_id must be storeable independently for two instances."""
+    db = tmp_path / "shared.db"
+    event = {"id": "dup-id", "timestamp": "2024-01-01T00:00:00Z"}
+
+    with EventRepository(db, instance="alice") as repo_a:
+        repo_a.mark_processed(event, wallet_record_id="wid-a")
+        repo_a.commit()
+
+    with EventRepository(db, instance="bob") as repo_b:
+        repo_b.mark_processed(event, wallet_record_id="wid-b")
+        repo_b.commit()
+
+    with EventRepository(db, instance="alice") as repo_a:
+        assert repo_a.get_wallet_record_id(event) == "wid-a"
+
+    with EventRepository(db, instance="bob") as repo_b:
+        assert repo_b.get_wallet_record_id(event) == "wid-b"
+
+
+def test_repo_instance_scopes_count_processed(tmp_path):
+    """count_processed must count only rows for the repo's own instance."""
+    db = tmp_path / "shared.db"
+    e1 = {"id": "e1", "timestamp": "2024-01-01T00:00:00Z"}
+    e2 = {"id": "e2", "timestamp": "2024-01-01T00:00:00Z"}
+
+    with EventRepository(db, instance="alice") as repo_a:
+        repo_a.mark_processed(e1)
+        repo_a.mark_processed(e2)
+        repo_a.commit()
+        assert repo_a.count_processed() == 2
+
+    with EventRepository(db, instance="bob") as repo_b:
+        assert repo_b.count_processed() == 0
+
+
+def test_repo_instance_scopes_purge(tmp_path, monkeypatch):
+    """purge_old_records must only delete records belonging to the repo's instance."""
+    db = tmp_path / "shared.db"
+    old = datetime.now(UTC) - timedelta(days=90)
+    recent = datetime.now(UTC)
+
+    with EventRepository(db, instance="alice") as repo_a:
+        _mark_processed_at(repo_a, "alice-old", old, monkeypatch)
+        _mark_processed_at(repo_a, "alice-recent", recent, monkeypatch)
+
+    with EventRepository(db, instance="bob") as repo_b:
+        _mark_processed_at(repo_b, "alice-old", old, monkeypatch)  # same id, bob's
+        repo_b.purge_old_records(ttl_days=60)
+        # bob's old event is deleted
+        assert not repo_b.is_processed("alice-old")
+
+    # alice's records must be untouched
+    with EventRepository(db, instance="alice") as repo_a:
+        assert repo_a.is_processed("alice-old")
+        assert repo_a.is_processed("alice-recent")
+
+
+def test_repo_instance_scopes_get_raw(tmp_path):
+    """get_raw must return only the row for the repo's instance."""
+    db = tmp_path / "shared.db"
+    event = {"id": "raw-evt", "timestamp": "2024-01-01T00:00:00Z", "data": "alice"}
+
+    with EventRepository(db, instance="alice") as repo_a:
+        repo_a.mark_processed(event)
+        repo_a.commit()
+
+    with EventRepository(db, instance="bob") as repo_b:
+        assert repo_b.get_raw("raw-evt") is None
+
+
+def test_repo_instance_scopes_mark_processed_force(tmp_path):
+    """mark_processed_force must upsert within the same instance scope only."""
+    db = tmp_path / "shared.db"
+    event = {"id": "force-evt", "timestamp": "2024-01-01T00:00:00Z"}
+
+    with EventRepository(db, instance="alice") as repo_a:
+        repo_a.mark_processed(event, wallet_record_id="wid-orig")
+        repo_a.commit()
+
+    with EventRepository(db, instance="alice") as repo_a:
+        repo_a.mark_processed_force(event, wallet_record_id="wid-updated")
+        repo_a.commit()
+        assert repo_a.get_wallet_record_id(event) == "wid-updated"
+        assert repo_a.count_processed() == 1  # no duplicate row
+
+
+# ---------------------------------------------------------------------------
+# EventRepository — instance column migration on existing DB
+# ---------------------------------------------------------------------------
+
+
+def test_repo_migration_adds_instance_column_to_existing_db(tmp_path):
+    """Opening a per-instance DB (without instance column) must add the column."""
+    db = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE processed_events ("
+        "event_id TEXT PRIMARY KEY, event_type TEXT NOT NULL DEFAULT '', "
+        "event_timestamp TEXT NOT NULL DEFAULT '', amount TEXT NOT NULL DEFAULT '', "
+        "raw TEXT NOT NULL DEFAULT '', synced_at TEXT NOT NULL, "
+        "wallet_record_id TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO processed_events "
+        "(event_id, event_type, event_timestamp, amount, raw, synced_at) "
+        "VALUES ('legacy-evt', 'BANK_TRANSACTION_INCOMING', '2024-01-01', '10', '{}', '2024-01-01')"
+    )
+    conn.commit()
+    conn.close()
+
+    # Opening with the new EventRepository must add instance column and find the legacy row
+    with EventRepository(db, instance="") as repo:
+        assert repo.is_processed("legacy-evt")
+        cols = repo._column_names("processed_events")
+    assert "instance" in cols
+
+
+# ---------------------------------------------------------------------------
+# migrate_legacy_databases
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_legacy_databases_copies_rows(tmp_path):
+    """migrate_legacy_databases must copy processed_events rows from per-instance DBs."""
+    from app.persistence import migrate_legacy_databases
+
+    # Create a per-instance DB structure
+    instance_dir = tmp_path / "sync" / "alice"
+    instance_dir.mkdir(parents=True)
+    legacy_db = instance_dir / "sync.db"
+    conn = sqlite3.connect(legacy_db)
+    conn.execute(
+        "CREATE TABLE processed_events ("
+        "event_id TEXT PRIMARY KEY, event_type TEXT NOT NULL DEFAULT '', "
+        "event_timestamp TEXT NOT NULL DEFAULT '', amount TEXT NOT NULL DEFAULT '', "
+        "raw TEXT NOT NULL DEFAULT '', synced_at TEXT NOT NULL, "
+        "wallet_record_id TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO processed_events "
+        "(event_id, event_type, event_timestamp, amount, raw, synced_at) "
+        "VALUES ('alice-evt', 'BANK_TRANSACTION_INCOMING', '2024-01-01', '10', '{}', '2024-01-01')"
+    )
+    conn.execute(
+        "CREATE TABLE auth_state (instance TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO auth_state (instance, status, updated_at) VALUES ('alice', 'ok', '2024-01-01')"
+    )
+    conn.commit()
+    conn.close()
+
+    shared_db = tmp_path / "sync.db"
+    migrate_legacy_databases(shared_db)
+
+    # The shared DB must now contain alice's event with instance='alice'
+    with EventRepository(shared_db, instance="alice") as repo:
+        assert repo.is_processed("alice-evt")
+        assert repo.get_auth_state("alice") == "ok"
+
+
+def test_migrate_legacy_databases_stamps_instance_column(tmp_path):
+    """migrate_legacy_databases must stamp instance=name from directory name."""
+    from app.persistence import migrate_legacy_databases
+
+    for name in ("alice", "bob"):
+        instance_dir = tmp_path / "sync" / name
+        instance_dir.mkdir(parents=True)
+        legacy_db = instance_dir / "sync.db"
+        conn = sqlite3.connect(legacy_db)
+        conn.execute(
+            "CREATE TABLE processed_events ("
+            "event_id TEXT PRIMARY KEY, event_type TEXT NOT NULL DEFAULT '', "
+            "event_timestamp TEXT NOT NULL DEFAULT '', amount TEXT NOT NULL DEFAULT '', "
+            "raw TEXT NOT NULL DEFAULT '', synced_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            f"INSERT INTO processed_events "
+            f"(event_id, event_type, event_timestamp, amount, raw, synced_at) "
+            f"VALUES ('{name}-evt', '', '2024-01-01', '0', '{{}}', '2024-01-01')"
+        )
+        conn.commit()
+        conn.close()
+
+    shared_db = tmp_path / "sync.db"
+    migrate_legacy_databases(shared_db)
+
+    with EventRepository(shared_db, instance="alice") as repo:
+        assert repo.is_processed("alice-evt")
+        assert not repo.is_processed("bob-evt")
+
+    with EventRepository(shared_db, instance="bob") as repo:
+        assert repo.is_processed("bob-evt")
+        assert not repo.is_processed("alice-evt")
+
+
+def test_migrate_legacy_databases_skips_when_shared_db_exists(tmp_path):
+    """migrate_legacy_databases must be a no-op when shared DB already exists."""
+    from app.persistence import migrate_legacy_databases
+
+    # Create a legacy per-instance DB
+    instance_dir = tmp_path / "sync" / "alice"
+    instance_dir.mkdir(parents=True)
+    legacy_db = instance_dir / "sync.db"
+    conn = sqlite3.connect(legacy_db)
+    conn.execute(
+        "CREATE TABLE processed_events ("
+        "event_id TEXT PRIMARY KEY, event_type TEXT NOT NULL DEFAULT '', "
+        "event_timestamp TEXT NOT NULL DEFAULT '', amount TEXT NOT NULL DEFAULT '', "
+        "raw TEXT NOT NULL DEFAULT '', synced_at TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO processed_events "
+        "(event_id, event_type, event_timestamp, amount, raw, synced_at) "
+        "VALUES ('alice-evt', '', '2024-01-01', '0', '{}', '2024-01-01')"
+    )
+    conn.commit()
+    conn.close()
+
+    # Pre-create the shared DB (empty)
+    shared_db = tmp_path / "sync.db"
+    shared_db.touch()
+
+    migrate_legacy_databases(shared_db)
+
+    # Shared DB must still be empty — no migration occurred
+    conn = sqlite3.connect(shared_db)
+    tables = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()
+    conn.close()
+    assert tables == []
+
+
+def test_migrate_legacy_databases_skips_corrupt_db(tmp_path, caplog):
+    """migrate_legacy_databases must warn and skip corrupt/locked old DBs."""
+    import logging
+
+    from app.persistence import migrate_legacy_databases
+
+    instance_dir = tmp_path / "sync" / "bad"
+    instance_dir.mkdir(parents=True)
+    bad_db = instance_dir / "sync.db"
+    bad_db.write_bytes(b"not a sqlite database at all!")
+
+    shared_db = tmp_path / "sync.db"
+
+    with caplog.at_level(logging.WARNING, logger="app.persistence"):
+        migrate_legacy_databases(shared_db)
+
+    assert any("bad" in r.message for r in caplog.records)
+
+
+def test_migrate_legacy_databases_is_idempotent(tmp_path):
+    """Calling migrate_legacy_databases twice must not duplicate rows."""
+    from app.persistence import migrate_legacy_databases
+
+    instance_dir = tmp_path / "sync" / "alice"
+    instance_dir.mkdir(parents=True)
+    legacy_db = instance_dir / "sync.db"
+    conn = sqlite3.connect(legacy_db)
+    conn.execute(
+        "CREATE TABLE processed_events ("
+        "event_id TEXT PRIMARY KEY, event_type TEXT NOT NULL DEFAULT '', "
+        "event_timestamp TEXT NOT NULL DEFAULT '', amount TEXT NOT NULL DEFAULT '', "
+        "raw TEXT NOT NULL DEFAULT '', synced_at TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO processed_events "
+        "(event_id, event_type, event_timestamp, amount, raw, synced_at) "
+        "VALUES ('alice-evt', '', '2024-01-01', '0', '{}', '2024-01-01')"
+    )
+    conn.commit()
+    conn.close()
+
+    shared_db = tmp_path / "sync.db"
+    # Call once to migrate
+    migrate_legacy_databases(shared_db)
+    # Rename shared DB away and recreate to simulate second call
+    # Actually — delete shared DB to allow second call (skips when exists)
+    # Instead test: shared DB doesn't exist for both calls (both trigger migration)
+    # But first call creates shared DB, so second call is skipped.
+    # Test that first call works, then shared DB exists, second call is no-op.
+    migrate_legacy_databases(shared_db)
+
+    with EventRepository(shared_db, instance="alice") as repo:
+        assert repo.count_processed() == 1
+
+
+def test_migrate_legacy_databases_no_old_dbs(tmp_path):
+    """migrate_legacy_databases must succeed when there are no old per-instance DBs."""
+    from app.persistence import migrate_legacy_databases
+
+    # No sync/ directory at all
+    shared_db = tmp_path / "sync.db"
+    migrate_legacy_databases(shared_db)  # must not raise
+    assert not shared_db.exists()  # no shared DB created when nothing to migrate
+
+
+def test_migrate_legacy_databases_sync_dir_exists_but_empty(tmp_path):
+    """migrate_legacy_databases is a no-op when sync/ dir has no per-instance sync.db files."""
+    from app.persistence import migrate_legacy_databases
+
+    # sync/ dir exists but no instances inside
+    (tmp_path / "sync").mkdir()
+    shared_db = tmp_path / "sync.db"
+    migrate_legacy_databases(shared_db)  # must not raise
+    assert not shared_db.exists()  # nothing to migrate
+
+
+def test_migrate_legacy_databases_old_db_has_only_auth_state(tmp_path):
+    """migrate_legacy_databases handles old DBs with auth_state but no processed_events."""
+    from app.persistence import migrate_legacy_databases
+
+    instance_dir = tmp_path / "sync" / "alice"
+    instance_dir.mkdir(parents=True)
+    legacy_db = instance_dir / "sync.db"
+    conn = sqlite3.connect(legacy_db)
+    # Only auth_state, no processed_events table
+    conn.execute(
+        "CREATE TABLE auth_state (instance TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO auth_state (instance, status, updated_at) VALUES ('alice', 'ok', '2024-01-01')"
+    )
+    conn.commit()
+    conn.close()
+
+    shared_db = tmp_path / "sync.db"
+    migrate_legacy_databases(shared_db)
+
+    with EventRepository(shared_db, instance="alice") as repo:
+        assert repo.get_auth_state("alice") == "ok"
+        assert repo.count_processed() == 0

@@ -78,6 +78,15 @@ class Config:
     label_ids: dict[str, str] = field(default_factory=dict)
     category_strategy: str = "none"
 
+    @property
+    def shared_db_path(self) -> Path:
+        """Path to the shared ``sync.db`` at the root data directory level.
+
+        ``data_dir`` is ``{root}/sync/{instance}``; the shared database lives at
+        ``{root}/sync.db`` — two levels above the instance subdirectory.
+        """
+        return self.data_dir.parent.parent / "sync.db"
+
 
 @dataclass(frozen=True)
 class BackupConfig:

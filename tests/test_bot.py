@@ -1659,13 +1659,13 @@ def test_format_sync_timestamp_invalid_returns_raw():
 
 
 def test_check_session_direct_no_cookies_returns_false(tmp_path):
-    result = _check_session_direct(tmp_path, "user1")
+    result = _check_session_direct(tmp_path, tmp_path / "sync.db", "user1")
     assert result is False
 
 
 def test_check_session_direct_no_db_returns_true_when_cookie_valid(tmp_path):
     with patch("app.bot.has_valid_session", return_value=True):
-        result = _check_session_direct(tmp_path, "user1")
+        result = _check_session_direct(tmp_path, tmp_path / "sync.db", "user1")
     assert result is True
 
 
@@ -1677,7 +1677,7 @@ def test_check_session_direct_auth_state_failed_returns_false(tmp_path):
         repo.set_auth_state("user1", "failed")
 
     with patch("app.bot.has_valid_session", return_value=True):
-        result = _check_session_direct(tmp_path, "user1")
+        result = _check_session_direct(tmp_path, db_path, "user1")
     assert result is False
 
 
@@ -1689,7 +1689,7 @@ def test_check_session_direct_auth_state_ok_returns_true(tmp_path):
         repo.set_auth_state("user1", "ok")
 
     with patch("app.bot.has_valid_session", return_value=True):
-        result = _check_session_direct(tmp_path, "user1")
+        result = _check_session_direct(tmp_path, db_path, "user1")
     assert result is True
 
 
@@ -1699,7 +1699,7 @@ def test_check_session_direct_auth_state_ok_returns_true(tmp_path):
 
 
 def test_last_sync_summary_direct_no_db_returns_none(tmp_path):
-    result = _last_sync_summary_direct(tmp_path, "user1")
+    result = _last_sync_summary_direct(tmp_path / "sync.db", "user1")
     assert result is None
 
 
@@ -1710,7 +1710,7 @@ def test_last_sync_summary_direct_success_run(tmp_path):
     with EventRepository(db_path) as repo:
         repo.set_sync_run("user1", status="success", saved=5, failed=0, excluded=1)
 
-    result = _last_sync_summary_direct(tmp_path, "user1")
+    result = _last_sync_summary_direct(db_path, "user1")
     assert result is not None
     assert "✅" in result
     assert "success" in result
@@ -1725,7 +1725,7 @@ def test_last_sync_summary_direct_failed_run(tmp_path):
     with EventRepository(db_path) as repo:
         repo.set_sync_run("user1", status="failed", saved=0, failed=2, excluded=0)
 
-    result = _last_sync_summary_direct(tmp_path, "user1")
+    result = _last_sync_summary_direct(db_path, "user1")
     assert result is not None
     assert "❌" in result
     assert "failed" in result
@@ -1738,7 +1738,7 @@ def test_last_sync_summary_direct_no_run_for_instance_returns_none(tmp_path):
     with EventRepository(db_path) as repo:
         repo.set_sync_run("other", status="success", saved=1, failed=0, excluded=0)
 
-    result = _last_sync_summary_direct(tmp_path, "user1")
+    result = _last_sync_summary_direct(db_path, "user1")
     assert result is None
 
 

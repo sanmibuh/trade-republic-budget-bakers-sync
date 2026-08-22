@@ -1773,3 +1773,59 @@ def test_instances_config_path_constant_value():
     from app.config import INSTANCES_CONFIG_PATH
 
     assert Path("/app/config/instances.yml") == INSTANCES_CONFIG_PATH
+
+
+# ---------------------------------------------------------------------------
+# Config.shared_db_path property (issue #173)
+# ---------------------------------------------------------------------------
+
+
+def test_config_shared_db_path_is_root_sync_db(tmp_path):
+    """Config.shared_db_path must point to {root_data_dir}/sync.db."""
+    from app.config import Config
+
+    root = tmp_path / "data"
+    instance_data_dir = root / "sync" / "alice"
+    cfg = Config(
+        owner_name="Alice",
+        phone_number="+34600000000",
+        pin="1234",
+        wallet_api_key="key",
+        wallet_cash_account_id="cash",
+        wallet_portfolio_account_id="port",
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        lookback_days=7,
+        dedup_ttl_days=60,
+        data_dir=instance_data_dir,
+        instance="alice",
+    )
+
+    assert cfg.shared_db_path == root / "sync.db"
+
+
+def test_instances_config_to_config_shared_db_path(tmp_path):
+    """to_config() must set shared_db_path to {root_data_dir}/sync.db."""
+    import textwrap
+
+    from app.config import InstancesConfig
+
+    yaml_content = textwrap.dedent(f"""\
+        data_dir: {tmp_path}
+        telegram_bot_token: "tok"
+        telegram_chat_id: "cid"
+        sync:
+          wallet_api_key: "key"
+          instances:
+            - name: user1
+              phone: "+34600000000"
+              pin: "1234"
+              wallet_cash_account_id: "cash"
+              wallet_portfolio_account_id: "port"
+    """)
+    cfg_file = tmp_path / "i.yml"
+    cfg_file.write_text(yaml_content)
+
+    cfg = InstancesConfig.load(cfg_file).to_config("user1")
+
+    assert cfg.shared_db_path == tmp_path / "sync.db"

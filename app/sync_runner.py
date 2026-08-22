@@ -103,7 +103,9 @@ class SyncRunner:
         observability and must never interrupt the main sync flow.
         """
         try:
-            with EventRepository(self._cfg.data_dir / _SYNC_DB) as repo:
+            with EventRepository(
+                self._cfg.shared_db_path, instance=self._cfg.instance
+            ) as repo:
                 repo.set_auth_state(self._cfg.instance, status)
         except Exception:
             log.warning(
@@ -120,7 +122,9 @@ class SyncRunner:
         main sync flow.
         """
         try:
-            with EventRepository(self._cfg.data_dir / _SYNC_DB) as repo:
+            with EventRepository(
+                self._cfg.shared_db_path, instance=self._cfg.instance
+            ) as repo:
                 repo.set_sync_run(
                     self._cfg.instance,
                     status="failed",
