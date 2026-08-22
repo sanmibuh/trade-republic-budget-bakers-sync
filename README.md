@@ -188,12 +188,13 @@ The built-in Telegram bot lets you trigger sync and backup operations on demand 
 | Command | Description |
 |---|---|
 | `/sync` | Force a Trade Republic sync — choose instance via inline buttons |
+| `/status` | Show all instances and whether backup is available |
 | `/logs` | Show today's logs for an instance — choose instance via inline buttons |
-| `/code <instance> <code>` | Submit an authenticator code to a waiting login process |
 | `/backup` | Force a Wallet backup — guided by inline buttons (monthly/yearly) |
 | `/backup monthly [YYYY-MM]` | Monthly backup, optional period (default: previous month) |
 | `/backup yearly [YYYY]` | Yearly backup, optional year (default: previous year) |
-| `/status` | Show all instances and whether backup is available |
+| `/resync` | Force re-sync of a specific day, bypassing deduplication |
+| `/code <instance> <code>` | Submit an authenticator code to a waiting login process |
 
 Backup commands are only available when at least one sync instance is configured (the first instance's `wallet_api_key` is used).
 
