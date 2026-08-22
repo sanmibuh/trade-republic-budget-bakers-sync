@@ -445,7 +445,7 @@ def test_build_event_row_wallet_record_id_none(db):
     assert row[-1] is None
 
 
-def test_build_event_row_falls_back_to_str_on_type_error(db, monkeypatch):
+def test_build_event_row_falls_back_to_str_on_type_error(db):
     """_build_event_row falls back to str(event) when json.dumps raises TypeError."""
     from unittest.mock import patch
 

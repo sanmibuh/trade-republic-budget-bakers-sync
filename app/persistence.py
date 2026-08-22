@@ -154,6 +154,17 @@ class EventRepository:
             wallet_record_id,
         )
 
+    _SQL_INSERT_IGNORE = (
+        "INSERT OR IGNORE INTO processed_events "
+        "(event_id, instance, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    _SQL_INSERT_REPLACE = (
+        "INSERT OR REPLACE INTO processed_events "
+        "(event_id, instance, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+
     def _insert_processed_event(
         self,
         event: dict[str, Any],
@@ -161,12 +172,12 @@ class EventRepository:
         *,
         conflict: Literal["IGNORE", "REPLACE"],
     ) -> None:
-        self._conn.execute(
-            f"INSERT OR {conflict} INTO processed_events "
-            "(event_id, instance, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            self._build_event_row(event, wallet_record_id),
+        sql = (
+            self._SQL_INSERT_IGNORE
+            if conflict == "IGNORE"
+            else self._SQL_INSERT_REPLACE
         )
+        self._conn.execute(sql, self._build_event_row(event, wallet_record_id))
 
     def mark_processed(
         self, event: dict[str, Any], *, wallet_record_id: str | None = None
