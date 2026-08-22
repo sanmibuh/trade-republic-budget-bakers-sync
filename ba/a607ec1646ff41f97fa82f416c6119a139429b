@@ -1,0 +1,30 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 19,24-25,193,234,250-251,262,269,326,408
+Makefile
+  h_97a91c9e567f87 3,17,24-25,28,36-38,53-55,57-58,60-61,63-64,66-67
+README.md
+  h_97a91c9e567f87 17,20-21,28,31,41,43,45-78,80,82-100,102-107,111,114-117,130,133-135,138,177,204,218-219,223,225,235-236,251-259
+app/__main__.py
+  h_97a91c9e567f87 348-350
+app/bot.py
+  h_97a91c9e567f87 125
+app/config.py
+  h_97a91c9e567f87 3,11-13,15
+deploy/DEPLOY.md
+  h_97a91c9e567f87 14-15,18,26,40-41,195-196
+deploy/local/.gitignore
+  h_97a91c9e567f87 1,4
+tests/test_bot.py
+  h_97a91c9e567f87 172,181,188,242,255,263,270,278,285
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "baa607ec1646ff41f97fa82f416c6119a139429b",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
