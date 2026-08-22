@@ -258,13 +258,12 @@ class TelegramBot:
         # Session for all Telegram API calls — routes through the SSL circuit-breaker
         # so allow_insecure_ssl applies to bot traffic too.
         self._session = _build_session()
-        # Migrate legacy per-instance databases to the shared DB on first startup.
+        # Initialise the shared database schema on startup.
         if cfg.instances:
-            from app.persistence import migrate_legacy_databases
+            from app.persistence import init_db
 
             first_inst = next(iter(cfg.instances.values()))
-            shared_db_path = first_inst.config.shared_db_path
-            migrate_legacy_databases(shared_db_path)
+            init_db(first_inst.config.shared_db_path)
 
     # ------------------------------------------------------------------
     # Public

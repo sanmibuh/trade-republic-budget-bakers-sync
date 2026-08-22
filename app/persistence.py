@@ -51,53 +51,34 @@ def dedup_event_id(event: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# EventRepository
+# Schema initialisation
 # ---------------------------------------------------------------------------
 
-_CREATE_TABLE = """
-    CREATE TABLE IF NOT EXISTS processed_events (
-        event_id         TEXT NOT NULL,
-        instance         TEXT NOT NULL DEFAULT '',
-        event_type       TEXT NOT NULL DEFAULT '',
-        event_timestamp  TEXT NOT NULL DEFAULT '',
-        amount           TEXT NOT NULL DEFAULT '',
-        raw              TEXT NOT NULL DEFAULT '',
-        synced_at        TEXT NOT NULL,
-        wallet_record_id TEXT,
-        PRIMARY KEY (event_id, instance)
-    )
-"""
 
-_MIGRATE_ADD_WALLET_RECORD_ID = """
-    ALTER TABLE processed_events ADD COLUMN wallet_record_id TEXT
-"""
+def init_db(db_path: Path) -> None:
+    """Initialise the SQLite database schema from ``schema.sql``.
 
-_MIGRATE_ADD_INSTANCE = """
-    ALTER TABLE processed_events ADD COLUMN instance TEXT NOT NULL DEFAULT ''
-"""
+    Reads the idempotent DDL bundled alongside this module and executes it
+    against *db_path*, creating the file if it does not yet exist.  Safe to
+    call multiple times — all statements use ``CREATE … IF NOT EXISTS``.
 
-_CREATE_INDEX = """
-    CREATE INDEX IF NOT EXISTS idx_synced_at ON processed_events (synced_at)
-"""
+    Call this once at process startup (e.g. from ``main._prepare``) before
+    any :class:`EventRepository` is opened.
 
-_CREATE_AUTH_STATE_TABLE = """
-    CREATE TABLE IF NOT EXISTS auth_state (
-        instance    TEXT PRIMARY KEY,
-        status      TEXT NOT NULL,
-        updated_at  TEXT NOT NULL
-    )
-"""
+    Args:
+        db_path: Filesystem path for the SQLite database file.
+    """
+    sql = (Path(__file__).parent / "schema.sql").read_text()
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(sql)
+    finally:
+        conn.close()
 
-_CREATE_SYNC_RUNS_TABLE = """
-    CREATE TABLE IF NOT EXISTS sync_runs (
-        instance  TEXT PRIMARY KEY,
-        status    TEXT NOT NULL,
-        ran_at    TEXT NOT NULL,
-        saved     INTEGER NOT NULL DEFAULT 0,
-        failed    INTEGER NOT NULL DEFAULT 0,
-        excluded  INTEGER NOT NULL DEFAULT 0
-    )
-"""
+
+# ---------------------------------------------------------------------------
+# EventRepository
+# ---------------------------------------------------------------------------
 
 
 class EventRepository:
@@ -109,7 +90,12 @@ class EventRepository:
     All ``processed_events`` queries are scoped to *instance* so that a single
     shared database can serve multiple sync instances without cross-contamination.
 
+    The database schema must be initialised by calling :func:`init_db` once at
+    process startup before any ``EventRepository`` is opened.
+
     Usage::
+
+        init_db(db_path)           # once at startup
 
         with EventRepository(db_path, instance="alice") as repo:
             repo.purge_old_records()
@@ -122,25 +108,6 @@ class EventRepository:
     def __init__(self, db_path: Path, instance: str = "") -> None:
         self._instance = instance
         self._conn = sqlite3.connect(db_path)
-        self._conn.execute(_CREATE_TABLE)
-        self._conn.execute(_CREATE_INDEX)
-        self._conn.execute(_CREATE_AUTH_STATE_TABLE)
-        self._conn.execute(_CREATE_SYNC_RUNS_TABLE)
-        self._migrate()
-        self._conn.commit()
-
-    def _migrate(self) -> None:
-        cols = self._column_names("processed_events")
-        if "wallet_record_id" not in cols:
-            self._conn.execute(_MIGRATE_ADD_WALLET_RECORD_ID)
-        if "instance" not in cols:
-            self._conn.execute(_MIGRATE_ADD_INSTANCE)
-
-    def _column_names(self, table: str) -> set[str]:
-        return {
-            row[1]
-            for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
-        }
 
     def filter_unprocessed(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         events_with_ids = [(event, dedup_event_id(event)) for event in events]
@@ -357,137 +324,3 @@ class EventRepository:
 
     def __exit__(self, *_: object) -> None:
         self.close()
-
-
-# ---------------------------------------------------------------------------
-# Legacy per-instance DB migration (issue #173)
-# ---------------------------------------------------------------------------
-
-
-def migrate_legacy_databases(shared_db_path: Path) -> None:
-    """Migrate existing per-instance ``sync.db`` files into the shared database.
-
-    Trigger condition: the shared database at *shared_db_path* does not yet
-    exist, but at least one old per-instance ``{root}/sync/{name}/sync.db``
-    file exists.  When the shared DB is already present this function is a
-    no-op (idempotent by design).
-
-    For each discovered per-instance database:
-    - ``processed_events`` rows are copied with ``instance`` stamped from the
-      directory name.
-    - ``auth_state`` rows are copied as-is (already keyed by instance name).
-    - Locked or corrupt databases are skipped with a ``WARNING`` log.
-    - Old database files are left untouched — no deletion.
-
-    Args:
-        shared_db_path: Destination path for the new shared ``sync.db``.
-    """
-    if shared_db_path.exists():
-        return
-
-    root_data_dir = shared_db_path.parent
-    sync_dir = root_data_dir / "sync"
-    if not sync_dir.is_dir():
-        return
-
-    old_dbs: list[tuple[str, Path]] = []
-    for entry in sorted(sync_dir.iterdir()):
-        if entry.is_dir():
-            candidate = entry / "sync.db"
-            if candidate.exists():
-                old_dbs.append((entry.name, candidate))
-
-    if not old_dbs:
-        return
-
-    # Open (create) the shared DB with the new schema
-    with EventRepository(shared_db_path, instance="") as _:
-        pass  # schema creation handled by __init__
-
-    shared_conn = sqlite3.connect(shared_db_path)
-    try:
-        for name, old_path in old_dbs:
-            try:
-                _copy_legacy_db(shared_conn, old_path, name)
-            except Exception as exc:
-                log.warning(
-                    "Skipping legacy DB for instance %r (%s): %s",
-                    name,
-                    old_path,
-                    exc,
-                )
-        shared_conn.commit()
-    finally:
-        shared_conn.close()
-
-
-def _copy_legacy_db(shared_conn: sqlite3.Connection, old_path: Path, name: str) -> None:
-    """Copy rows from *old_path* into *shared_conn*, stamping ``instance = name``."""
-    old_conn = sqlite3.connect(old_path)
-    try:
-        # Validate that it is a proper SQLite file by querying the schema
-        tables = {
-            row[0]
-            for row in old_conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
-
-        if "processed_events" in tables:
-            old_cols = {
-                row[1]
-                for row in old_conn.execute(
-                    "PRAGMA table_info(processed_events)"
-                ).fetchall()
-            }
-            rows = old_conn.execute("SELECT * FROM processed_events").fetchall()
-            col_list = [
-                row[1]
-                for row in old_conn.execute(
-                    "PRAGMA table_info(processed_events)"
-                ).fetchall()
-            ]
-            for row in rows:
-                row_dict = dict(zip(col_list, row, strict=True))
-                shared_conn.execute(
-                    "INSERT OR IGNORE INTO processed_events "
-                    "(event_id, instance, event_type, event_timestamp, amount, raw, "
-                    "synced_at, wallet_record_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        row_dict.get("event_id", ""),
-                        name,
-                        row_dict.get("event_type", ""),
-                        row_dict.get("event_timestamp", ""),
-                        row_dict.get("amount", ""),
-                        row_dict.get("raw", ""),
-                        row_dict.get("synced_at", ""),
-                        row_dict.get("wallet_record_id"),
-                    ),
-                )
-            pe_count = len(rows)
-        else:
-            pe_count = 0
-            old_cols = set()
-
-        if "auth_state" in tables:
-            auth_rows = old_conn.execute("SELECT * FROM auth_state").fetchall()
-            for auth_row in auth_rows:
-                shared_conn.execute(
-                    "INSERT OR IGNORE INTO auth_state (instance, status, updated_at) "
-                    "VALUES (?, ?, ?)",
-                    auth_row,
-                )
-            auth_count = len(auth_rows)
-        else:
-            auth_count = 0
-
-        log.info(
-            "Migrated %d processed_events and %d auth_state rows from sync/%s/sync.db",
-            pe_count,
-            auth_count,
-            name,
-        )
-        _ = old_cols  # referenced to satisfy linter (used above for dict building)
-    finally:
-        old_conn.close()

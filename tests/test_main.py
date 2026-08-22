@@ -321,6 +321,7 @@ def test_prepare_creates_data_dir_and_returns_notifier(tmp_path):
 
     cfg = MagicMock()
     cfg.data_dir = tmp_path / "data"
+    cfg.shared_db_path = tmp_path / "sync.db"
     cfg.telegram_bot_token = "tok"
     cfg.telegram_chat_id = "chat"
     cfg.owner_name = "David"
