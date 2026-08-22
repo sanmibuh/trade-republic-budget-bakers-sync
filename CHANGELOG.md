@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [7.2.0] - 2026-08-22
+
+### What's Changed
+* Remove legacy single-container mode and hardcode instances config path — [#168](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/168)
+**Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v7.1.1...v7.2.0
+
+
 ## [7.1.1] - 2026-08-21
 
 ### What's Changed
