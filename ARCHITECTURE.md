@@ -120,16 +120,16 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
   `/code` submissions are rejected cleanly.
 - Code delivery: the `/code` bot command calls `python -m app submit-code --instance <name> <code>` in-process
   (no Docker SDK, no `exec_run`). All services share the same data volume, so the file written by `submit-code`
-  is immediately visible to the blocked login/sync process.
-- On-demand renewal: `/login` (bot) → `python -m app login` → `main.run_login()` triggers the 2FA flow explicitly.
-  Scheduled cron syncs that hit an expired session trigger the same flow automatically (Eli via push, David via
-  `/code`).
-- `run()` (sync) and `run_login()` share `_prepare(cfg)` (data dir + SSL circuit-breaker + logging + `Notifier`)
+  is immediately visible to the blocked sync process.
+- When a sync (cron or bot-triggered) hits an expired session, the 2FA flow is triggered automatically in-process
+  via `TelegramCodeProvider` (or `TerminalCodeProvider` on interactive bootstrap). No separate `/login` command
+  is needed — the sync self-heals and continues once the code is received.
+- `run()` (sync) shares `_prepare(cfg)` (data dir + SSL circuit-breaker + logging + `Notifier`)
   as a module-level bootstrap helper.
 - Sync orchestration logic lives in the `SyncRunner` class (`sync_runner.py`). Its public methods — `connect`,
   `fetch_events`, `build_batch`, `process_results` — accept `cfg` and `notifier` injected via the constructor,
-  making dependencies explicit and easy to mock. `run()` and `run_login()` are thin wrappers that call `_prepare`,
-  construct a `SyncRunner`, and delegate to it. `main.py` re-exports `SyncRunner`, `_SyncCounts`, `_Batch`, and
+  making dependencies explicit and easy to mock. `run()` is a thin wrapper that calls `_prepare`,
+  constructs a `SyncRunner`, and delegates to it. `main.py` re-exports `SyncRunner`, `_SyncCounts`, `_Batch`, and
   `AuthenticationError` for backward compatibility.
 
 ### Deduplication
@@ -192,11 +192,10 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   - `python -m app sync --instance <name>` — resolves config from `instances.yml` and runs sync for that instance
   - `python -m app backup <mode> [param]` — dispatches to `backup.run_auto/run_monthly/run_yearly`
   - `python -m app bot` — starts the Telegram bot
-   - `python -m app login` — runs `main.run_login()`, an on-demand 2FA session renewal
-   - `python -m app submit-code <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting
-     login/sync process to pick up
-   - `python -m app resync YYYY-MM-DD` — runs `main.run_resync(date_str)`, force re-syncing a specific day
-   - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG_PATH`, one per line.
+  - `python -m app submit-code <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting
+    sync process to pick up
+  - `python -m app resync YYYY-MM-DD` — runs `main.run_resync(date_str)`, force re-syncing a specific day
+  - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG_PATH`, one per line.
   - `python -m app list-schedules` — prints `name<TAB>schedule` for every instance that has a schedule,
     one per line. Used by `entrypoint.sh` to register one cron job per instance with its own schedule.
   - `python -m app get-backup-schedule` — prints the `backup_schedule` from `INSTANCES_CONFIG_PATH`, or nothing.
@@ -228,17 +227,16 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 - Yearly cleanup removes the 12 monthly files whose period is covered by the yearly backup.
 
 ### Telegram bot
-- `app/bot.py`: long-polling bot and command handlers; wires `app/bot_keyboards.py`; executes all sync/login/resync/backup operations via direct in-process Python calls (no Docker SDK, no `exec_run`).
+- `app/bot.py`: long-polling bot and command handlers; wires `app/bot_keyboards.py`; executes all sync/resync/backup operations via direct in-process Python calls (no Docker SDK, no `exec_run`).
 - `app/bot_keyboards.py`: stateless inline keyboard builder functions (backup type/period pickers, instance pickers, resync date picker); no dependency on bot state.
 - `BotConfig` reads `telegram_bot_token` and `telegram_chat_id` from `instances.yml`. `INSTANCES_CONFIG_PATH` is the path to the instances YAML file; backup config is derived from `BackupConfig.from_instances_yaml()`.
-- Each sync instance is represented as `InstanceConfig(name, config: Config)` — the bot calls `main.run()`, `main.run_login()`, and `main.run_resync()` directly with the instance's `Config`.
+- Each sync instance is represented as `InstanceConfig(name, config: Config)` — the bot calls `main.run()` and `main.run_resync()` directly with the instance's `Config`.
 - Backup command (`/backup [monthly|yearly] [period]`) uses a two-step inline keyboard: first choose type
   (Monthly / Yearly), then choose the period. Direct args (`/backup monthly 2026-07`) skip the keyboards.
-- Sync/login/resync commands (`/sync`, `/login`, `/resync`) show an inline instance picker.
+- Sync/resync commands (`/sync`, `/resync`) show an inline instance picker. When a sync detects an expired session,
+  2FA is triggered automatically in-process (no separate `/login` command needed).
 - `/status` reports auth state per instance — ✅ session valid, ⚠️ needs login, ❓ DB unreadable (corrupted/locked) — by reading `sync.db` directly
   via `EventRepository` and checking cookie expiry via `has_valid_session` (`_check_session_direct`).
-- `/login` renews an expired 2FA session on demand (instance picker); a 6-digit code sent as a plain message is
-  forwarded to the target instance's `data_dir/.tr_2fa_code` file (see *2FA via Telegram*).
 - `/resync [YYYY-MM-DD]` force re-syncs a specific day: instance picker → date picker (last 7 days) → executes
   `main.run_resync()` in a background thread. With a date arg, jumps straight to the instance picker.
   Callback data format: `resync_pick_date:<instance>` (date picker step) and `resync:<date>:<instance>` (execute step).
@@ -266,7 +264,7 @@ The `backup` CLI command (`python -m app backup`) loads config via `_resolve_bac
 `InstancesConfig` (`app/config.py`) supports loading N sync instances from a single YAML file,
 enabling a single-container deployment without per-instance Docker services. The bot (`app/bot.py`)
 reads this file from `INSTANCES_CONFIG_PATH` (defaults to `/app/config/instances.yml`) and dispatches
-all operations (sync, login, resync, backup) as direct in-process Python calls.
+all operations (sync, resync, backup) as direct in-process Python calls.
 
 **File format** (`instances.yml`):
 
@@ -320,8 +318,8 @@ pointing to `instances.yml.example`.
 - `InstancesConfig.sync_schedule` — the global schedule (or `None`); individual instances expose it
   via `InstanceConfig.schedule` after inheritance resolution at load time.
 - `InstancesConfig.backup_schedule` — the backup cron expression (or `None`).
-- `run(cfg)` and `run_login(cfg)` require an injected `Config`; there is no fallback to env-var based construction.
-- CLI: `python -m app sync --instance david` and `python -m app login --instance david` resolve
+- `run(cfg)` requires an injected `Config`; there is no fallback to env-var based construction.
+- CLI: `python -m app sync --instance david` resolves
   config from `INSTANCES_CONFIG_PATH` (`/app/config/instances.yml` by default, overridable via the `INSTANCES_CONFIG` env var).
 - Validation on load: missing required fields, duplicate names, and invalid `category_strategy`
   all raise `ValueError` with a descriptive message.
@@ -332,8 +330,8 @@ pointing to `instances.yml.example`.
 
 ### Logging (`app/logging_setup.py`)
 - `setup_logging(log_dir)` — called **once at process startup** by each CLI entry point; sets up rotating file handler + console handler. Returns `None`.
-  - **Bot process**: called in the `bot` CLI command with `instances_yaml.data_dir` → all in-process sync/login/resync/backup calls share a single `{DATA_DIR}/sync.log`.
-  - **Standalone sync / login**: called with `instances_yaml.data_dir` when `--instance` is used.
+  - **Bot process**: called in the `bot` CLI command with `instances_yaml.data_dir` → all in-process sync/resync/backup calls share a single `{DATA_DIR}/sync.log`.
+  - **Standalone sync**: called with `instances_yaml.data_dir` when `--instance` is used.
   - **Standalone resync**: called with `cfg.data_dir` when `--instance` is used.
   - **Standalone backup**: called with `cfg.data_dir` (root data dir).
   - **Short-lived commands** (`submit-code`, `check-pending`, `list-instances`): do not call `setup_logging` — they run without any logging configuration.

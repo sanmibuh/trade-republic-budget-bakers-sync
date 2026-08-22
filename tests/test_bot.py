@@ -325,7 +325,7 @@ def test_register_commands_includes_backup_when_configured(tmp_path):
     assert "backup" in cmd_names
     assert "status" in cmd_names
     assert "help" not in cmd_names
-    assert "login" in cmd_names
+    assert "login" not in cmd_names
 
 
 def test_register_commands_excludes_backup_when_not_configured(tmp_path):
@@ -795,6 +795,24 @@ def test_callback_query_sync_dispatches_launch_sync(tmp_path):
     assert mock_sync.call_args.args[0].name == "User1"
 
 
+def test_callback_query_legacy_login_routes_to_sync(tmp_path):
+    """Legacy ``login:<instance>`` callbacks from old chat history trigger a sync."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_launch_sync") as mock_sync,
+    ):
+        bot._handle_callback_query(
+            {"id": "cq1", "data": "login:user1", "message": {"chat": {"id": 42}}}
+        )
+    mock_sync.assert_called_once()
+    assert mock_sync.call_args.args[0].name == "User1"
+    # User should receive a deprecation notice
+    assert mock_send.call_count == 1
+    assert "/login" in mock_send.call_args.args[0]
+
+
 def test_callback_query_unknown_instance_replies(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     with (
@@ -886,188 +904,16 @@ def test_run_sync_for_instance_sends_error_on_exception(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# TelegramBot._cmd_login / _launch_login
+# TelegramBot — digit-intercept for 2FA
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_login_sends_keyboard_with_instances(tmp_path):
-    bot = _bot(tmp_path=tmp_path)
-    with patch.object(bot, "_send_message") as mock_send:
-        bot._cmd_login([])
-    mock_send.assert_called_once()
-    keyboard = mock_send.call_args.kwargs["keyboard"]
-    all_buttons = [btn for row in keyboard for btn in row]
-    labels = [b["text"] for b in all_buttons]
-    assert "User1" in labels
-    assert "User2" in labels
-
-
-def test_login_buttons_callback_data_encodes_login_cmd(tmp_path):
-    bot = _bot(tmp_path=tmp_path)
-    with patch.object(bot, "_send_message") as mock_send:
-        bot._cmd_login([])
-    keyboard = mock_send.call_args.kwargs["keyboard"]
-    cb_data = [b["callback_data"] for row in keyboard for b in row]
-    assert all(d.startswith("login:") for d in cb_data)
-
-
-def test_callback_query_login_dispatches_launch_login(tmp_path):
-    bot = _bot(tmp_path=tmp_path)
-    with (
-        patch.object(bot, "_answer_callback_query"),
-        patch.object(bot, "_launch_login") as mock_login,
-    ):
-        bot._handle_callback_query(
-            {"id": "cq1", "data": "login:user1", "message": {"chat": {"id": 42}}}
-        )
-    mock_login.assert_called_once()
-    assert mock_login.call_args.args[0].name == "User1"
-
-
-def test_launch_login_sends_ack_and_starts_thread(tmp_path):
+def test_handle_message_digit_string_submitted_when_pending_marker_present(tmp_path):
+    """A digit-only reply is treated as 2FA code when the PENDING_FILENAME marker exists."""
     bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
-    with (
-        patch.object(bot, "_send_message") as mock_send,
-        patch("app.bot.threading.Thread") as mock_thread,
-    ):
-        mock_thread.return_value.start = MagicMock()
-        bot._launch_login(inst)
-    mock_send.assert_called_once()
-    assert "User1" in mock_send.call_args.args[0]
-    mock_thread.assert_called_once()
-    assert mock_thread.call_args.kwargs["daemon"] is True
 
-
-def test_launch_login_thread_target_is_run_login_for_instance(tmp_path):
-    bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    with (
-        patch.object(bot, "_send_message"),
-        patch("app.bot.threading.Thread") as mock_thread,
-    ):
-        mock_thread.return_value.start = MagicMock()
-        bot._launch_login(inst)
-    assert mock_thread.call_args.kwargs["target"] == bot._run_login_for_instance
-    assert mock_thread.call_args.kwargs["args"] == (inst,)
-
-
-def test_run_login_for_instance_calls_main_run_login(tmp_path):
-    bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    with (
-        patch("app.bot._main_run_login", return_value=0),
-        patch.object(bot, "_on_login_success") as mock_success,
-    ):
-        bot._run_login_for_instance(inst)
-    mock_success.assert_called_once_with(inst)
-
-
-def test_run_login_for_instance_calls_on_error_when_result_nonzero(tmp_path):
-    bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    with (
-        patch("app.bot._main_run_login", return_value=1),
-        patch.object(bot, "_on_login_error") as mock_error,
-    ):
-        bot._run_login_for_instance(inst)
-    mock_error.assert_called_once()
-    assert mock_error.call_args.args[0] is inst
-
-
-def test_run_login_for_instance_calls_on_error_on_exception(tmp_path):
-    bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    with (
-        patch("app.bot._main_run_login", side_effect=RuntimeError("boom")),
-        patch.object(bot, "_on_login_error") as mock_error,
-    ):
-        bot._run_login_for_instance(inst)
-    mock_error.assert_called_once()
-    assert "boom" in mock_error.call_args.args[1]
-
-
-def test_launch_login_reports_success_via_on_login_success(tmp_path):
-    bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    with (
-        patch.object(bot, "_send_message"),
-        patch("app.bot.threading.Thread") as mock_thread,
-        patch.object(bot, "_launch_sync"),
-    ):
-        mock_thread.return_value.start = MagicMock()
-        bot._launch_login(inst)
-
-    # Simulate success callback
-    with (
-        patch.object(bot, "_send_message") as mock_send2,
-        patch.object(bot, "_launch_sync"),
-    ):
-        bot._on_login_success(inst)
-    mock_send2.assert_called_once()
-    assert "User1" in mock_send2.call_args.args[0]
-
-
-def test_launch_login_auto_syncs_on_success(tmp_path):
-    """After a successful login, the bot automatically triggers a sync for the same instance."""
-    bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    with (
-        patch.object(bot, "_send_message"),
-        patch.object(bot, "_launch_sync") as mock_sync,
-    ):
-        bot._on_login_success(inst)
-    mock_sync.assert_called_once_with(inst)
-
-
-# ---------------------------------------------------------------------------
-# TelegramBot — pending login state & digit-intercept for 2FA
-# ---------------------------------------------------------------------------
-
-
-def test_launch_login_marks_instance_as_pending(tmp_path):
-    """While login is running, the instance should be in _pending_login."""
-    bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    with (
-        patch.object(bot, "_send_message"),
-        patch("app.bot.threading.Thread") as mock_thread,
-    ):
-        mock_thread.return_value.start = MagicMock()
-        bot._launch_login(inst)
-    assert "user1" in bot._pending_login
-
-
-def test_on_login_success_removes_pending_state(tmp_path):
-    """After success, the instance is removed from _pending_login."""
-    bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    bot._pending_login["user1"] = inst
-    with (
-        patch.object(bot, "_send_message"),
-        patch.object(bot, "_launch_sync"),
-    ):
-        bot._on_login_success(inst)
-    assert "user1" not in bot._pending_login
-
-
-def test_on_login_error_removes_pending_state(tmp_path):
-    """After an error, the instance is also removed from _pending_login."""
-    bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    bot._pending_login["user1"] = inst
-    with patch.object(bot, "_send_message"):
-        bot._on_login_error(inst, "❌ failed")
-    assert "user1" not in bot._pending_login
-
-
-def test_handle_message_digit_string_submitted_to_pending_instance(tmp_path):
-    """A digit-only reply is treated as 2FA code when exactly one instance is pending."""
-    bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    bot._pending_login["user1"] = inst
-
-    # Create pending marker file so submit succeeds
+    # Create pending marker file so submit succeeds (multi-instance probe path)
     inst.config.data_dir.mkdir(parents=True, exist_ok=True)
     (inst.config.data_dir / ".tr_2fa_pending").touch()
 
@@ -1098,11 +944,14 @@ def test_handle_message_digit_string_not_deleted_when_no_pending_login_multi_ins
     mock_delete.assert_not_called()
 
 
-def test_handle_message_digit_string_not_deleted_when_multiple_pending(tmp_path):
-    """Digit message is not deleted when multiple instances are pending (just a prompt is sent)."""
+def test_handle_message_digit_string_not_deleted_when_multiple_pending_markers(
+    tmp_path,
+):
+    """Digit message is not deleted when multiple instances have PENDING_FILENAME markers."""
     bot = _bot(tmp_path=tmp_path)
-    bot._pending_login["user1"] = bot._cfg.instances["user1"]
-    bot._pending_login["user2"] = bot._cfg.instances["user2"]
+    for inst in bot._cfg.instances.values():
+        inst.config.data_dir.mkdir(parents=True, exist_ok=True)
+        (inst.config.data_dir / ".tr_2fa_pending").touch()
     with (
         patch.object(bot, "_send_message"),
         patch.object(bot, "_delete_message") as mock_delete,
@@ -1123,41 +972,6 @@ def test_handle_message_digit_string_prompts_disambiguation_when_no_pending_logi
         bot._handle_message({"chat": {"id": 42}, "text": "123456"})
     mock_send.assert_called_once()
     assert "/code" in mock_send.call_args.args[0]
-
-
-def test_handle_message_digit_string_sends_prompt_when_multiple_pending(tmp_path):
-    """When multiple instances are pending, ask which one the code is for."""
-    bot = _bot(tmp_path=tmp_path)
-    bot._pending_login["user1"] = bot._cfg.instances["user1"]
-    bot._pending_login["user2"] = bot._cfg.instances["user2"]
-    with patch.object(bot, "_send_message") as mock_send:
-        bot._handle_message({"chat": {"id": 42}, "text": "123456"})
-    mock_send.assert_called_once()
-    sent_text = mock_send.call_args.args[0]
-    assert "user1" in sent_text.lower() or "user2" in sent_text.lower()
-
-
-def test_maybe_submit_pending_code_snapshots_dict_to_avoid_race(tmp_path):
-    """_maybe_submit_pending_code must snapshot _pending_login before iterating
-    so a concurrent mutation from a worker thread doesn't cause RuntimeError."""
-    bot = _bot(tmp_path=tmp_path)
-    inst = bot._cfg.instances["user1"]
-    bot._pending_login["user1"] = inst
-
-    # Create pending marker
-    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
-    (inst.config.data_dir / ".tr_2fa_pending").touch()
-
-    def clear_pending(*_args, **_kwargs):
-        bot._pending_login.clear()
-        return True
-
-    with (
-        patch.object(bot, "_submit_code_to", side_effect=clear_pending),
-        patch.object(bot, "_send_message"),
-    ):
-        result = bot._maybe_submit_pending_code("123456")
-    assert result is True
 
 
 def test_maybe_submit_pending_code_single_instance_no_pending_marker_warns(tmp_path):
@@ -1195,8 +1009,8 @@ def test_maybe_submit_pending_code_single_instance_with_pending_submits(tmp_path
 
 
 def test_handle_message_digit_cron_single_instance_submits_code(tmp_path):
-    """Replying with a digit-only code while _pending_login is empty should work
-    for single-instance setups (cron-triggered 2FA) and delete the sensitive message."""
+    """Replying with a digit-only code should work for single-instance setups
+    (sync-triggered 2FA) and delete the sensitive message."""
     single_instance = {
         "user1": InstanceConfig(
             name="User1", config=_make_config(tmp_path / "user1", "user1")
@@ -1219,7 +1033,7 @@ def test_handle_message_digit_cron_single_instance_submits_code(tmp_path):
 def test_maybe_submit_pending_code_multi_instance_no_pending_sends_disambiguation(
     tmp_path,
 ):
-    """When _pending_login is empty and no pending markers, sends disambiguation prompt."""
+    """When no pending markers exist, sends disambiguation prompt."""
     bot = _bot(tmp_path=tmp_path)  # user1 + user2, no pending markers
     with (
         patch.object(bot, "_send_message") as mock_send,
@@ -1232,8 +1046,8 @@ def test_maybe_submit_pending_code_multi_instance_no_pending_sends_disambiguatio
 
 
 def test_handle_message_digit_cron_multi_instance_sends_disambiguation(tmp_path):
-    """Replying with a digit-only code while _pending_login is empty with multiple
-    instances should ask the user to disambiguate."""
+    """Replying with a digit-only code with multiple instances and no pending markers
+    asks the user to disambiguate."""
     bot = _bot(tmp_path=tmp_path)  # user1 + user2, no pending markers
     with patch.object(bot, "_send_message") as mock_send:
         bot._handle_message({"chat": {"id": 42}, "text": "123456"})
@@ -1242,8 +1056,7 @@ def test_handle_message_digit_cron_multi_instance_sends_disambiguation(tmp_path)
 
 
 def test_maybe_submit_pending_code_single_file_pending_submits_directly(tmp_path):
-    """When _pending_login is empty but exactly one instance has a pending marker,
-    the code is submitted to that instance."""
+    """When exactly one instance has a pending marker, the code is submitted to that instance."""
     bot = _bot(tmp_path=tmp_path)  # user1 + user2
     user1_dir = tmp_path / "user1"
     user1_dir.mkdir(parents=True, exist_ok=True)

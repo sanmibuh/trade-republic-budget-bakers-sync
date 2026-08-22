@@ -6,8 +6,8 @@ Two strategies exist for obtaining the authenticator code during a v2 web login:
   bootstrap (``docker compose run -it``), where a human is at the terminal.
 * ``TelegramCodeProvider`` — sends a Telegram prompt asking the user to reply
   with ``/code <instance> <code>`` and then polls a file that the Telegram bot
-  writes into the container. Used for scheduled cron syncs and the on-demand
-  ``/login`` command, where there is no terminal.
+  writes into the container. Used for scheduled cron syncs and bot-triggered
+  syncs when the session is expired, where there is no terminal.
 
 ``select_code_provider`` picks the right strategy based on whether a TTY is
 attached and whether Telegram is configured. If neither applies it returns

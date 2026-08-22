@@ -168,7 +168,7 @@ class Notifier:
         return self._send(
             self._header("⏱", "2FA Timeout")
             + f"The code request for `{safe_instance}` has expired\\.\n"
-            "Run /login to start a new session\\."
+            "Run `/sync` to trigger a new authentication attempt\\."
         )
 
     def login_success(self) -> bool:

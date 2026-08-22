@@ -13,7 +13,6 @@ from app.sync_runner import (  # noqa: F401 — re-exported for backward compati
     _Batch,
     _SyncCounts,
 )
-from app.tr_client import LoginFailedError, SessionExpiredError, TRClient
 from app.tr_mapper import filter_by_lookback
 from app.wallet_client import WalletClient
 
@@ -21,12 +20,12 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Bootstrap helpers (shared by run() and run_login())
+# Bootstrap helpers
 # ---------------------------------------------------------------------------
 
 
 def _prepare(cfg: Config) -> Notifier:
-    """Shared bootstrap for the sync/login entry points.
+    """Shared bootstrap for the sync entry points.
 
     Ensures the data dir exists and returns a ready-to-use ``Notifier``.
 
@@ -40,11 +39,6 @@ def _prepare(cfg: Config) -> Notifier:
     """
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     return Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)
-
-
-def _connect(cfg: Config, notifier: Notifier) -> TRClient:
-    """Thin wrapper used by run_login(); delegates to SyncRunner.connect()."""
-    return SyncRunner(cfg, notifier).connect()
 
 
 # ---------------------------------------------------------------------------
@@ -97,38 +91,6 @@ def run(cfg: Config) -> int:
                     "sync_complete notification not sent (no credentials or request failed)"
                 )
 
-    return 0
-
-
-def run_login(cfg: Config) -> int:
-    """Re-authenticate with Trade Republic on demand and persist the session.
-
-    Used by the ``login`` command (triggered by the Telegram ``/login`` command).
-    Resumes the session if still valid; otherwise runs the full 2FA login using
-    the Telegram-based authenticator-code flow (or a push approval for accounts
-    without an authenticator). Returns 0 on success, 1 on a recoverable failure.
-    """
-    notifier = _prepare(cfg)
-    log.info("Starting on-demand login for owner: %s", cfg.owner_name)
-
-    try:
-        _connect(cfg, notifier)
-    except LoginFailedError:
-        log.exception("Login failed")
-        notifier.login_failed()
-        return 1
-    except SessionExpiredError:
-        log.warning(
-            "Session expired and no code provider available — bootstrap required"
-        )
-        notifier.authentication_required()
-        return 1
-    except Exception as exc:
-        log.exception("Unexpected error during on-demand login")
-        notifier.error(exc)
-        return 1
-
-    log.info("On-demand login completed successfully")
     return 0
 
 
