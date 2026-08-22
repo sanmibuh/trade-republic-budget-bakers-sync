@@ -1,0 +1,18 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 478-480
+app/persistence.py
+  h_97a91c9e567f87 72
+tests/conftest.py
+  h_97a91c9e567f87 28,30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "38e4b749c900ffef62d7fc61dd1a5418bab9a4ee",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
