@@ -13,9 +13,6 @@ services:
       retries: 3
       start_period: 30s
     environment:
-      # Path to the instances YAML config (mounted below).
-      # Sync/backup schedules and all credentials are defined in instances.yml.
-      INSTANCES_CONFIG: /app/config/instances.yml
       TZ: "Europe/Berlin"
     volumes:
       # Instances YAML — contains all credentials for sync, bot, and backup (keep secret, never commit)

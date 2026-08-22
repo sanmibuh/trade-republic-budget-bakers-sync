@@ -319,12 +319,14 @@ def test_botconfig_from_env_invalid_allow_insecure_ssl_raises(monkeypatch):
         BotConfig.from_env()
 
 
-def test_botconfig_from_env_missing_instances_config(monkeypatch):
+def test_botconfig_from_env_uses_hardcoded_instances_config_path(monkeypatch):
+    from app.config import INSTANCES_CONFIG_PATH
+
     for k, v in _VALID_ENV.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.delenv("INSTANCES_CONFIG")
-    with pytest.raises(ValueError, match="INSTANCES_CONFIG"):
+    with _mock_instances_load() as mock_load:
         BotConfig.from_env()
+    mock_load.assert_called_once_with(INSTANCES_CONFIG_PATH)
 
 
 def test_botconfig_telegram_verify_ssl_default_true(monkeypatch):

@@ -30,7 +30,6 @@ def test_run_excluded_events_not_reprocessed_on_next_run(tmp_path):
     }
 
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier"),
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=[excluded_event]),
@@ -39,7 +38,6 @@ def test_run_excluded_events_not_reprocessed_on_next_run(tmp_path):
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
         cfg.dedup_ttl_days = 60
-        mock_cfg_cls.return_value = cfg
 
         runner = mock_runner_cls.return_value
         runner.fetch_events.return_value = [excluded_event]
@@ -65,7 +63,7 @@ def test_run_excluded_events_not_reprocessed_on_next_run(tmp_path):
 
         runner._submit_batch.side_effect = fake_submit_batch
 
-        run()
+        run(cfg=cfg)
 
     # After run(), the event must be persisted (committed) in the DB
     with EventRepository(tmp_path / "sync.db") as repo:
@@ -94,7 +92,6 @@ def test_run_returns_zero_on_success(tmp_path):
     ]
 
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier"),
         patch("app.main.SyncRunner") as mock_runner_cls,
     ):
@@ -102,7 +99,6 @@ def test_run_returns_zero_on_success(tmp_path):
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
         cfg.dedup_ttl_days = 60
-        mock_cfg_cls.return_value = cfg
 
         runner = mock_runner_cls.return_value
         runner.fetch_events.return_value = fake_events
@@ -124,7 +120,7 @@ def test_run_returns_zero_on_success(tmp_path):
             patch("app.main.WalletClient") as mock_wallet,
         ):
             mock_wallet.return_value.post_records.return_value = [{}]
-            result = run()
+            result = run(cfg=cfg)
 
     assert result == 0
 
@@ -135,7 +131,6 @@ def test_run_returns_zero_when_no_new_events(tmp_path):
     from app.main import run
 
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier"),
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=[]),
@@ -144,7 +139,6 @@ def test_run_returns_zero_when_no_new_events(tmp_path):
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
         cfg.dedup_ttl_days = 60
-        mock_cfg_cls.return_value = cfg
 
         runner = mock_runner_cls.return_value
         runner.fetch_events.return_value = []
@@ -155,7 +149,7 @@ def test_run_returns_zero_when_no_new_events(tmp_path):
         batch.event_record_indices = []
         runner.build_batch.return_value = batch
 
-        result = run()
+        result = run(cfg=cfg)
 
     assert result == 0
 
@@ -194,7 +188,6 @@ def test_run_wallet_error_notifies_and_reraises(tmp_path):
     boom = RuntimeError("wallet down")
 
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=[]),
@@ -203,7 +196,6 @@ def test_run_wallet_error_notifies_and_reraises(tmp_path):
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
         cfg.dedup_ttl_days = 60
-        mock_cfg_cls.return_value = cfg
 
         runner = mock_runner_cls.return_value
         runner.fetch_events.return_value = []
@@ -212,7 +204,7 @@ def test_run_wallet_error_notifies_and_reraises(tmp_path):
         notifier_instance = mock_notifier_cls.return_value
 
         with pytest.raises(RuntimeError):
-            run()
+            run(cfg=cfg)
 
     notifier_instance.error.assert_called_once_with(boom)
 
@@ -224,7 +216,6 @@ def test_run_logs_warning_when_sync_complete_not_sent(tmp_path):
     from app.main import run
 
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=[]),
@@ -233,7 +224,6 @@ def test_run_logs_warning_when_sync_complete_not_sent(tmp_path):
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
         cfg.dedup_ttl_days = 60
-        mock_cfg_cls.return_value = cfg
 
         runner = mock_runner_cls.return_value
         runner.fetch_events.return_value = []
@@ -247,7 +237,7 @@ def test_run_logs_warning_when_sync_complete_not_sent(tmp_path):
         notifier_instance = mock_notifier_cls.return_value
         notifier_instance.sync_complete.return_value = False  # simulate not sent
 
-        result = run()
+        result = run(cfg=cfg)
 
     assert result == 0
     notifier_instance.sync_complete.assert_called_once()
@@ -274,7 +264,6 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
     ]
 
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.filter_by_lookback", return_value=fake_events),
@@ -284,7 +273,6 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
         cfg.data_dir = tmp_path
         cfg.lookback_days = 7
         cfg.dedup_ttl_days = 60
-        mock_cfg_cls.return_value = cfg
 
         runner = mock_runner_cls.return_value
         runner.fetch_events.return_value = fake_events
@@ -301,7 +289,7 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
         notifier_instance = mock_notifier_cls.return_value
 
         with pytest.raises(RuntimeError):
-            run()
+            run(cfg=cfg)
 
     # sync_complete must be called (via finally) with the correct excluded count
     notifier_instance.sync_complete.assert_called_once()
@@ -320,17 +308,15 @@ def test_run_login_connects_and_returns_zero(tmp_path):
     from app.main import run_login
 
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.sync_runner.TRClient") as MockTR,
         patch("app.sync_runner._build_code_provider", return_value=MagicMock()),
     ):
         cfg = MagicMock()
         cfg.data_dir = tmp_path
-        mock_cfg_cls.return_value = cfg
         notifier_instance = mock_notifier_cls.return_value
 
-        result = run_login()
+        result = run_login(cfg=cfg)
 
     assert result == 0
     MockTR.return_value.connect.assert_called_once()
@@ -344,19 +330,18 @@ def test_run_login_session_expired_notifies_and_exits(tmp_path):
     from app.main import run_login
     from app.tr_client import SessionExpiredError
 
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.sync_runner.TRClient") as MockTR,
         patch("app.sync_runner._build_code_provider", return_value=None),
     ):
-        cfg = MagicMock()
-        cfg.data_dir = tmp_path
-        mock_cfg_cls.return_value = cfg
         MockTR.return_value.connect.side_effect = SessionExpiredError("no provider")
         notifier_instance = mock_notifier_cls.return_value
 
-        result = run_login()
+        result = run_login(cfg=cfg)
 
     assert result == 1
     notifier_instance.authentication_required.assert_called_once()
@@ -368,19 +353,18 @@ def test_run_login_login_failed_notifies_and_exits(tmp_path):
     from app.main import run_login
     from app.tr_client import LoginFailedError
 
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.sync_runner.TRClient") as MockTR,
         patch("app.sync_runner._build_code_provider", return_value=MagicMock()),
     ):
-        cfg = MagicMock()
-        cfg.data_dir = tmp_path
-        mock_cfg_cls.return_value = cfg
         MockTR.return_value.connect.side_effect = LoginFailedError("bad code")
         notifier_instance = mock_notifier_cls.return_value
 
-        result = run_login()
+        result = run_login(cfg=cfg)
 
     assert result == 1
     notifier_instance.login_failed.assert_called_once()
@@ -391,19 +375,18 @@ def test_run_login_unexpected_error_notifies_and_exits(tmp_path):
 
     from app.main import run_login
 
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier") as mock_notifier_cls,
         patch("app.sync_runner.TRClient") as MockTR,
         patch("app.sync_runner._build_code_provider", return_value=MagicMock()),
     ):
-        cfg = MagicMock()
-        cfg.data_dir = tmp_path
-        mock_cfg_cls.return_value = cfg
         MockTR.return_value.connect.side_effect = RuntimeError("boom")
         notifier_instance = mock_notifier_cls.return_value
 
-        result = run_login()
+        result = run_login(cfg=cfg)
 
     assert result == 1
     notifier_instance.error.assert_called_once()
@@ -443,16 +426,14 @@ def test_run_resync_returns_zero_on_success(tmp_path):
 
     from app.main import run_resync
 
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier"),
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.WalletClient"),
     ):
-        cfg = MagicMock()
-        cfg.data_dir = tmp_path
-        mock_cfg_cls.return_value = cfg
-
         runner = mock_runner_cls.return_value
         counts = MagicMock()
         counts.synced = 1
@@ -460,7 +441,7 @@ def test_run_resync_returns_zero_on_success(tmp_path):
         counts.excluded = 0
         runner.resync_day.return_value = counts
 
-        result = run_resync("2026-07-15")
+        result = run_resync("2026-07-15", cfg=cfg)
 
     assert result == 0
 
@@ -468,7 +449,8 @@ def test_run_resync_returns_zero_on_success(tmp_path):
 def test_run_resync_invalid_date_returns_one():
     from app.main import run_resync
 
-    result = run_resync("not-a-date")
+    cfg = MagicMock()
+    result = run_resync("not-a-date", cfg=cfg)
 
     assert result == 1
 
@@ -478,16 +460,14 @@ def test_run_resync_calls_resync_day_with_date(tmp_path):
 
     from app.main import run_resync
 
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier"),
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.WalletClient"),
     ):
-        cfg = MagicMock()
-        cfg.data_dir = tmp_path
-        mock_cfg_cls.return_value = cfg
-
         runner = mock_runner_cls.return_value
         counts = MagicMock()
         counts.synced = 0
@@ -495,7 +475,7 @@ def test_run_resync_calls_resync_day_with_date(tmp_path):
         counts.excluded = 0
         runner.resync_day.return_value = counts
 
-        run_resync("2026-07-15")
+        run_resync("2026-07-15", cfg=cfg)
 
     runner.resync_day.assert_called_once()
     call_args = runner.resync_day.call_args
@@ -508,20 +488,18 @@ def test_run_resync_exception_returns_one(tmp_path):
 
     from app.main import run_resync
 
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+
     with (
-        patch("app.main.Config.from_env") as mock_cfg_cls,
         patch("app.main.Notifier"),
         patch("app.main.SyncRunner") as mock_runner_cls,
         patch("app.main.WalletClient"),
     ):
-        cfg = MagicMock()
-        cfg.data_dir = tmp_path
-        mock_cfg_cls.return_value = cfg
-
         runner = mock_runner_cls.return_value
         runner.resync_day.side_effect = RuntimeError("boom")
 
-        result = run_resync("2026-07-15")
+        result = run_resync("2026-07-15", cfg=cfg)
 
     assert result == 1
 
@@ -530,6 +508,7 @@ def test_run_resync_rejects_datetime_string():
     """run_resync must reject full datetime strings — only YYYY-MM-DD is valid."""
     from app.main import run_resync
 
-    result = run_resync("2026-07-15T12:00:00")
+    cfg = MagicMock()
+    result = run_resync("2026-07-15T12:00:00", cfg=cfg)
 
     assert result == 1

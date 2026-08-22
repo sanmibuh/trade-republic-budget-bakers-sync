@@ -55,11 +55,11 @@ from app.bot_keyboards import (
     year_buttons as _year_buttons_fn,
 )
 from app.config import (
+    INSTANCES_CONFIG_PATH,
     BackupConfig,
     Config,
     InstancesConfig,
     has_valid_session,
-    read_instances_config_path,
     read_optional_wallet_api_key,
     read_telegram_verify_ssl,
 )
@@ -115,8 +115,7 @@ class BotConfig:
     @classmethod
     def from_env(cls, instances_yaml: InstancesConfig | None = None) -> BotConfig:
         if instances_yaml is None:
-            path = read_instances_config_path()
-            instances_yaml = InstancesConfig.load(path)
+            instances_yaml = InstancesConfig.load(INSTANCES_CONFIG_PATH)
 
         # Telegram credentials: InstancesConfig.load already consolidates YAML values
         # with env-var fallbacks (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID), so

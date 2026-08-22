@@ -190,7 +190,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 ### CLI entry point (`app/__main__.py`)
 - Single entry point via `python -m app` using **click** with subcommands:
   - `python -m app sync` — runs `main.run()`
-  - `python -m app sync --instance <name>` — resolves config from `INSTANCES_CONFIG` YAML and runs sync for that instance
+  - `python -m app sync --instance <name>` — resolves config from `INSTANCES_CONFIG_PATH` YAML and runs sync for that instance
   - `python -m app backup <mode> [param]` — dispatches to `backup.run_auto/run_monthly/run_yearly`
   - `python -m app bot` — starts the Telegram bot
   - `python -m app login` — runs `main.run_login()`, an on-demand 2FA session renewal
@@ -200,19 +200,17 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   - `python -m app check-session` — exits 0 if a valid session exists (non-expired cookie) **and** `auth_state`
     for this instance in `sync.db` is not `failed`/`expired`; exits 1 otherwise. Used by the bot's `/status`
     command to report per-instance auth state without network calls.
-  - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG`, one per line.
+  - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG_PATH`, one per line.
   - `python -m app list-schedules` — prints `name<TAB>schedule` for every instance that has a schedule,
     one per line. Used by `entrypoint.sh` to register one cron job per instance with its own schedule.
-  - `python -m app get-backup-schedule` — prints the `backup_schedule` from `INSTANCES_CONFIG`, or nothing.
+  - `python -m app get-backup-schedule` — prints the `backup_schedule` from `INSTANCES_CONFIG_PATH`, or nothing.
     Used by `entrypoint.sh` to conditionally register the backup cron job.
 - All imports inside command functions are deferred — startup is fast and dependencies are only loaded when needed.
 - `click.Choice(["auto", "monthly", "yearly"])` provides free input validation and help text.
 - `entrypoint.sh` and `tr-sync.sh` both use `python -m app <subcommand>` — single consistent interface.
 
 ### Scheduled daemon
-- `docker/app/entrypoint.sh`: behaviour controlled by `INSTANCES_CONFIG` (multi-instance) or `MODE` env var (legacy):
-
-  **Multi-instance mode** (activated when `INSTANCES_CONFIG` is set — Phase 2/4 of #145):
+- `docker/app/entrypoint.sh`: reads `instances.yml` at `/app/config/instances.yml` (hardcoded path):
   - Calls `python -m app list-schedules` to get per-instance `name<TAB>schedule` pairs.
   - Registers one cron job per instance with its own schedule: `python -m app sync --instance <name>`.
   - Calls `python -m app get-backup-schedule`; if a schedule is returned, registers a backup cron job.
@@ -221,16 +219,9 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
     if either process exits unexpectedly the shell kills the other and exits non-zero so Docker can
     restart the container. A `SIGTERM`/`SIGINT` trap ensures both children are stopped cleanly on
     `docker stop`.
-  - `MODE` env var is ignored in this mode.
   - All instances share one log file: `{DATA_DIR}/sync.log`.
   - Instance data lives under `{DATA_DIR}/sync/{instance_name}/`.
   - Exits with an error if no instance has a schedule defined.
-
-  **Legacy single-instance mode** (when `INSTANCES_CONFIG` is not set — fully backwards-compatible):
-  - `MODE=sync` — registers `SYNC_SCHEDULE` cron job (`python -m app sync`). One-shot if `SYNC_SCHEDULE` not set.
-  - `MODE=backup` — registers `BACKUP_SCHEDULE` cron job (`python -m app backup auto`). One-shot if not set.
-  - `MODE=bot` — starts the Telegram bot (`python -m app bot`).
-  - `CMD=<command>` — overrides all modes, runs a one-shot command and exits.
 - `TZ` env var must be set in the container for cron to interpret hours in local time (default is UTC).
 
 ### Backup strategy
@@ -243,7 +234,7 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 ### Telegram bot
 - `app/bot.py`: long-polling bot and command handlers; wires `app/bot_keyboards.py`; executes all sync/login/resync/backup operations via direct in-process Python calls (no Docker SDK, no `exec_run`).
 - `app/bot_keyboards.py`: stateless inline keyboard builder functions (backup type/period pickers, instance pickers, resync date picker); no dependency on bot state.
-- `BotConfig` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `INSTANCES_CONFIG` from env. `INSTANCES_CONFIG` is a path to the instances YAML file; backup config is derived from `BackupConfig.from_instances_yaml()` with an optional `WALLET_API_KEY` env override via `read_optional_wallet_api_key()`.
+- `BotConfig` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` from env (with YAML as fallback). `INSTANCES_CONFIG_PATH` (hardcoded) is the path to the instances YAML file; backup config is derived from `BackupConfig.from_instances_yaml()` with an optional `WALLET_API_KEY` env override via `read_optional_wallet_api_key()`.
 - Each sync instance is represented as `InstanceConfig(name, config: Config)` — the bot calls `main.run()`, `main.run_login()`, and `main.run_resync()` directly with the instance's `Config`.
 - Backup command (`/backup [monthly|yearly] [period]`) uses a two-step inline keyboard: first choose type
   (Monthly / Yearly), then choose the period. Direct args (`/backup monthly 2026-07`) skip the keyboards.
@@ -257,25 +248,24 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
   Callback data format: `resync_pick_date:<instance>` (date picker step) and `resync:<date>:<instance>` (execute step).
 
 ### Config — environment variables
-- `Config.from_env()` — full config for the **sync** command. Requires `PHONE_NUMBER`, `PIN`, `WALLET_API_KEY`,
-  `WALLET_CASH_ACCOUNT_ID`, `WALLET_PORTFOLIO_ACCOUNT_ID`.
-- `BackupConfig.from_env()` — minimal config for the **backup** command. Only requires `WALLET_API_KEY`. Does not
-  validate sync-only credentials, so the backup container can run without them.
-- Both share optional fields: `OWNER_NAME` (default `"Backup"`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
-  `DATA_DIR`, `ALLOW_INSECURE_SSL` (default `false`).
+- `Config` — full config for the **sync** command. Constructed directly from `InstancesConfig` YAML
+  (`InstancesConfig.to_config(name)`). No `from_env()` factory — all config comes from `instances.yml`.
+- `BackupConfig` — minimal config for the **backup** command. Derived from `BackupConfig.from_instances_yaml()`.
+- Both share optional fields defined in YAML: `owner_name` (default `"Backup"`), `telegram_bot_token`,
+  `telegram_chat_id`, `data_dir`, `allow_insecure_ssl` (default `false`).
 - `Config.dedup_ttl_days` — controls how many days of processed-event records are retained in `sync.db`.
-  Read from `DEDUP_TTL_DAYS` (default `60`). Passed to `EventRepository.purge_old_records(ttl_days=...)`
+  Read from YAML (`dedup_ttl_days`, default `60`). Passed to `EventRepository.purge_old_records(ttl_days=...)`
   at the start of each normal sync run (`run()`). The resync entry point (`run_resync`) does not purge,
   as it is a targeted single-day operation.
-- `Config.category_strategy` — controls automatic pre-categorization of Wallet records. Read from
-  `CATEGORY_STRATEGY` (default `none`). Accepted values: `none`, `history`. See *Auto-categorization*
+- `Config.category_strategy` — controls automatic pre-categorization of Wallet records. Read from YAML
+  (`category_strategy`, default `none`). Accepted values: `none`, `history`. See *Auto-categorization*
   section for details.
-- `Config.instance` — logical instance name used for the Telegram 2FA prompt/`/code` routing. Read from
-  `INSTANCE`, defaulting to `OWNER_NAME` lowercased (e.g. `david`, `eli`), which already matches the container
-  instance name, so it need not be set explicitly in compose.
+- `Config.instance` — logical instance name used for the Telegram 2FA prompt/`/code` routing. Always
+  set from the YAML instance name.
+- `INSTANCES_CONFIG_PATH` — module-level constant in `config.py`; hardcoded to `/app/config/instances.yml`.
+  All services load config from this path; it is not configurable via env var.
 - `BotEnv.from_env()` — reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `TELEGRAM_VERIFY_SSL` from env.
-  No longer used directly by `BotConfig.from_env` (kept for backward compatibility).
-  `INSTANCES_CONFIG` is read separately via `read_instances_config_path()` → `InstancesConfig.load()`.
+  Used by `BotConfig.from_env` to allow env-var overrides of Telegram credentials on top of the YAML.
 - `read_data_dir()` — standalone helper that returns the `DATA_DIR` path (default `/app/data`); used by
   `check-session` which only needs the data directory, not full credentials.
 - `read_instance()` — standalone helper that returns the logical instance name (`INSTANCE` env var, falling
@@ -296,15 +286,15 @@ missing, detected with `PRAGMA table_info`; new tables are created via `CREATE T
 3. **No instances in YAML** → `backup_cfg` is `None` and `/backup` commands are disabled.
 
 The `backup` CLI command (`python -m app backup`) loads config via `_resolve_backup_cfg()`:
-- **`INSTANCES_CONFIG` unset or blank** → falls back to `BackupConfig.from_env()` (legacy single-instance `MODE=backup` path; requires `WALLET_API_KEY` env var).
-- **`INSTANCES_CONFIG` set** → loads `InstancesConfig` from the YAML and derives `BackupConfig` from it. Any YAML validation or I/O error surfaces as a `click.UsageError`.
+- Loads `InstancesConfig` from the hardcoded `INSTANCES_CONFIG_PATH` and derives `BackupConfig` from it.
+- Any YAML validation or I/O error surfaces as a `click.UsageError`.
 
-### Multi-instance YAML config (#145)
+### Multi-instance YAML config (#145, #162)
 
 `InstancesConfig` (`app/config.py`) supports loading N sync instances from a single YAML file,
 enabling a single-container deployment without per-instance Docker services. The bot (`app/bot.py`)
-reads this file via `INSTANCES_CONFIG` and dispatches all operations (sync, login, resync, backup)
-as direct in-process Python calls.
+reads this file from `INSTANCES_CONFIG_PATH` (hardcoded to `/app/config/instances.yml`) and dispatches
+all operations (sync, login, resync, backup) as direct in-process Python calls.
 
 **File format** (`instances.yml`):
 
@@ -358,10 +348,9 @@ pointing to `instances.yml.example`.
 - `InstancesConfig.sync_schedule` — the global schedule (or `None`); individual instances expose it
   via `InstanceConfig.schedule` after inheritance resolution at load time.
 - `InstancesConfig.backup_schedule` — the backup cron expression (or `None`).
-- `run(cfg=None)` and `run_login(cfg=None)` accept an injected `Config`; `None` falls back to
-  `Config.from_env()` — fully backwards-compatible.
+- `run(cfg)` and `run_login(cfg)` require an injected `Config`; there is no fallback to env-var based construction.
 - CLI: `python -m app sync --instance david` and `python -m app login --instance david` resolve
-  config from the file at `INSTANCES_CONFIG` env var.
+  config from `INSTANCES_CONFIG_PATH` (`/app/config/instances.yml`).
 - Validation on load: missing required fields, duplicate names, and invalid `category_strategy`
   all raise `ValueError` with a descriptive message.
 
@@ -373,7 +362,7 @@ pointing to `instances.yml.example`.
 ### Logging (`app/logging_setup.py`)
 - `setup_logging(log_dir)` — called **once at process startup** by each CLI entry point; sets up rotating file handler + console handler. Returns `None`.
   - **Bot process**: called in the `bot` CLI command with `instances_yaml.data_dir` → all in-process sync/login/resync/backup calls share a single `{DATA_DIR}/sync.log`.
-  - **Standalone sync / login**: called with `instances_yaml.data_dir` when `--instance` is used, or `cfg.data_dir` when driven by env vars (single-instance mode, where `cfg.data_dir` is the root data dir).
+  - **Standalone sync / login**: called with `instances_yaml.data_dir` when `--instance` is used.
   - **Standalone resync**: called with `cfg.data_dir` (always env-var driven, root data dir).
   - **Standalone backup**: called with `cfg.data_dir` (root data dir).
   - **Short-lived commands** (`submit-code`, `check-pending`, `check-session`, `list-instances`): do not call `setup_logging` — they run without any logging configuration.

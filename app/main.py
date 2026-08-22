@@ -52,9 +52,7 @@ def _connect(cfg: Config, notifier: Notifier) -> TRClient:
 # ---------------------------------------------------------------------------
 
 
-def run(cfg: Config | None = None) -> int:
-    if cfg is None:
-        cfg = Config.from_env()
+def run(cfg: Config) -> int:
     notifier = _prepare(cfg)
     log.info("Starting sync for owner: %s", cfg.owner_name)
 
@@ -102,7 +100,7 @@ def run(cfg: Config | None = None) -> int:
     return 0
 
 
-def run_login(cfg: Config | None = None) -> int:
+def run_login(cfg: Config) -> int:
     """Re-authenticate with Trade Republic on demand and persist the session.
 
     Used by the ``login`` command (triggered by the Telegram ``/login`` command).
@@ -110,8 +108,6 @@ def run_login(cfg: Config | None = None) -> int:
     the Telegram-based authenticator-code flow (or a push approval for accounts
     without an authenticator). Returns 0 on success, 1 on a recoverable failure.
     """
-    if cfg is None:
-        cfg = Config.from_env()
     notifier = _prepare(cfg)
     log.info("Starting on-demand login for owner: %s", cfg.owner_name)
 
@@ -136,7 +132,7 @@ def run_login(cfg: Config | None = None) -> int:
     return 0
 
 
-def run_resync(date_str: str, cfg: Config | None = None) -> int:
+def run_resync(date_str: str, cfg: Config) -> int:
     """Force a re-sync of all TR events for a specific day, bypassing dedup.
 
     Already-synced events are updated via PUT; never-synced events are inserted
@@ -144,8 +140,7 @@ def run_resync(date_str: str, cfg: Config | None = None) -> int:
 
     Args:
         date_str: ISO date string ``YYYY-MM-DD`` for the day to re-sync.
-        cfg:      Optional pre-built :class:`Config`.  When ``None`` (default),
-                  falls back to ``Config.from_env()`` for backwards compatibility.
+        cfg:      Pre-built :class:`Config` for the instance.
 
     Returns:
         0 on success, 1 on invalid date or unrecoverable error.
@@ -156,8 +151,6 @@ def run_resync(date_str: str, cfg: Config | None = None) -> int:
         log.error("Invalid date for resync: %r (expected YYYY-MM-DD)", date_str)
         return 1
 
-    if cfg is None:
-        cfg = Config.from_env()
     notifier = _prepare(cfg)
     log.info("Starting force resync for date=%s owner=%s", date_str, cfg.owner_name)
 
