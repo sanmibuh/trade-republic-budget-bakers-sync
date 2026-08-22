@@ -1,0 +1,19 @@
+deploy/example/tr-sync.sh
+  s_016a4d77d409ce::t_65fb3ec23f66e4 8,35,81,95-99,102-125,127-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "cd50e8a1fb737c188aca0d2bde3ad61a22752d37",
+  "prompts": {},
+  "sessions": {
+    "s_016a4d77d409ce": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd62a929bffeD3Xqzjw4fXTtMo",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
