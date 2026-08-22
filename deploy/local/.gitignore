@@ -1,4 +1,4 @@
-# Everything in deploy/local/ except the template is ignored.
+# Everything in deploy/local/ except tracked files is git-ignored.
 *
 !.gitignore
-!local.env.template
+!instances.yml.template

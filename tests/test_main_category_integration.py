@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.categorizer import HistoryCategorizer
-from app.config import Config
+from app.config import Config, _resolve_category_strategy
 from app.notifier import Notifier
 from app.persistence import EventRepository
 from app.sync_runner import SyncRunner
@@ -175,52 +175,22 @@ def test_build_batch_strategy_history_zero_amount_not_categorized():
 # ---------------------------------------------------------------------------
 
 
-def test_config_category_strategy_default_is_none(monkeypatch):
-    for var in (
-        "PHONE_NUMBER",
-        "PIN",
-        "WALLET_API_KEY",
-        "WALLET_CASH_ACCOUNT_ID",
-        "WALLET_PORTFOLIO_ACCOUNT_ID",
-    ):
-        monkeypatch.setenv(var, "x")
-    monkeypatch.delenv("CATEGORY_STRATEGY", raising=False)
-    monkeypatch.delenv("ALLOW_INSECURE_SSL", raising=False)
-
-    cfg = Config.from_env()
+def test_config_category_strategy_default_is_none():
+    cfg = _make_cfg()
     assert cfg.category_strategy == "none"
 
 
-def test_config_category_strategy_history(monkeypatch):
-    for var in (
-        "PHONE_NUMBER",
-        "PIN",
-        "WALLET_API_KEY",
-        "WALLET_CASH_ACCOUNT_ID",
-        "WALLET_PORTFOLIO_ACCOUNT_ID",
-    ):
-        monkeypatch.setenv(var, "x")
-    monkeypatch.setenv("CATEGORY_STRATEGY", "history")
-    monkeypatch.delenv("ALLOW_INSECURE_SSL", raising=False)
-
-    cfg = Config.from_env()
+def test_config_category_strategy_history():
+    cfg = _make_cfg(category_strategy="history")
     assert cfg.category_strategy == "history"
 
 
-def test_config_category_strategy_invalid_raises(monkeypatch):
-    for var in (
-        "PHONE_NUMBER",
-        "PIN",
-        "WALLET_API_KEY",
-        "WALLET_CASH_ACCOUNT_ID",
-        "WALLET_PORTFOLIO_ACCOUNT_ID",
-    ):
-        monkeypatch.setenv(var, "x")
-    monkeypatch.setenv("CATEGORY_STRATEGY", "invalid_value")
-    monkeypatch.delenv("ALLOW_INSECURE_SSL", raising=False)
-
-    with pytest.raises(ValueError, match="CATEGORY_STRATEGY"):
-        Config.from_env()
+def test_config_category_strategy_invalid_raises():
+    raw_inst = {"category_strategy": "invalid_value"}
+    with pytest.raises(ValueError, match="category_strategy"):
+        _resolve_category_strategy(
+            "test-instance", raw_inst, global_category_strategy=None
+        )
 
 
 # ---------------------------------------------------------------------------

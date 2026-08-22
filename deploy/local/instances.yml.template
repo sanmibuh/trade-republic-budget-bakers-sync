@@ -1,0 +1,26 @@
+# Local development config — copy to instances.yml and fill in values.
+# instances.yml is git-ignored. This template is committed.
+
+# Optional: Telegram bot for remote control.
+telegram_bot_token: ""
+telegram_chat_id: ""
+
+# Optional: backup cron schedule (used by get-backup-schedule).
+# backup_schedule: "0 8 1 * *"
+
+# Optional: override default data directory.
+data_dir: deploy/local/data
+
+sync:
+  instances:
+    - name: user1
+      phone: "+34600000000"     # Trade Republic account phone number
+      pin: "1234"               # Trade Republic PIN
+      wallet_api_key: ""        # BudgetBakers Wallet API key (also used for backups)
+      wallet_cash_account_id: ""
+      wallet_portfolio_account_id: ""
+      # Optional overrides:
+      # owner_name: "User 1"
+      # lookback_days: 10
+      # dedup_ttl_days: 60
+      # schedule: "*/30 * * * *"

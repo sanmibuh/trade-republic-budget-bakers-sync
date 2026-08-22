@@ -1,14 +1,17 @@
 """app CLI entry point.
 
 Usage:
-    python -m app                          # shows help
-    python -m app sync                     # one-shot TR → Wallet sync (env vars)
-    python -m app sync --instance user1    # one-shot sync for a named instance (YAML config)
-    python -m app backup auto              # smart daily backup
-    python -m app backup monthly           # backup previous month
-    python -m app backup monthly 2026-07   # backup specific month
-    python -m app backup yearly            # backup previous year
-    python -m app backup yearly 2025       # backup specific year
+    python -m app                                    # shows help
+    python -m app sync --instance user1             # one-shot TR → Wallet sync
+    python -m app login --instance user1            # re-authenticate
+    python -m app resync --instance user1 DATE      # force re-sync for a date
+    python -m app submit-code --instance user1 CODE # deliver 2FA code
+    python -m app check-pending --instance user1    # check if 2FA is waiting
+    python -m app backup auto                       # smart daily backup
+    python -m app backup monthly                    # backup previous month
+    python -m app backup monthly 2026-07            # backup specific month
+    python -m app backup yearly                     # backup previous year
+    python -m app backup yearly 2025                # backup specific year
 """
 
 from __future__ import annotations
@@ -27,26 +30,22 @@ if TYPE_CHECKING:
 
 
 def _resolve_instance_cfg(instance: str) -> tuple[Config, Path]:
-    """Load ``InstancesConfig`` via ``INSTANCES_CONFIG`` env var and return the
+    """Load ``InstancesConfig`` from the hardcoded path and return the
     ``Config`` for *instance* together with the root data directory.
 
-    ``INSTANCES_CONFIG`` is read through :func:`app.config.read_instances_config_path`
-    so that all env var access stays in ``config.py``.  Any ``ValueError`` or
-    ``OSError`` (including ``FileNotFoundError`` and ``PermissionError``) is
-    re-raised as a :class:`click.UsageError` so the user sees a clean error
-    message instead of a traceback.
+    Any ``ValueError`` or ``OSError`` (including ``FileNotFoundError`` and
+    ``PermissionError``) is re-raised as a :class:`click.UsageError` so the
+    user sees a clean error message instead of a traceback.
 
-    Raises :class:`click.UsageError` immediately when *instance* is blank, so
-    passing ``--instance ""`` never silently falls back to env-var mode.
+    Raises :class:`click.UsageError` immediately when *instance* is blank.
     """
-    from app.config import InstancesConfig, read_instances_config_path
+    from app.config import INSTANCES_CONFIG_PATH, InstancesConfig
 
     if not instance.strip():
         raise click.UsageError("--instance value must not be blank")
     instance = instance.strip()
     try:
-        path = read_instances_config_path()
-        instances_yaml = InstancesConfig.load(path)
+        instances_yaml = InstancesConfig.load(INSTANCES_CONFIG_PATH)
         return instances_yaml.to_config(instance), instances_yaml.data_dir
     except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
@@ -60,22 +59,16 @@ def cli() -> None:
 @cli.command()
 @click.option(
     "--instance",
-    default=None,
+    required=True,
     metavar="NAME",
-    help="Instance name from the INSTANCES_CONFIG YAML file. "
-    "When set, credentials are loaded from the file instead of env vars.",
+    help="Instance name from the instances YAML config file.",
 )
-def sync(instance: str | None) -> None:
+def sync(instance: str) -> None:
     """Run a one-shot Trade Republic → Wallet sync."""
-    from app.config import Config
     from app.http_client import configure
     from app.main import run
 
-    if instance is not None:
-        cfg, log_dir = _resolve_instance_cfg(instance)
-    else:
-        cfg = Config.from_env()
-        log_dir = cfg.data_dir
+    cfg, log_dir = _resolve_instance_cfg(instance)
     setup_logging(log_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run(cfg=cfg))
@@ -84,34 +77,35 @@ def sync(instance: str | None) -> None:
 @cli.command()
 @click.option(
     "--instance",
-    default=None,
+    required=True,
     metavar="NAME",
-    help="Instance name from the INSTANCES_CONFIG YAML file.",
+    help="Instance name from the instances YAML config file.",
 )
-def login(instance: str | None) -> None:
+def login(instance: str) -> None:
     """Re-authenticate with Trade Republic on demand (renew the 2FA session).
 
     Resumes the saved session if still valid; otherwise runs the full login.
     For authenticator accounts the code is requested via Telegram (reply with
     /code <instance> <code>); for push accounts, approve the request in the app.
     """
-    from app.config import Config
     from app.http_client import configure
     from app.main import run_login
 
-    if instance is not None:
-        cfg, log_dir = _resolve_instance_cfg(instance)
-    else:
-        cfg = Config.from_env()
-        log_dir = cfg.data_dir
+    cfg, log_dir = _resolve_instance_cfg(instance)
     setup_logging(log_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run_login(cfg=cfg))
 
 
 @cli.command(name="submit-code")
+@click.option(
+    "--instance",
+    required=True,
+    metavar="NAME",
+    help="Instance name from the instances YAML config file.",
+)
 @click.argument("code")
-def submit_code(code: str) -> None:
+def submit_code(instance: str, code: str) -> None:
     """Write an authenticator CODE for a waiting login process to pick up.
 
     Used by the Telegram bot (the /code command) to deliver the 2FA code into
@@ -120,10 +114,9 @@ def submit_code(code: str) -> None:
     Exits with an error if no login is currently waiting (the pending marker
     file is absent), so stale /code submissions are rejected cleanly.
     """
-    from app.config import Config
     from app.twofa import CODE_FILENAME, PENDING_FILENAME
 
-    cfg = Config.from_env()
+    cfg, _ = _resolve_instance_cfg(instance)
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     pending_file = cfg.data_dir / PENDING_FILENAME
     if not pending_file.exists():
@@ -133,7 +126,13 @@ def submit_code(code: str) -> None:
 
 
 @cli.command(name="check-pending")
-def check_pending() -> None:
+@click.option(
+    "--instance",
+    required=True,
+    metavar="NAME",
+    help="Instance name from the instances YAML config file.",
+)
+def check_pending(instance: str) -> None:
     """Exit 0 if a 2FA login is currently waiting for a code, 1 otherwise.
 
     Used by the Telegram bot to detect which containers are blocked on
@@ -145,54 +144,11 @@ def check_pending() -> None:
         0 — the pending-login marker file is present (container awaiting code).
         1 — no active 2FA request for this instance.
     """
-    from app.config import Config
     from app.twofa import PENDING_FILENAME
 
-    cfg = Config.from_env()
+    cfg, _ = _resolve_instance_cfg(instance)
     pending_file = cfg.data_dir / PENDING_FILENAME
     sys.exit(0 if pending_file.exists() else 1)
-
-
-@cli.command(name="check-session")
-def check_session() -> None:
-    """Exit 0 if a saved Trade Republic session exists, 1 if login is required.
-
-    Used by the Telegram bot to report per-instance authentication state in
-    /status without making any network calls.
-
-    pytr persists the session as cookies.txt (written by save_websession()).
-    The check reads the cookie expiry timestamps so that a file with only
-    expired cookies is correctly reported as needing re-authentication.
-
-    Additionally, if ``sync.db`` contains an ``auth_state`` row for this
-    instance with status ``"failed"`` or ``"expired"``, the command exits 1
-    even when a cookies file is present — this catches the case where a failed
-    login left the old session file in place.
-
-    Exit codes:
-        0 — session valid and auth state is ``ok`` (or no state recorded yet).
-        1 — session missing, expired, or auth state is ``failed``/``expired``.
-        2 — DB could not be read (corrupted/locked); the bot treats this as
-            an unknown/unreachable state rather than a hard auth failure.
-    """
-    from app.config import has_valid_session, read_data_dir, read_instance
-    from app.persistence import EventRepository
-
-    data_dir = read_data_dir()
-    if not has_valid_session(data_dir):
-        sys.exit(1)
-
-    db_path = data_dir / "sync.db"
-    if db_path.exists():
-        try:
-            with EventRepository(db_path) as repo:
-                auth_status = repo.get_auth_state(read_instance())
-        except Exception:
-            sys.exit(2)
-        if auth_status in ("failed", "expired"):
-            sys.exit(1)
-
-    sys.exit(0)
 
 
 def _resolve_backup_cfg() -> BackupConfig:
@@ -202,26 +158,16 @@ def _resolve_backup_cfg() -> BackupConfig:
     sees a clean message instead of a traceback.
     """
     from app.config import (
+        INSTANCES_CONFIG_PATH,
         BackupConfig,
         InstancesConfig,
-        read_instances_config_path,
-        read_optional_wallet_api_key,
     )
 
     try:
-        path = read_instances_config_path()
-    except ValueError:
-        try:
-            return BackupConfig.from_env()
-        except ValueError as exc:
-            raise click.UsageError(str(exc)) from exc
-    try:
-        instances_yaml = InstancesConfig.load(path)
+        instances_yaml = InstancesConfig.load(INSTANCES_CONFIG_PATH)
     except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
-    cfg = BackupConfig.from_instances_yaml(
-        instances_yaml, wallet_api_key=read_optional_wallet_api_key()
-    )
+    cfg = BackupConfig.from_instances_yaml(instances_yaml)
     if cfg is None:
         raise click.UsageError(
             "instances config has no instances — cannot build backup config"
@@ -306,8 +252,14 @@ def backup(mode: str, param: str | None) -> None:
 
 
 @cli.command()
+@click.option(
+    "--instance",
+    required=True,
+    metavar="NAME",
+    help="Instance name from the instances YAML config file.",
+)
 @click.argument("date")
-def resync(date: str) -> None:
+def resync(instance: str, date: str) -> None:
     """Force a re-sync of all TR events for DATE (YYYY-MM-DD), bypassing dedup.
 
     Already-synced events are updated in BudgetBakers via PUT; new or previously
@@ -316,31 +268,28 @@ def resync(date: str) -> None:
 
     \b
     Example:
-      python -m app resync 2026-07-15
+      python -m app resync --instance user1 2026-07-15
     """
-    from app.config import Config
     from app.http_client import configure
     from app.main import run_resync
 
-    cfg = Config.from_env()
-    setup_logging(cfg.data_dir)
+    cfg, log_dir = _resolve_instance_cfg(instance)
+    setup_logging(log_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     sys.exit(run_resync(date, cfg=cfg))
 
 
 @cli.command(name="list-instances")
 def list_instances() -> None:
-    """List all instance names from the INSTANCES_CONFIG YAML file, one per line.
+    """List all instance names from the instances YAML config file, one per line.
 
-    Used by entrypoint.sh to register one cron job per instance in
-    multi-instance mode.  Exits with an error when INSTANCES_CONFIG is not
-    set or the file cannot be loaded.
+    Used by entrypoint.sh to register one cron job per instance.
+    Exits with an error when the file cannot be loaded.
     """
-    from app.config import InstancesConfig, read_instances_config_path
+    from app.config import INSTANCES_CONFIG_PATH, InstancesConfig
 
     try:
-        path = read_instances_config_path()
-        cfg = InstancesConfig.load(path)
+        cfg = InstancesConfig.load(INSTANCES_CONFIG_PATH)
     except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
 
@@ -356,13 +305,12 @@ def list_schedules() -> None:
     schedule override) are emitted.  Instances with no schedule are omitted.
 
     Used by entrypoint.sh to register one cron job per instance with its own
-    schedule in multi-instance mode.
+    schedule.
     """
-    from app.config import InstancesConfig, read_instances_config_path
+    from app.config import INSTANCES_CONFIG_PATH, InstancesConfig
 
     try:
-        path = read_instances_config_path()
-        cfg = InstancesConfig.load(path)
+        cfg = InstancesConfig.load(INSTANCES_CONFIG_PATH)
     except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
 
@@ -373,16 +321,15 @@ def list_schedules() -> None:
 
 @cli.command(name="get-backup-schedule")
 def get_backup_schedule() -> None:
-    """Print the backup_schedule from the INSTANCES_CONFIG YAML file, or nothing.
+    """Print the backup_schedule from the instances YAML config file, or nothing.
 
     Exits 0 in both cases (schedule present or absent).  Used by entrypoint.sh
     to conditionally register the backup cron job.
     """
-    from app.config import InstancesConfig, read_instances_config_path
+    from app.config import INSTANCES_CONFIG_PATH, InstancesConfig
 
     try:
-        path = read_instances_config_path()
-        cfg = InstancesConfig.load(path)
+        cfg = InstancesConfig.load(INSTANCES_CONFIG_PATH)
     except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
 
@@ -398,10 +345,9 @@ def bot() -> None:
     them directly as in-process Python calls (no Docker SDK required).
 
     \b
-    Required environment variables:
-      TELEGRAM_BOT_TOKEN    Bot token from BotFather.
-      TELEGRAM_CHAT_ID      Authorized chat ID — only this chat can issue commands.
-      INSTANCES_CONFIG      Path to the instances YAML config file.
+    Required fields in instances.yml:
+      telegram_bot_token    Bot token from BotFather.
+      telegram_chat_id      Authorized chat ID — only this chat can issue commands.
 
     \b
     Supported Telegram commands:
@@ -415,10 +361,10 @@ def bot() -> None:
       /backup [monthly|yearly] [period]
     """
     from app.bot import run
-    from app.config import InstancesConfig, read_instances_config_path
+    from app.config import INSTANCES_CONFIG_PATH, InstancesConfig
 
     try:
-        instances_yaml = InstancesConfig.load(read_instances_config_path())
+        instances_yaml = InstancesConfig.load(INSTANCES_CONFIG_PATH)
     except (ValueError, OSError) as exc:
         raise click.UsageError(str(exc)) from exc
     setup_logging(instances_yaml.data_dir)

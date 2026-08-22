@@ -89,10 +89,6 @@ def _bot(
 # BotConfig.from_env
 # ---------------------------------------------------------------------------
 
-_VALID_ENV = {
-    "INSTANCES_CONFIG": "/fake/instances.yml",
-}
-
 _YAML_CONTENT = """
 telegram_bot_token: "mytoken"
 telegram_chat_id: "123"
@@ -173,9 +169,7 @@ def _mock_instances_load(yaml_text: str = _YAML_CONTENT):
     return patch("app.bot.InstancesConfig.load", side_effect=_load)
 
 
-def test_botconfig_from_env_valid(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
+def test_botconfig_from_env_valid():
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.bot_token == "mytoken"
@@ -184,29 +178,22 @@ def test_botconfig_from_env_valid(monkeypatch):
     assert "user2" in cfg.instances
 
 
-def test_botconfig_from_env_instances_have_correct_name(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
+def test_botconfig_from_env_instances_have_correct_name():
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.instances["user1"].name == "user1"
     assert cfg.instances["user2"].name == "user2"
 
 
-def test_botconfig_from_env_instances_have_config_objects(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
+def test_botconfig_from_env_instances_have_config_objects():
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert isinstance(cfg.instances["user1"].config, Config)
     assert cfg.instances["user1"].config.phone_number == "+34600000000"
 
 
-def test_botconfig_from_env_backup_from_yaml_when_env_key_absent(monkeypatch):
-    """When WALLET_API_KEY is not set, backup_cfg is derived from the first instance in YAML."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.delenv("WALLET_API_KEY", raising=False)
+def test_botconfig_from_env_backup_uses_yaml_wallet_key(monkeypatch):
+    """backup_cfg is derived from the first instance's wallet_api_key in YAML."""
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.backup_cfg is not None
@@ -215,56 +202,13 @@ def test_botconfig_from_env_backup_from_yaml_when_env_key_absent(monkeypatch):
 
 def test_botconfig_from_env_backup_yaml_data_dir_is_backup_subdir(monkeypatch):
     """Backup data_dir derived from YAML uses instances data_dir / 'backup'."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.delenv("WALLET_API_KEY", raising=False)
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.backup_cfg is not None
     assert cfg.backup_cfg.data_dir.name == "data"
 
 
-def test_botconfig_from_env_backup_env_key_takes_precedence_over_yaml(monkeypatch):
-    """When WALLET_API_KEY env var is set, it takes precedence over the YAML instance key."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.setenv("WALLET_API_KEY", "envkey")
-    with _mock_instances_load():
-        cfg = BotConfig.from_env()
-    assert cfg.backup_cfg is not None
-    assert cfg.backup_cfg.wallet_api_key == "envkey"
-
-
-def test_botconfig_from_env_backup_uses_yaml_telegram_when_env_wallet_key_set(
-    monkeypatch,
-):
-    """Even when WALLET_API_KEY is set in env, Telegram creds come from instances YAML."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.setenv("WALLET_API_KEY", "envkey")
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-    with _mock_instances_load():
-        cfg = BotConfig.from_env()
-    assert cfg.backup_cfg is not None
-    assert cfg.backup_cfg.telegram_bot_token == "mytoken"
-    assert cfg.backup_cfg.telegram_chat_id == "123"
-
-
-def test_botconfig_from_env_backup_enabled_when_wallet_key_present(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.setenv("WALLET_API_KEY", "mykey")
-    with _mock_instances_load():
-        cfg = BotConfig.from_env()
-    assert cfg.backup_cfg is not None
-    assert cfg.backup_cfg.wallet_api_key == "mykey"
-
-
 def test_botconfig_from_env_missing_token(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     with (
         _mock_instances_load(_YAML_NO_TOKEN),
         pytest.raises(ValueError, match="TELEGRAM_BOT_TOKEN"),
@@ -273,9 +217,6 @@ def test_botconfig_from_env_missing_token(monkeypatch):
 
 
 def test_botconfig_from_env_missing_chat_id(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     with (
         _mock_instances_load(_YAML_NO_CHAT_ID),
         pytest.raises(ValueError, match="TELEGRAM_CHAT_ID"),
@@ -283,11 +224,8 @@ def test_botconfig_from_env_missing_chat_id(monkeypatch):
         BotConfig.from_env()
 
 
-def test_botconfig_from_env_token_from_yaml_only(monkeypatch):
-    """TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID can come from instances.yml without env vars."""
-    monkeypatch.setenv("INSTANCES_CONFIG", "/fake/instances.yml")
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+def test_botconfig_from_env_token_from_yaml(monkeypatch):
+    """TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are read from instances.yml."""
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.bot_token == "mytoken"
@@ -296,18 +234,13 @@ def test_botconfig_from_env_token_from_yaml_only(monkeypatch):
 
 def test_botconfig_from_env_numeric_chat_id_in_yaml(monkeypatch):
     """Unquoted numeric telegram_chat_id in YAML (loaded as int) must not raise AttributeError."""
-    monkeypatch.setenv("INSTANCES_CONFIG", "/fake/instances.yml")
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     with _mock_instances_load(_YAML_NUMERIC_CHAT_ID):
         cfg = BotConfig.from_env()
     assert cfg.chat_id == "123"
 
 
-def test_botconfig_from_env_invalid_allow_insecure_ssl_raises(monkeypatch):
+def test_botconfig_from_env_invalid_allow_insecure_ssl_raises():
     """A bad allow_insecure_ssl value in the YAML must propagate as ValueError."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
     bad_yaml = _YAML_CONTENT.replace(
         'telegram_bot_token: "mytoken"',
         'allow_insecure_ssl: "not-a-bool"\ntelegram_bot_token: "mytoken"',
@@ -319,75 +252,60 @@ def test_botconfig_from_env_invalid_allow_insecure_ssl_raises(monkeypatch):
         BotConfig.from_env()
 
 
-def test_botconfig_from_env_missing_instances_config(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.delenv("INSTANCES_CONFIG")
-    with pytest.raises(ValueError, match="INSTANCES_CONFIG"):
+def test_botconfig_from_env_uses_instances_config_path():
+    from app.config import INSTANCES_CONFIG_PATH
+
+    with _mock_instances_load() as mock_load:
         BotConfig.from_env()
+    mock_load.assert_called_once_with(INSTANCES_CONFIG_PATH)
 
 
-def test_botconfig_telegram_verify_ssl_default_true(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    with _mock_instances_load():
-        cfg = BotConfig.from_env()
-    assert cfg.telegram_verify_ssl is True
-
-
-def test_botconfig_telegram_verify_ssl_false(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.setenv("TELEGRAM_VERIFY_SSL", "false")
-    with _mock_instances_load():
-        cfg = BotConfig.from_env()
-    assert cfg.telegram_verify_ssl is False
-
-
-def test_botconfig_telegram_verify_ssl_invalid(monkeypatch):
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.setenv("TELEGRAM_VERIFY_SSL", "maybe")
-    with _mock_instances_load(), pytest.raises(ValueError, match="TELEGRAM_VERIFY_SSL"):
-        BotConfig.from_env()
-
-
-def test_botconfig_from_env_allow_insecure_ssl_defaults_false(monkeypatch):
+def test_botconfig_from_env_allow_insecure_ssl_defaults_false():
     """BotConfig.allow_insecure_ssl must default to False when YAML has no setting."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.allow_insecure_ssl is False
 
 
-def test_botconfig_from_env_allow_insecure_ssl_true_from_yaml(monkeypatch):
+def test_botconfig_from_env_allow_insecure_ssl_true_from_yaml():
     """BotConfig.allow_insecure_ssl must be True when the YAML sets allow_insecure_ssl: true."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
     yaml_with_ssl = _YAML_CONTENT.rstrip() + "\nallow_insecure_ssl: true\n"
     with _mock_instances_load(yaml_with_ssl):
         cfg = BotConfig.from_env()
     assert cfg.allow_insecure_ssl is True
 
 
-def test_botconfig_log_dir_default_is_data_dir(monkeypatch):
+def test_botconfig_log_dir_default_is_data_dir():
     """BotConfig.log_dir default must be /app/data (not /app/data/logs)."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
     with _mock_instances_load():
         cfg = BotConfig.from_env()
     assert cfg.log_dir == Path("/app/data")
 
 
-def test_botconfig_from_env_log_dir_uses_instances_data_dir(monkeypatch):
+def test_botconfig_from_env_log_dir_uses_instances_data_dir():
     """BotConfig.log_dir must equal instances_yaml.data_dir (not data_dir / 'logs')."""
-    for k, v in _VALID_ENV.items():
-        monkeypatch.setenv(k, v)
     yaml_with_data_dir = _YAML_CONTENT.rstrip() + '\ndata_dir: "/custom/data"\n'
     with _mock_instances_load(yaml_with_data_dir):
         cfg = BotConfig.from_env()
     assert cfg.log_dir == Path("/custom/data")
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot — SSL circuit-breaker session
+# ---------------------------------------------------------------------------
+
+
+def test_telegrambot_creates_session_via_build_session(tmp_path):
+    """TelegramBot must build its Telegram session through http_client.build_session
+    so that allow_insecure_ssl applies to bot traffic too."""
+    import requests as req_lib
+
+    from app import http_client
+
+    with patch("app.bot._build_session", wraps=http_client.build_session) as mock_build:
+        bot = _bot(tmp_path=tmp_path)
+    mock_build.assert_called_once()
+    assert isinstance(bot._session, req_lib.Session)
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +317,7 @@ def test_register_commands_includes_backup_when_configured(tmp_path):
     bot = _bot(backup_cfg=_make_backup_config(tmp_path), tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._register_commands()
     commands = mock_post.call_args.kwargs["json"]["commands"]
     cmd_names = [c["command"] for c in commands]
@@ -414,7 +332,7 @@ def test_register_commands_excludes_backup_when_not_configured(tmp_path):
     bot = _bot(backup_cfg=None, tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._register_commands()
     commands = mock_post.call_args.kwargs["json"]["commands"]
     cmd_names = [c["command"] for c in commands]
@@ -427,7 +345,7 @@ def test_register_commands_logs_description_does_not_mention_instance(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._register_commands()
     commands = mock_post.call_args.kwargs["json"]["commands"]
     logs_cmd = next(c for c in commands if c["command"] == "logs")
@@ -436,7 +354,9 @@ def test_register_commands_logs_description_does_not_mention_instance(tmp_path):
 
 def test_register_commands_does_not_raise_on_failure(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch("app.bot.requests.post", side_effect=requests.RequestException("fail")):
+    with patch.object(
+        bot._session, "post", side_effect=requests.RequestException("fail")
+    ):
         bot._register_commands()  # must not raise
 
 
@@ -514,7 +434,7 @@ def test_handle_message_does_not_delete_non_code_commands(tmp_path):
 
 def test_delete_message_calls_telegram_api(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch("app.bot.requests.post") as mock_post:
+    with patch.object(bot._session, "post") as mock_post:
         bot._delete_message(555)
     mock_post.assert_called_once()
     payload = mock_post.call_args.kwargs["json"]
@@ -524,13 +444,15 @@ def test_delete_message_calls_telegram_api(tmp_path):
 
 def test_delete_message_does_not_raise_on_failure(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch("app.bot.requests.post", side_effect=requests.RequestException("fail")):
+    with patch.object(
+        bot._session, "post", side_effect=requests.RequestException("fail")
+    ):
         bot._delete_message(555)  # must not raise
 
 
 def test_delete_message_ignores_missing_id(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch("app.bot.requests.post") as mock_post:
+    with patch.object(bot._session, "post") as mock_post:
         bot._delete_message(None)
     mock_post.assert_not_called()
 
@@ -1505,7 +1427,7 @@ def test_send_message_posts_to_telegram(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._send_message("hello")
     url = mock_post.call_args.args[0]
     assert "sendMessage" in url
@@ -1520,7 +1442,7 @@ def test_send_message_with_keyboard_includes_reply_markup(tmp_path):
     keyboard = [[{"text": "A", "callback_data": "a"}]]
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._send_message("pick", keyboard=keyboard)
     payload = mock_post.call_args.kwargs["json"]
     assert "reply_markup" in payload
@@ -1529,8 +1451,8 @@ def test_send_message_with_keyboard_includes_reply_markup(tmp_path):
 
 def test_send_message_does_not_raise_on_request_exception(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch(
-        "app.bot.requests.post", side_effect=requests.RequestException("network error")
+    with patch.object(
+        bot._session, "post", side_effect=requests.RequestException("network error")
     ):
         bot._send_message("hello")  # must not raise
 
@@ -1543,7 +1465,7 @@ def test_send_message_does_not_raise_on_request_exception(tmp_path):
 def test_answer_callback_query_calls_api(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._answer_callback_query("cq123")
     url = mock_post.call_args.args[0]
     assert "answerCallbackQuery" in url
@@ -1552,7 +1474,9 @@ def test_answer_callback_query_calls_api(tmp_path):
 
 def test_answer_callback_query_does_not_raise_on_failure(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch("app.bot.requests.post", side_effect=requests.RequestException("fail")):
+    with patch.object(
+        bot._session, "post", side_effect=requests.RequestException("fail")
+    ):
         bot._answer_callback_query("cq1")  # must not raise
 
 
@@ -1878,7 +1802,7 @@ def test_register_commands_includes_logs(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._register_commands()
     commands = mock_post.call_args.kwargs["json"]["commands"]
     cmd_names = [c["command"] for c in commands]
@@ -1894,7 +1818,7 @@ def test_send_message_default_parse_mode_is_markdownv2(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._send_message("hello")
     payload = mock_post.call_args.kwargs["json"]
     assert payload.get("parse_mode") == "MarkdownV2"
@@ -1904,7 +1828,7 @@ def test_send_message_no_parse_mode_omits_field(tmp_path):
     bot = _bot(tmp_path=tmp_path)
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    with patch("app.bot.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(bot._session, "post", return_value=mock_resp) as mock_post:
         bot._send_message("plain text", parse_mode=None)
     payload = mock_post.call_args.kwargs["json"]
     assert "parse_mode" not in payload
@@ -2097,26 +2021,6 @@ def test_cmd_status_checks_each_instance(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# TelegramBot.__init__ — telegram_verify_ssl=False disables urllib3 warnings
-# ---------------------------------------------------------------------------
-
-
-def test_init_disables_urllib3_warnings_when_ssl_verify_false():
-    """When telegram_verify_ssl=False, urllib3 InsecureRequestWarning is suppressed."""
-    import urllib3
-
-    with patch.object(urllib3, "disable_warnings") as mock_dw:
-        TelegramBot(
-            BotConfig(
-                bot_token="tok",
-                chat_id="42",
-                instances={},
-                telegram_verify_ssl=False,
-            )
-        )
-    mock_dw.assert_called_once_with(urllib3.exceptions.InsecureRequestWarning)
-
-
 def test_init_configures_ssl_once_at_startup():
     """TelegramBot.__init__ must call http_client.configure() once with the BotConfig ssl policy."""
     with patch("app.bot.http_client.configure") as mock_configure:
@@ -2176,7 +2080,7 @@ def test_poll_once_dispatches_update(tmp_path):
         "result": [{"update_id": 10, "message": {"chat": {"id": 42}, "text": "/help"}}]
     }
     with (
-        patch("app.bot.requests.get", return_value=mock_resp),
+        patch.object(bot._session, "get", return_value=mock_resp),
         patch.object(bot, "_handle_update") as mock_handle,
     ):
         bot._poll_once()
@@ -2196,7 +2100,7 @@ def test_poll_once_advances_offset_for_multiple_updates(tmp_path):
         ]
     }
     with (
-        patch("app.bot.requests.get", return_value=mock_resp),
+        patch.object(bot._session, "get", return_value=mock_resp),
         patch.object(bot, "_handle_update"),
     ):
         bot._poll_once()
@@ -2222,7 +2126,7 @@ def test_poll_once_continues_on_handle_update_exception(tmp_path):
             raise RuntimeError("boom")
 
     with (
-        patch("app.bot.requests.get", return_value=mock_resp),
+        patch.object(bot._session, "get", return_value=mock_resp),
         patch.object(bot, "_handle_update", side_effect=flaky_handle),
     ):
         bot._poll_once()
@@ -2491,7 +2395,7 @@ def test_run_resync_for_instance_calls_main_run_resync(tmp_path):
 
 def test_register_commands_includes_resync(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch("app.bot.requests.post") as mock_post:
+    with patch.object(bot._session, "post") as mock_post:
         mock_post.return_value = MagicMock(raise_for_status=MagicMock())
         bot._register_commands()
     payload = mock_post.call_args.kwargs["json"]

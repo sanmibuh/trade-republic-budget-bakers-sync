@@ -5,33 +5,14 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
-def _required_env(name: str) -> str:
-    value = os.getenv(name)
-    if value is None or value.strip() == "":
-        raise ValueError(f"Missing required environment variable: {name}")
-    return value
-
-
-def _positive_int_env(name: str, default: int) -> int:
-    raw = os.getenv(name, str(default))
-    try:
-        value = int(raw)
-    except ValueError as err:
-        raise ValueError(f"{name} must be an integer, got: {raw!r}") from err
-    if value <= 0:
-        raise ValueError(f"{name} must be a positive integer, got: {value}")
-    return value
-
-
-# Default data directory when DATA_DIR env var is not set.
+# Default data directory.
 _DEFAULT_DATA_DIR = "/app/data"
 
-# Default owner name used when OWNER_NAME env var is not set.
-# The backup service intentionally omits OWNER_NAME; sync services set it explicitly.
-_DEFAULT_OWNER_NAME = "Backup"
+# Path to the instances YAML config file (mounted via Docker volume).
+# Can be overridden by the INSTANCES_CONFIG env var for local development.
+INSTANCES_CONFIG_PATH = Path(os.getenv("INSTANCES_CONFIG", "/app/config/instances.yml"))
 
-# Event types that support optional label assignment via LABEL_<EVENT_TYPE> env vars.
+# Event types that support optional label assignment (configured in instances.yml).
 LABELABLE_EVENT_TYPES: tuple[str, ...] = (
     "BANK_TRANSACTION_INCOMING",
     "BANK_TRANSACTION_OUTGOING",
@@ -49,95 +30,7 @@ LABELABLE_EVENT_TYPES: tuple[str, ...] = (
     "PAYMENT_INBOUND",
 )
 
-
-def _read_label_ids() -> dict[str, str]:
-    """Read LABEL_<EVENT_TYPE> env vars and return a mapping of event_type → label_id."""
-    return {
-        event_type: label_id
-        for event_type in LABELABLE_EVENT_TYPES
-        if (label_id := os.getenv(f"LABEL_{event_type}", "").strip())
-    }
-
-
 _VALID_CATEGORY_STRATEGIES: frozenset[str] = frozenset({"none", "history"})
-
-
-def _category_strategy_env() -> str:
-    raw = os.getenv("CATEGORY_STRATEGY", "none").strip().lower()
-    if raw not in _VALID_CATEGORY_STRATEGIES:
-        raise ValueError(
-            f"CATEGORY_STRATEGY must be one of {sorted(_VALID_CATEGORY_STRATEGIES)}, got: {raw!r}"
-        )
-    return raw
-
-
-def _bool_env(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    normalized = raw.strip().lower()
-    if normalized in ("true", "1", "yes"):
-        return True
-    if normalized in ("false", "0", "no"):
-        return False
-    raise ValueError(f"{name} must be a boolean (true/false/1/0/yes/no), got: {raw!r}")
-
-
-def _read_notifier_env() -> dict[str, object]:
-    """Read env vars shared by Config and BackupConfig."""
-    return {
-        "owner_name": os.getenv("OWNER_NAME", _DEFAULT_OWNER_NAME),
-        "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
-        "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID"),
-        "data_dir": Path(os.getenv("DATA_DIR", _DEFAULT_DATA_DIR)),
-        "allow_insecure_ssl": _bool_env("ALLOW_INSECURE_SSL", default=False),
-    }
-
-
-def read_instances_config_path() -> Path:
-    """Return the path to the instances YAML config file from ``INSTANCES_CONFIG`` env var.
-
-    Raises ``ValueError`` when the variable is unset or blank.  All env var reads
-    for ``INSTANCES_CONFIG`` must go through this helper — never call ``os.getenv``
-    for this variable outside ``config.py``.
-    """
-    raw = os.getenv("INSTANCES_CONFIG", "").strip()
-    if not raw:
-        raise ValueError("Missing required environment variable: INSTANCES_CONFIG")
-    return Path(raw)
-
-
-def read_optional_wallet_api_key() -> str | None:
-    """Return ``WALLET_API_KEY`` from env, or ``None`` if absent or blank.
-
-    Used by the bot to let an explicit env override take precedence over the
-    key stored in the instances YAML.  All ``os.getenv`` calls must stay in
-    ``config.py``; callers must use this helper instead of calling
-    ``os.getenv`` directly.
-    """
-    return os.getenv("WALLET_API_KEY", "").strip() or None
-
-
-def read_data_dir() -> Path:
-    """Return the data directory path from the DATA_DIR environment variable."""
-    return Path(os.getenv("DATA_DIR", _DEFAULT_DATA_DIR))
-
-
-def read_telegram_verify_ssl() -> bool:
-    """Return the TELEGRAM_VERIFY_SSL setting (default True)."""
-    return _bool_env("TELEGRAM_VERIFY_SSL", default=True)
-
-
-def read_instance() -> str:
-    """Return the logical instance name for this container.
-
-    Reads ``INSTANCE`` env var; falls back to ``OWNER_NAME`` lowercased
-    (matching the logic in :meth:`Config.from_env`).
-    """
-    instance = os.getenv("INSTANCE", "").strip()
-    if instance:
-        return instance
-    return os.getenv("OWNER_NAME", _DEFAULT_OWNER_NAME).lower()
 
 
 def has_valid_session(data_dir: Path) -> bool:
@@ -185,26 +78,6 @@ class Config:
     label_ids: dict[str, str] = field(default_factory=dict)
     category_strategy: str = "none"
 
-    @classmethod
-    def from_env(cls) -> Config:
-        notifier_env = _read_notifier_env()
-        instance = (
-            os.getenv("INSTANCE", "").strip() or str(notifier_env["owner_name"]).lower()
-        )
-        return cls(
-            **notifier_env,
-            phone_number=_required_env("PHONE_NUMBER"),
-            pin=_required_env("PIN"),
-            wallet_api_key=_required_env("WALLET_API_KEY"),
-            wallet_cash_account_id=_required_env("WALLET_CASH_ACCOUNT_ID"),
-            wallet_portfolio_account_id=_required_env("WALLET_PORTFOLIO_ACCOUNT_ID"),
-            lookback_days=_positive_int_env("LOOKBACK_DAYS", default=7),
-            dedup_ttl_days=_positive_int_env("DEDUP_TTL_DAYS", default=60),
-            instance=instance,
-            label_ids=_read_label_ids(),
-            category_strategy=_category_strategy_env(),
-        )
-
 
 @dataclass(frozen=True)
 class BackupConfig:
@@ -218,26 +91,14 @@ class BackupConfig:
     allow_insecure_ssl: bool = False
 
     @classmethod
-    def from_env(cls) -> BackupConfig:
-        return cls(
-            **_read_notifier_env(),
-            wallet_api_key=_required_env("WALLET_API_KEY"),
-        )
-
-    @classmethod
     def from_instances_yaml(
         cls,
         instances_yaml: InstancesConfig,
-        wallet_api_key: str | None = None,
     ) -> BackupConfig | None:
         """Build a :class:`BackupConfig` from an :class:`InstancesConfig`.
 
-        Telegram credentials, ``data_dir``, and ``allow_insecure_ssl`` are always
-        taken from *instances_yaml* so that the backup service is consistent with
-        the sync instances in the single-container deployment.
-
-        ``wallet_api_key`` overrides the key from the first instance (use this to
-        propagate ``WALLET_API_KEY`` from the environment when it is set).
+        Telegram credentials, ``data_dir``, and ``allow_insecure_ssl`` are taken
+        from *instances_yaml*. ``wallet_api_key`` is taken from the first instance.
 
         Returns ``None`` when *instances_yaml* has no instances.
         """
@@ -246,7 +107,7 @@ class BackupConfig:
         first = instances_yaml.instances[0]
         return cls(
             owner_name="Backup",
-            wallet_api_key=wallet_api_key or first.wallet_api_key,
+            wallet_api_key=first.wallet_api_key,
             telegram_bot_token=instances_yaml.telegram_bot_token,
             telegram_chat_id=instances_yaml.telegram_chat_id,
             data_dir=instances_yaml.data_dir,
@@ -254,25 +115,8 @@ class BackupConfig:
         )
 
 
-@dataclass(frozen=True)
-class BotEnv:
-    """Raw environment values needed by the Telegram bot."""
-
-    bot_token: str
-    chat_id: str
-    telegram_verify_ssl: bool = True
-
-    @classmethod
-    def from_env(cls) -> BotEnv:
-        return cls(
-            bot_token=_required_env("TELEGRAM_BOT_TOKEN"),
-            chat_id=_required_env("TELEGRAM_CHAT_ID"),
-            telegram_verify_ssl=_bool_env("TELEGRAM_VERIFY_SSL", default=True),
-        )
-
-
 # ---------------------------------------------------------------------------
-# Multi-instance config (YAML file — Phase 1 of single-container migration)
+# Multi-instance config (YAML file)
 # ---------------------------------------------------------------------------
 
 _REQUIRED_INSTANCE_FIELDS: tuple[str, ...] = (
@@ -647,9 +491,8 @@ class SyncConfig:
 
 @dataclass(frozen=True)
 class InstancesConfig:
-    """Configuration for all sync instances, loaded from a YAML file.
+    """Configuration for all sync instances, loaded from ``/app/config/instances.yml``.
 
-    The file path is read from the ``INSTANCES_CONFIG`` environment variable.
     Each instance gets its own ``data_dir`` subdirectory:
     ``{root_data_dir}/{instance.name}/``.
 
@@ -688,7 +531,7 @@ class InstancesConfig:
     @classmethod
     def load(cls, path: Path) -> InstancesConfig:
         """Load and validate an instances YAML config file."""
-        import yaml  # deferred — only needed when INSTANCES_CONFIG is used
+        import yaml  # deferred — only needed when instances.yml is loaded
 
         raw = path.read_text()  # raises FileNotFoundError if absent
         try:
@@ -757,12 +600,8 @@ class InstancesConfig:
                 schedule=sync_schedule,
             ),
             data_dir=Path(data.get("data_dir", _DEFAULT_DATA_DIR)),
-            telegram_bot_token=data.get("telegram_bot_token")
-            or os.getenv("TELEGRAM_BOT_TOKEN")
-            or None,
-            telegram_chat_id=data.get("telegram_chat_id")
-            or os.getenv("TELEGRAM_CHAT_ID")
-            or None,
+            telegram_bot_token=data.get("telegram_bot_token") or None,
+            telegram_chat_id=data.get("telegram_chat_id") or None,
             allow_insecure_ssl=allow_insecure_ssl,
             backup_schedule=backup_schedule,
         )
