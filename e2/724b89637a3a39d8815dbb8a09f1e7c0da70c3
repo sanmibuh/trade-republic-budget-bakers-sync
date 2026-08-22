@@ -1,0 +1,16 @@
+app/persistence.py
+  h_97a91c9e567f87 31-38,48,148
+tests/test_persistence.py
+  h_97a91c9e567f87 91-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "e2724b89637a3a39d8815dbb8a09f1e7c0da70c3",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
