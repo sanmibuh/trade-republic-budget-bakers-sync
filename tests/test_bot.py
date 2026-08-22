@@ -379,6 +379,7 @@ def test_handle_message_non_command_replies_commands_only(tmp_path):
         bot._handle_message({"chat": {"id": 42}, "text": "hello"})
     mock_send.assert_called_once()
     assert "command" in mock_send.call_args.args[0].lower()
+    assert "/help" not in mock_send.call_args.args[0]
 
 
 def test_handle_message_unknown_command_replies(tmp_path):
@@ -387,6 +388,7 @@ def test_handle_message_unknown_command_replies(tmp_path):
         bot._handle_message({"chat": {"id": 42}, "text": "/unknown"})
     mock_send.assert_called_once()
     assert "Unknown" in mock_send.call_args.args[0]
+    assert "/help" not in mock_send.call_args.args[0]
 
 
 def test_handle_message_help_is_unknown_command(tmp_path):
@@ -1998,6 +2000,20 @@ def test_init_configures_ssl_once_at_startup():
 # ---------------------------------------------------------------------------
 # TelegramBot.run — polling loop
 # ---------------------------------------------------------------------------
+
+
+def test_run_sends_startup_message_without_help_reference(tmp_path):
+    """run() must send a startup message that does not reference /help."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_register_commands"),
+        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_poll_once", side_effect=KeyboardInterrupt),
+    ):
+        bot.run()
+    startup_msg = mock_send.call_args_list[0].args[0]
+    assert "started" in startup_msg.lower() or "ready" in startup_msg.lower()
+    assert "/help" not in startup_msg
 
 
 def test_run_stops_on_keyboard_interrupt(tmp_path):
