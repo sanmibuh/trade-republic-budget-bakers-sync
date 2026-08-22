@@ -5,10 +5,6 @@
 telegram_bot_token: ""
 telegram_chat_id: ""
 
-# Optional: shared backup config.
-# backup:
-#   wallet_api_key: ""
-
 # Optional: backup cron schedule (used by get-backup-schedule).
 # backup_schedule: "0 8 1 * *"
 
@@ -20,7 +16,7 @@ sync:
     - name: user1
       phone: "+34600000000"     # Trade Republic account phone number
       pin: "1234"               # Trade Republic PIN
-      wallet_api_key: ""        # BudgetBakers Wallet API key
+      wallet_api_key: ""        # BudgetBakers Wallet API key (also used for backups)
       wallet_cash_account_id: ""
       wallet_portfolio_account_id: ""
       # Optional overrides:

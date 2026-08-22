@@ -181,7 +181,7 @@ python -m app bot
 
 ## Telegram bot (remote control)
 
-An optional `telegram-bot` service lets you trigger sync and backup operations on demand from Telegram, without accessing the server.
+The built-in Telegram bot lets you trigger sync and backup operations on demand from Telegram, without accessing the server.
 
 ### Commands
 

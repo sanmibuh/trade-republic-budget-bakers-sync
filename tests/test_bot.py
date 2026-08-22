@@ -1451,8 +1451,8 @@ def test_send_message_with_keyboard_includes_reply_markup(tmp_path):
 
 def test_send_message_does_not_raise_on_request_exception(tmp_path):
     bot = _bot(tmp_path=tmp_path)
-    with patch(
-        "app.bot.requests.post", side_effect=requests.RequestException("network error")
+    with patch.object(
+        bot._session, "post", side_effect=requests.RequestException("network error")
     ):
         bot._send_message("hello")  # must not raise
 
