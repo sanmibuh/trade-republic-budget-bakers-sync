@@ -351,7 +351,6 @@ def bot() -> None:
 
     \b
     Supported Telegram commands:
-      /help
       /status
       /sync              (shows an inline keyboard to pick the instance)
       /login             (shows an inline keyboard to pick the instance)

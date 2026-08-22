@@ -324,7 +324,7 @@ def test_register_commands_includes_backup_when_configured(tmp_path):
     assert "sync" in cmd_names
     assert "backup" in cmd_names
     assert "status" in cmd_names
-    assert "help" in cmd_names
+    assert "help" not in cmd_names
     assert "login" in cmd_names
 
 
@@ -379,6 +379,7 @@ def test_handle_message_non_command_replies_commands_only(tmp_path):
         bot._handle_message({"chat": {"id": 42}, "text": "hello"})
     mock_send.assert_called_once()
     assert "command" in mock_send.call_args.args[0].lower()
+    assert "/help" not in mock_send.call_args.args[0]
 
 
 def test_handle_message_unknown_command_replies(tmp_path):
@@ -387,13 +388,16 @@ def test_handle_message_unknown_command_replies(tmp_path):
         bot._handle_message({"chat": {"id": 42}, "text": "/unknown"})
     mock_send.assert_called_once()
     assert "Unknown" in mock_send.call_args.args[0]
+    assert "/help" not in mock_send.call_args.args[0]
 
 
-def test_handle_message_dispatches_help(tmp_path):
+def test_handle_message_help_is_unknown_command(tmp_path):
+    """/help is no longer a registered command and returns an unknown-command reply."""
     bot = _bot(tmp_path=tmp_path)
-    with patch.object(bot, "_cmd_help") as mock_help:
+    with patch.object(bot, "_send_message") as mock_send:
         bot._handle_message({"chat": {"id": 42}, "text": "/help"})
-    mock_help.assert_called_once()
+    mock_send.assert_called_once()
+    assert "Unknown" in mock_send.call_args.args[0]
 
 
 def test_handle_message_strips_bot_name_suffix(tmp_path):
@@ -455,41 +459,6 @@ def test_delete_message_ignores_missing_id(tmp_path):
     with patch.object(bot._session, "post") as mock_post:
         bot._delete_message(None)
     mock_post.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# TelegramBot._cmd_help
-# ---------------------------------------------------------------------------
-
-
-def test_cmd_help_includes_backup_when_configured(tmp_path):
-    bot = _bot(backup_cfg=_make_backup_config(tmp_path), tmp_path=tmp_path)
-    with patch.object(bot, "_send_message") as mock_send:
-        bot._cmd_help([])
-    msg = mock_send.call_args.args[0]
-    assert "sync" in msg.lower()
-    assert "backup" in msg.lower()
-
-
-def test_cmd_help_excludes_backup_when_not_configured(tmp_path):
-    bot = _bot(backup_cfg=None, tmp_path=tmp_path)
-    with patch.object(bot, "_send_message") as mock_send:
-        bot._cmd_help([])
-    msg = mock_send.call_args.args[0]
-    assert "sync" in msg.lower()
-    assert "/backup" not in msg
-
-
-def test_cmd_help_logs_line_does_not_mention_instance(tmp_path):
-    """/help output for /logs must not claim it shows logs 'for an instance'."""
-    bot = _bot(tmp_path=tmp_path)
-    with patch.object(bot, "_send_message") as mock_send:
-        bot._cmd_help([])
-    msg = mock_send.call_args.args[0]
-    # Find the /logs line and confirm it doesn't say "for an instance"
-    logs_line = next((ln for ln in msg.splitlines() if "/logs" in ln), None)
-    assert logs_line is not None
-    assert "instance" not in logs_line.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -2033,6 +2002,20 @@ def test_init_configures_ssl_once_at_startup():
 # ---------------------------------------------------------------------------
 
 
+def test_run_sends_startup_message_without_help_reference(tmp_path):
+    """run() must send a startup message that does not reference /help."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_register_commands"),
+        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_poll_once", side_effect=KeyboardInterrupt),
+    ):
+        bot.run()
+    startup_msg = mock_send.call_args_list[0].args[0]
+    assert "started" in startup_msg.lower() or "ready" in startup_msg.lower()
+    assert "/help" not in startup_msg
+
+
 def test_run_stops_on_keyboard_interrupt(tmp_path):
     """KeyboardInterrupt inside the loop causes run() to exit cleanly."""
     bot = _bot(tmp_path=tmp_path)
@@ -2401,35 +2384,6 @@ def test_register_commands_includes_resync(tmp_path):
     payload = mock_post.call_args.kwargs["json"]
     commands = [c["command"] for c in payload["commands"]]
     assert "resync" in commands
-
-
-def test_cmd_help_code_mentions_plain_digit_message(tmp_path):
-    """/help /code line must explain that a plain digit message is the default 2FA flow."""
-    bot = _bot(tmp_path=tmp_path)
-    with patch.object(bot, "_send_message") as mock_send:
-        bot._cmd_help([])
-    msg = mock_send.call_args.args[0]
-    # Find the /code line specifically and verify it mentions the plain-message alternative
-    code_line = next((line for line in msg.splitlines() if "/code" in line), "")
-    assert code_line, "/code must appear in /help output"
-    assert (
-        "plain" in code_line.lower()
-        or "direct" in code_line.lower()
-        or "message" in code_line.lower()
-    )
-
-
-# ---------------------------------------------------------------------------
-# _cmd_help — resync mentioned
-# ---------------------------------------------------------------------------
-
-
-def test_cmd_help_mentions_resync(tmp_path):
-    bot = _bot(tmp_path=tmp_path)
-    with patch.object(bot, "_send_message") as mock_send:
-        bot._cmd_help([])
-    msg = mock_send.call_args.args[0]
-    assert "resync" in msg.lower()
 
 
 # ---------------------------------------------------------------------------
