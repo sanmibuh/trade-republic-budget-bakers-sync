@@ -25,8 +25,8 @@ def _auto_init_db(monkeypatch):
 
     original_init = persistence.EventRepository.__init__
 
-    def _patched_init(self, db_path, instance=""):
+    def _patched_init(self, db_path, instance="", **kwargs):
         init_db(db_path)
-        original_init(self, db_path, instance)
+        original_init(self, db_path, instance, **kwargs)
 
     monkeypatch.setattr(persistence.EventRepository, "__init__", _patched_init)

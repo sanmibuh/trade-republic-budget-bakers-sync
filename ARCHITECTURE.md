@@ -475,9 +475,9 @@ image publish workflows.
 - `backups/monthly/` — monthly JSON snapshots (permanent)
 - `backups/yearly/` — yearly JSON snapshots (permanent)
 
-**Legacy layout** (pre-issue #173): each instance had its own `sync/{name}/sync.db`.  On first startup after
-upgrading, `migrate_legacy_databases()` automatically copies rows into the shared `sync.db` and leaves the old
-files in place (read-only, safe to delete manually).
+**Legacy layout** (pre-issue #173): each instance had its own `sync/{name}/sync.db`.  All production
+deployments were migrated to the shared `sync.db` as part of #173.  The old per-instance files can be
+deleted manually if still present.
 
 ---
 

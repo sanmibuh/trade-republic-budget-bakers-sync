@@ -69,6 +69,7 @@ def init_db(db_path: Path) -> None:
         db_path: Filesystem path for the SQLite database file.
     """
     sql = (Path(__file__).parent / "schema.sql").read_text()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     try:
         conn.executescript(sql)
