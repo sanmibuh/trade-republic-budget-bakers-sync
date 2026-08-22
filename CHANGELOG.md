@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [7.3.0] - 2026-08-22
+
+### What's Changed
+* Unify databases: single shared sync.db instead of one per instance — [#185](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/185)
+* Reorder bot commands: sync, status, logs, backup, resync — [#184](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/184)
+* Remove /login command — sync already triggers re-authentication automatically — [#183](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/183)
+**Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v7.2.0...v7.3.0
+
+
 ## [7.2.0] - 2026-08-22
 
 ### What's Changed
