@@ -630,7 +630,8 @@ def test_resync_day_fetches_events_for_exact_date():
 
     since = mock_fetch.call_args[0][0]
     assert since.date() == date(2026, 7, 15)
-    assert since.hour == 0 and since.minute == 0
+    assert since.hour == 0
+    assert since.minute == 0
 
 
 def test_resync_day_skips_dedup_filter(tmp_path):
