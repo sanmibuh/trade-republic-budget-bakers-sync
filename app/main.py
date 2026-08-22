@@ -28,6 +28,8 @@ def _prepare(cfg: Config) -> Notifier:
     """Shared bootstrap for the sync entry points.
 
     Ensures the data dir exists and returns a ready-to-use ``Notifier``.
+    Does not initialise the database — callers are responsible for calling
+    :func:`~app.persistence.init_db` before opening any repository.
 
     SSL is configured once at process startup by each CLI entry point or by
     ``TelegramBot.__init__()`` — not here — so repeated in-process calls from
@@ -38,7 +40,6 @@ def _prepare(cfg: Config) -> Notifier:
     shared log file without any handler lifecycle management.
     """
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
-    init_db(cfg.shared_db_path)
     return Notifier(cfg.telegram_bot_token, cfg.telegram_chat_id, cfg.owner_name)
 
 
@@ -48,6 +49,7 @@ def _prepare(cfg: Config) -> Notifier:
 
 
 def run(cfg: Config) -> int:
+    init_db(cfg.shared_db_path)
     notifier = _prepare(cfg)
     log.info("Starting sync for owner: %s", cfg.owner_name)
 
@@ -114,6 +116,7 @@ def run_resync(date_str: str, cfg: Config) -> int:
         log.error("Invalid date for resync: %r (expected YYYY-MM-DD)", date_str)
         return 1
 
+    init_db(cfg.shared_db_path)
     notifier = _prepare(cfg)
     log.info("Starting force resync for date=%s owner=%s", date_str, cfg.owner_name)
 

@@ -1670,9 +1670,10 @@ def test_check_session_direct_no_db_returns_true_when_cookie_valid(tmp_path):
 
 
 def test_check_session_direct_auth_state_failed_returns_false(tmp_path):
-    from app.persistence import EventRepository
+    from app.persistence import EventRepository, init_db
 
     db_path = tmp_path / "sync.db"
+    init_db(db_path)
     with EventRepository(db_path) as repo:
         repo.set_auth_state("user1", "failed")
 
@@ -1682,9 +1683,10 @@ def test_check_session_direct_auth_state_failed_returns_false(tmp_path):
 
 
 def test_check_session_direct_auth_state_ok_returns_true(tmp_path):
-    from app.persistence import EventRepository
+    from app.persistence import EventRepository, init_db
 
     db_path = tmp_path / "sync.db"
+    init_db(db_path)
     with EventRepository(db_path) as repo:
         repo.set_auth_state("user1", "ok")
 
@@ -1704,9 +1706,10 @@ def test_last_sync_summary_direct_no_db_returns_none(tmp_path):
 
 
 def test_last_sync_summary_direct_success_run(tmp_path):
-    from app.persistence import EventRepository
+    from app.persistence import EventRepository, init_db
 
     db_path = tmp_path / "sync.db"
+    init_db(db_path)
     with EventRepository(db_path) as repo:
         repo.set_sync_run("user1", status="success", saved=5, failed=0, excluded=1)
 
@@ -1719,9 +1722,10 @@ def test_last_sync_summary_direct_success_run(tmp_path):
 
 
 def test_last_sync_summary_direct_failed_run(tmp_path):
-    from app.persistence import EventRepository
+    from app.persistence import EventRepository, init_db
 
     db_path = tmp_path / "sync.db"
+    init_db(db_path)
     with EventRepository(db_path) as repo:
         repo.set_sync_run("user1", status="failed", saved=0, failed=2, excluded=0)
 
@@ -1732,9 +1736,10 @@ def test_last_sync_summary_direct_failed_run(tmp_path):
 
 
 def test_last_sync_summary_direct_no_run_for_instance_returns_none(tmp_path):
-    from app.persistence import EventRepository
+    from app.persistence import EventRepository, init_db
 
     db_path = tmp_path / "sync.db"
+    init_db(db_path)
     with EventRepository(db_path) as repo:
         repo.set_sync_run("other", status="success", saved=1, failed=0, excluded=0)
 
