@@ -410,6 +410,57 @@ def test_get_wallet_record_id_returns_none_when_id_is_null(db):
 
 
 # ---------------------------------------------------------------------------
+# EventRepository — _build_event_row (private helper)
+# ---------------------------------------------------------------------------
+
+
+def test_build_event_row_returns_correct_tuple(db):
+    """_build_event_row should return a tuple with the expected 8 fields."""
+    import json
+
+    event = {"id": "row-evt", "timestamp": "2026-07-01T12:00:00Z", "amount": 42.5}
+    wallet_record_id = "wid-row"
+    with EventRepository(db) as repo:
+        row = repo._build_event_row(event, wallet_record_id)
+
+    assert len(row) == 8
+    eid, instance, event_type, event_timestamp, amount, raw, synced_at, wrid = row
+    assert eid == "row-evt"
+    assert instance == ""
+    assert event_type is not None
+    assert event_timestamp is not None
+    assert amount == "42.5"
+    parsed = json.loads(raw)
+    assert parsed["id"] == "row-evt"
+    assert synced_at is not None
+    assert wrid == "wid-row"
+
+
+def test_build_event_row_wallet_record_id_none(db):
+    """_build_event_row stores None when wallet_record_id is not provided."""
+    event = {"id": "row-none", "timestamp": "2026-07-01T12:00:00Z"}
+    with EventRepository(db) as repo:
+        row = repo._build_event_row(event, None)
+
+    assert row[-1] is None
+
+
+def test_build_event_row_falls_back_to_str_on_type_error(db, monkeypatch):
+    """_build_event_row falls back to str(event) when json.dumps raises TypeError."""
+    from unittest.mock import patch
+
+    event = {"id": "row-fallback", "timestamp": "2026-07-01T00:00:00Z"}
+    with (
+        patch("app.persistence.json.dumps", side_effect=TypeError("not serialisable")),
+        EventRepository(db) as repo,
+    ):
+        row = repo._build_event_row(event, None)
+
+    raw = row[5]
+    assert "row-fallback" in raw
+
+
+# ---------------------------------------------------------------------------
 # EventRepository — mark_processed_force (upsert for resync)
 # ---------------------------------------------------------------------------
 

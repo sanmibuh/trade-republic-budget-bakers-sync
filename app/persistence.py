@@ -130,9 +130,10 @@ class EventRepository:
             event for event, dedup_id in events_with_ids if dedup_id not in processed
         ]
 
-    def mark_processed(
-        self, event: dict[str, Any], *, wallet_record_id: str | None = None
-    ) -> None:
+    def _build_event_row(
+        self, event: dict[str, Any], wallet_record_id: str | None
+    ) -> tuple:
+        """Build the row tuple shared by :meth:`mark_processed` and :meth:`mark_processed_force`."""
         eid = dedup_event_id(event)
         event_type = extract_event_type(event)
         event_timestamp = normalize_event_time(event)
@@ -142,22 +143,31 @@ class EventRepository:
         except TypeError:
             raw = str(event)
         synced_at = datetime.now(UTC).isoformat()
+        return (
+            eid,
+            self._instance,
+            event_type,
+            event_timestamp,
+            amount,
+            raw,
+            synced_at,
+            wallet_record_id,
+        )
 
+    def _insert_processed_event(
+        self, event: dict[str, Any], wallet_record_id: str | None, *, conflict: str
+    ) -> None:
         self._conn.execute(
-            "INSERT OR IGNORE INTO processed_events "
+            f"INSERT OR {conflict} INTO processed_events "
             "(event_id, instance, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                eid,
-                self._instance,
-                event_type,
-                event_timestamp,
-                amount,
-                raw,
-                synced_at,
-                wallet_record_id,
-            ),
+            self._build_event_row(event, wallet_record_id),
         )
+
+    def mark_processed(
+        self, event: dict[str, Any], *, wallet_record_id: str | None = None
+    ) -> None:
+        self._insert_processed_event(event, wallet_record_id, conflict="IGNORE")
 
     def mark_processed_force(
         self, event: dict[str, Any], *, wallet_record_id: str | None = None
@@ -169,31 +179,7 @@ class EventRepository:
         ``wallet_record_id`` is always updated. Used by the resync path to
         record updated Wallet IDs after a forced re-upload.
         """
-        eid = dedup_event_id(event)
-        event_type = extract_event_type(event)
-        event_timestamp = normalize_event_time(event)
-        amount = str(event.get("amount") or event.get("value") or "")
-        try:
-            raw = json.dumps(event, ensure_ascii=False, default=str)
-        except TypeError:
-            raw = str(event)
-        synced_at = datetime.now(UTC).isoformat()
-
-        self._conn.execute(
-            "INSERT OR REPLACE INTO processed_events "
-            "(event_id, instance, event_type, event_timestamp, amount, raw, synced_at, wallet_record_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                eid,
-                self._instance,
-                event_type,
-                event_timestamp,
-                amount,
-                raw,
-                synced_at,
-                wallet_record_id,
-            ),
-        )
+        self._insert_processed_event(event, wallet_record_id, conflict="REPLACE")
 
     def get_wallet_record_id(self, event: dict[str, Any]) -> str | None:
         eid = dedup_event_id(event)
