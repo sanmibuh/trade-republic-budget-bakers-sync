@@ -441,6 +441,41 @@ _CRON_FIELD_RE = (
 )
 _CRON_SCHEDULE_RE = re.compile(r"^" + r" ".join([_CRON_FIELD_RE] * 5) + r"$")
 
+# (min, max) inclusive for each cron field position
+_CRON_FIELD_RANGES: tuple[tuple[int, int], ...] = (
+    (0, 59),  # minute
+    (0, 23),  # hour
+    (1, 31),  # day of month
+    (1, 12),  # month
+    (0, 7),  # day of week (0 and 7 both mean Sunday)
+)
+
+
+def _validate_cron_field_ranges(field_name: str, value: str) -> None:
+    """Raise ``ValueError`` if any numeric value in a cron expression is out of range.
+
+    Must be called after syntax validation (``_CRON_SCHEDULE_RE``).
+    """
+    fields = value.split()
+    for position, (cron_field, (low, high)) in enumerate(
+        zip(fields, _CRON_FIELD_RANGES, strict=True)
+    ):
+        # Each field is a comma-separated list of terms; each term is
+        # [*|N|N-M][/S].  Strip the optional step part first, then check bases.
+        for term in cron_field.split(","):
+            base = term.split("/")[0]  # drop /step if present
+            if base == "*":
+                continue
+            # base is either "N" or "N-M"
+            parts = base.split("-")
+            for part in parts:
+                num = int(part)
+                if not (low <= num <= high):
+                    raise ValueError(
+                        f"{field_name} has an out-of-range value in field {position} "
+                        f"({num!r} is outside {low}–{high}) — got: {value!r}"
+                    )
+
 
 def _validate_cron_schedule(field_name: str, value: str) -> None:
     """Raise ``ValueError`` if *value* is not a valid five-field cron expression.
@@ -454,12 +489,17 @@ def _validate_cron_schedule(field_name: str, value: str) -> None:
     ``root`` user column.  An attacker-controlled extra word (e.g.
     ``* * * * * root touch /tmp/pwned #``) would shift the ``root`` column
     and inject an arbitrary command.
+
+    After syntax validation, numeric values are checked against the allowed
+    range for each field so that out-of-range expressions (e.g. ``0 25 * * *``)
+    are rejected before they silently fail inside the cron daemon.
     """
     if not _CRON_SCHEDULE_RE.match(value):
         raise ValueError(
             f"{field_name} must be a valid five-field cron expression "
             f"(e.g. '0 8 * * *') — got: {value!r}"
         )
+    _validate_cron_field_ranges(field_name, value)
 
 
 def _parse_sync_section(
