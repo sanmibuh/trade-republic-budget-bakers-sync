@@ -178,7 +178,7 @@ class Notifier:
         )
 
     def error(self, exc: Exception) -> bool:
-        safe_error = escape_markdown(f"{type(exc).__name__}: {exc}")
+        safe_error = _escape_code(f"{type(exc).__name__}: {exc}")
         return self._send(self._header("❌", "Sync Failed") + f"Error: `{safe_error}`")
 
     def fetch_summary(
