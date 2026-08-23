@@ -474,4 +474,7 @@ jobs:
 
           git add model-stats.json model-summary.json
           git diff --cached --quiet || git commit -m "chore(stats): nightly model usage $(date -u +%Y-%m-%d)"
-          git push origin ci-data
+          for i in 1 2 3; do
+            git push origin ci-data && break
+            git pull --rebase origin ci-data
+          done

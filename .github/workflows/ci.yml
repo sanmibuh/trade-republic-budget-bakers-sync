@@ -109,7 +109,10 @@ jobs:
           cp /tmp/ci-stats.json ./ci-stats.json
           git add ci-stats.json
           git diff --cached --quiet || git commit -m "chore: update ci-stats from main@${{ github.sha }}"
-          git push origin ci-data
+          for i in 1 2 3; do
+            git push origin ci-data && break
+            git pull --rebase origin ci-data
+          done
 
       # ----------------------------------------------------------------
       # On PR: compare with main stats and post comment
