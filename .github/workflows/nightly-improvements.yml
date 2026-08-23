@@ -476,5 +476,5 @@ jobs:
           git diff --cached --quiet || git commit -m "chore(stats): nightly model usage $(date -u +%Y-%m-%d)"
           for i in 1 2 3; do
             git push origin ci-data && break
-            git pull --rebase origin ci-data
+            [ "$i" -lt 3 ] && git pull --rebase origin ci-data || exit 1
           done

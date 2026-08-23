@@ -111,7 +111,7 @@ jobs:
           git diff --cached --quiet || git commit -m "chore: update ci-stats from main@${{ github.sha }}"
           for i in 1 2 3; do
             git push origin ci-data && break
-            git pull --rebase origin ci-data
+            [ "$i" -lt 3 ] && git pull --rebase origin ci-data || exit 1
           done
 
       # ----------------------------------------------------------------
