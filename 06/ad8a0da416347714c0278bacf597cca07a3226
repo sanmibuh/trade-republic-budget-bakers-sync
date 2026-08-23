@@ -1,0 +1,16 @@
+app/notifier.py
+  h_97a91c9e567f87 203,212-213,240-241,265-267,284
+tests/test_notifier.py
+  h_97a91c9e567f87 18,24,28,32,36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "06ad8a0da416347714c0278bacf597cca07a3226",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
