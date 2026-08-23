@@ -1,0 +1,17 @@
+tests/test_config.py
+  h_97a91c9e567f87 1717-1720
+app/config.py
+  h_97a91c9e567f87 467-472,474-478,501,503
+  h_97a91c9e567f87 454-466,473,479-487
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "d6c0126ac0b50bfa48f81498ead67265fd0c6dac",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
