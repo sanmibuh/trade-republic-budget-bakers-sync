@@ -1,0 +1,16 @@
+.github/workflows/ci.yml
+  h_97a91c9e567f87 112-115
+.github/workflows/nightly-improvements.yml
+  h_97a91c9e567f87 477-480
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "e53bb4ee3695d60de973271c46dceca030773afd",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
