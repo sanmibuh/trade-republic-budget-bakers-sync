@@ -1714,6 +1714,10 @@ def test_validate_cron_schedule_invalid(expr):
         # List with one out-of-range value
         "0 8,24 * * *",
         "0 0 1,32 * *",
+        # Step of zero — silently ignored by cron daemon
+        "*/0 * * * *",
+        "0 */0 * * *",
+        "0-30/0 * * * *",
     ],
 )
 def test_validate_cron_schedule_out_of_range(expr):

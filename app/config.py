@@ -451,6 +451,40 @@ _CRON_FIELD_RANGES: tuple[tuple[int, int], ...] = (
 )
 
 
+def _validate_cron_term(
+    field_name: str,
+    value: str,
+    position: int,
+    term: str,
+    low: int,
+    high: int,
+) -> None:
+    """Validate a single cron term (e.g. ``*/5``, ``8-18``, ``3``) for one field.
+
+    *position* is 1-based and used only in error messages.
+    Raises ``ValueError`` for an invalid step (<1) or an out-of-range base value.
+    """
+    parts = term.split("/")
+    base = parts[0]
+    if len(parts) == 2:
+        step = int(parts[1])
+        if step < 1:
+            raise ValueError(
+                f"{field_name} has an invalid step value in field {position} "
+                f"(step must be >= 1, got {step!r}) — got: {value!r}"
+            )
+    if base == "*":
+        return
+    # base is either "N" or "N-M"
+    for part in base.split("-"):
+        num = int(part)
+        if not (low <= num <= high):
+            raise ValueError(
+                f"{field_name} has an out-of-range value in field {position} "
+                f"({num!r} is outside {low}–{high}) — got: {value!r}"
+            )
+
+
 def _validate_cron_field_ranges(field_name: str, value: str) -> None:
     """Raise ``ValueError`` if any base numeric value in a cron expression is out of range.
 
@@ -464,21 +498,9 @@ def _validate_cron_field_ranges(field_name: str, value: str) -> None:
     for position, (cron_field, (low, high)) in enumerate(
         zip(fields, _CRON_FIELD_RANGES, strict=True)
     ):
-        # Each field is a comma-separated list of terms; each term is
-        # [*|N|N-M][/S].  Strip the optional step part first, then check bases.
+        # Each field is a comma-separated list of terms; each term is [*|N|N-M][/S].
         for term in cron_field.split(","):
-            base = term.split("/")[0]  # drop /step if present
-            if base == "*":
-                continue
-            # base is either "N" or "N-M"
-            parts = base.split("-")
-            for part in parts:
-                num = int(part)
-                if not (low <= num <= high):
-                    raise ValueError(
-                        f"{field_name} has an out-of-range value in field {position + 1} "
-                        f"({num!r} is outside {low}–{high}) — got: {value!r}"
-                    )
+            _validate_cron_term(field_name, value, position + 1, term, low, high)
 
 
 def _validate_cron_schedule(field_name: str, value: str) -> None:
