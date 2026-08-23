@@ -1,0 +1,19 @@
+app/notifier.py
+  s_ab18baae50eb77::t_420e1aa69db8e5 181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "4c4648521853495b54f20e17484d80ff57570be5",
+  "prompts": {},
+  "sessions": {
+    "s_ab18baae50eb77": {
+      "agent_id": {
+        "tool": "github-copilot-cli",
+        "id": "3f6e6139-5058-4d53-b9e6-80c8e49b7636",
+        "model": "unknown"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
