@@ -15,25 +15,25 @@ from app.notifier import (
 # ---------------------------------------------------------------------------
 
 
-def testescape_markdown_escapes_special_chars():
+def test_escape_markdown_escapes_special_chars():
     result = escape_markdown("hello_world*test")
     assert r"\_" in result  # underscore must be escaped
     assert r"\*" in result  # asterisk must be escaped
 
 
-def testescape_markdown_plain_text_unchanged():
+def test_escape_markdown_plain_text_unchanged():
     assert escape_markdown("hello world") == "hello world"
 
 
-def testescape_markdown_escapes_dot():
+def test_escape_markdown_escapes_dot():
     assert r"\." in escape_markdown("3.14")
 
 
-def testescape_markdown_escapes_underscore():
+def test_escape_markdown_escapes_underscore():
     assert r"\_" in escape_markdown("some_name")
 
 
-def testescape_markdown_escapes_backslash_first():
+def test_escape_markdown_escapes_backslash_first():
     # backslash must be escaped before other chars to avoid double-escaping
     result = escape_markdown("a\\b")
     assert result.startswith("a\\\\b") or "\\\\" in result

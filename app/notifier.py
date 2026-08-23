@@ -200,7 +200,7 @@ class Notifier:
         )
 
     def unknown_event_type(self, event_type: str) -> bool:
-        safe_type = escape_markdown(event_type)
+        safe_type = _escape_code(event_type)
         return self._send(
             self._header("⚠️", "Unknown Event Type")
             + f"Event type `{safe_type}` is not recognised\\.\n"
@@ -209,8 +209,8 @@ class Notifier:
         )
 
     def missing_api_result(self, event_id: str, missing_indices: list[int]) -> bool:
-        safe_id = escape_markdown(event_id)
-        safe_indices = escape_markdown(", ".join(str(i) for i in missing_indices))
+        safe_id = _escape_code(event_id)
+        safe_indices = _escape_code(", ".join(str(i) for i in missing_indices))
         return self._send(
             self._header("⚠️", "Incomplete API Response")
             + f"Event `{safe_id}` has no result for record index\\(es\\): `{safe_indices}`\\.\n"
@@ -237,8 +237,8 @@ class Notifier:
         ]
         if self._fetch_context is not None:
             ctx = self._fetch_context
-            safe_since = escape_markdown(ctx["since"])
-            safe_until = escape_markdown(ctx["until"])
+            safe_since = _escape_code(ctx["since"])
+            safe_until = _escape_code(ctx["until"])
             lines.append(
                 f"Period: `{safe_since}` → `{safe_until}`\n"
                 f"Fetched: *{ctx['fetched']}* · New: *{ctx['new']}* · Already synced: *{ctx['skipped']}*\n"
@@ -262,9 +262,9 @@ class Notifier:
     ) -> bool:
         safe = self._safe_owner()
         safe_mode = escape_markdown(mode.capitalize())
-        safe_period = escape_markdown(period)
-        safe_from = escape_markdown(date_from)
-        safe_to = escape_markdown(date_to)
+        safe_period = _escape_code(period)
+        safe_from = _escape_code(date_from)
+        safe_to = _escape_code(date_to)
         records = counts.get("records", 0)
         accounts = counts.get("accounts", 0)
         categories = counts.get("categories", 0)
@@ -281,5 +281,5 @@ class Notifier:
             removed = escape_markdown(str(counts["monthly_removed"]))
             lines.append(f"Monthly files removed: *{removed}*")
         if filename:
-            lines.append(f"File: `{escape_markdown(filename)}`")
+            lines.append(f"File: `{_escape_code(filename)}`")
         return self._send("\n".join(lines))
