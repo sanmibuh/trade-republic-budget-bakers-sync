@@ -730,8 +730,8 @@ class TelegramBot:
         """Submit *code* to the instance awaiting 2FA during a sync.
 
         For single-instance setups, submits directly.  For multi-instance
-        setups, probes the ``PENDING_FILENAME`` marker in each instance's
-        ``data_dir`` to discover which one is awaiting a code.
+        setups, probes each instance's ``twofa_pending_file`` at the data root
+        to discover which one is awaiting a code.
         """
         return self._submit_code_no_pending(code)
 
@@ -754,7 +754,7 @@ class TelegramBot:
         """Submit *code* to the instance currently awaiting a 2FA code.
 
         For a single-instance setup submits directly.  For multi-instance setups,
-        probes the ``PENDING_FILENAME`` marker in each instance's ``data_dir`` to
+        probes each instance's ``twofa_pending_file`` at the data root to
         discover which one is awaiting a code, falling back to a generic
         disambiguation prompt when no instance is waiting.
         """
