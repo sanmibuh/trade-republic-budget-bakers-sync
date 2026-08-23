@@ -63,7 +63,7 @@ from app.main import (
     run as _main_run,
     run_resync as _main_run_resync,
 )
-from app.notifier import Notifier, _escape_markdown as _esc
+from app.notifier import Notifier, escape_markdown as _esc
 from app.wallet_client import WalletClient
 
 log = logging.getLogger(__name__)
@@ -147,7 +147,7 @@ class BotConfig:
 # ---------------------------------------------------------------------------
 # Markdown helpers (MarkdownV2)
 # ---------------------------------------------------------------------------
-# _esc is imported from app.notifier._escape_markdown — single source of truth.
+# _esc is imported from app.notifier.escape_markdown — single source of truth.
 
 
 def _auth_icon(auth: bool | None) -> str:
