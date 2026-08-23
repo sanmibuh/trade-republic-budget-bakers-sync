@@ -14,9 +14,15 @@ _NOISY_LOGGERS = ("httpx", "telegram", "hpack")
 
 
 def _suppress_noisy_loggers() -> None:
-    """Set chatty third-party loggers to WARNING so they do not pollute INFO output."""
+    """Raise chatty third-party loggers to WARNING if their level is currently below it.
+
+    Only the effective level is raised; a stricter configuration (e.g. ERROR)
+    set by the caller or the environment is never lowered.
+    """
     for name in _NOISY_LOGGERS:
-        logging.getLogger(name).setLevel(logging.WARNING)
+        logger = logging.getLogger(name)
+        if logger.level == logging.NOTSET or logger.level < logging.WARNING:
+            logger.setLevel(logging.WARNING)
 
 
 def _make_formatter() -> logging.Formatter:

@@ -158,6 +158,26 @@ def test_configure_logging_suppresses_noisy_library_loggers():
             logging.getLogger(name).setLevel(level)
 
 
+def test_suppress_noisy_loggers_does_not_lower_stricter_level(tmp_path):
+    """A logger already at ERROR must not be lowered to WARNING."""
+    root = logging.getLogger()
+    before = set(root.handlers)
+    probe = "httpx"
+    original_level = logging.getLogger(probe).level
+    try:
+        logging.getLogger(probe).setLevel(logging.ERROR)
+        setup_logging(tmp_path)
+        assert logging.getLogger(probe).level == logging.ERROR, (
+            f"Logger {probe!r} should remain at ERROR; it must not be lowered to WARNING"
+        )
+    finally:
+        for h in root.handlers[:]:
+            if h not in before:
+                root.removeHandler(h)
+                h.close()
+        logging.getLogger(probe).setLevel(original_level)
+
+
 def test_setup_logging_and_configure_logging_use_same_format(tmp_path):
     """Both functions must produce handlers with identical formatter settings."""
     root = logging.getLogger()
