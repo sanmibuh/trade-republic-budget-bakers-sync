@@ -1807,14 +1807,12 @@ def test_instance_status_direct_auth_failed_in_db(tmp_path):
 
 def test_instance_status_direct_db_error_returns_none_auth(tmp_path):
     """When the DB raises an exception, auth is None and last_sync is None."""
-    from app.persistence import EventRepository, init_db
-
     db_path = tmp_path / "sync.db"
-    init_db(db_path)
+    db_path.touch()  # file exists so the DB path check passes
 
     with (
         patch("app.bot.has_valid_session", return_value=True),
-        patch.object(EventRepository, "__enter__", side_effect=Exception("boom")),
+        patch("app.persistence.sqlite3.connect", side_effect=Exception("boom")),
     ):
         result = _instance_status_direct(tmp_path, db_path, "user1")
     assert result.auth is None
@@ -1825,14 +1823,12 @@ def test_instance_status_direct_db_error_with_invalid_session_returns_false_auth
     tmp_path,
 ):
     """When the DB raises and session is already invalid, auth is False (not None)."""
-    from app.persistence import EventRepository, init_db
-
     db_path = tmp_path / "sync.db"
-    init_db(db_path)
+    db_path.touch()  # file exists so the DB path check passes
 
     with (
         patch("app.bot.has_valid_session", return_value=False),
-        patch.object(EventRepository, "__enter__", side_effect=Exception("boom")),
+        patch("app.persistence.sqlite3.connect", side_effect=Exception("boom")),
     ):
         result = _instance_status_direct(tmp_path, db_path, "user1")
     assert result.auth is False
@@ -1840,27 +1836,29 @@ def test_instance_status_direct_db_error_with_invalid_session_returns_false_auth
 
 
 def test_instance_status_direct_opens_only_one_connection(tmp_path):
-    """_instance_status_direct must open exactly one EventRepository, not two."""
-    from app.persistence import EventRepository, init_db
+    """_instance_status_direct must open exactly one SQLite connection, not two."""
+    from app.persistence import init_db
 
     db_path = tmp_path / "sync.db"
     init_db(db_path)
 
-    open_count = 0
-    original_enter = EventRepository.__enter__
+    import app.persistence as _persistence
 
-    def counting_enter(self):
-        nonlocal open_count
-        open_count += 1
-        return original_enter(self)
+    original_connect = _persistence.sqlite3.connect
+    connect_count = 0
+
+    def counting_connect(*args, **kwargs):
+        nonlocal connect_count
+        connect_count += 1
+        return original_connect(*args, **kwargs)
 
     with (
         patch("app.bot.has_valid_session", return_value=True),
-        patch.object(EventRepository, "__enter__", counting_enter),
+        patch("app.persistence.sqlite3.connect", side_effect=counting_connect),
     ):
         _instance_status_direct(tmp_path, db_path, "user1")
 
-    assert open_count == 1
+    assert connect_count == 1
 
 
 # ---------------------------------------------------------------------------
