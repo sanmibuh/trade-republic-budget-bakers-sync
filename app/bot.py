@@ -545,22 +545,7 @@ class TelegramBot:
         self._launch_resync(inst, date_str)
 
     def _on_cb_instance_cmd(self, cmd: str, parts: list[str]) -> None:
-        """Handle instance-routed callbacks: sync.
-
-        Also accepts legacy ``logs:<instance>`` callbacks (from chat history
-        buttons created before the shared-log migration) and routes them to
-        the current shared-log implementation — the instance name is ignored,
-        so stale buttons work even if the instance was renamed or removed.
-        """
-        # Legacy logs callbacks bypass the instance lookup — the shared log
-        # does not depend on which instance was originally selected.
-        if cmd == "logs":
-            threading.Thread(
-                target=self._fetch_and_send_logs,
-                daemon=True,
-            ).start()
-            return
-
+        """Handle instance-routed callbacks: sync."""
         instance_key = parts[-1].lower()
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
@@ -568,15 +553,6 @@ class TelegramBot:
             return
 
         if cmd == "sync":
-            self._launch_sync(inst)
-        elif cmd == "login":
-            # Legacy callback from buttons created before /login was removed.
-            # Route to sync — the 2FA flow is now handled automatically in-process.
-            self._send_message(
-                f"ℹ️ `/login` has been removed\\. "
-                f"Starting a sync for *{_esc(inst.name)}* instead — "
-                "re\\-authentication happens automatically if needed\\."
-            )
             self._launch_sync(inst)
         else:
             log.warning("Unknown callback cmd: %r", cmd)
