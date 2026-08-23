@@ -6,37 +6,63 @@ import requests
 
 from app.notifier import (
     Notifier,
-    _escape_markdown,
+    escape_code,
+    escape_markdown,
     send_telegram_message,
 )
 
 # ---------------------------------------------------------------------------
-# _escape_markdown
+# escape_markdown
 # ---------------------------------------------------------------------------
 
 
 def test_escape_markdown_escapes_special_chars():
-    result = _escape_markdown("hello_world*test")
+    result = escape_markdown("hello_world*test")
     assert r"\_" in result  # underscore must be escaped
     assert r"\*" in result  # asterisk must be escaped
 
 
 def test_escape_markdown_plain_text_unchanged():
-    assert _escape_markdown("hello world") == "hello world"
+    assert escape_markdown("hello world") == "hello world"
 
 
 def test_escape_markdown_escapes_dot():
-    assert r"\." in _escape_markdown("3.14")
+    assert r"\." in escape_markdown("3.14")
 
 
 def test_escape_markdown_escapes_underscore():
-    assert r"\_" in _escape_markdown("some_name")
+    assert r"\_" in escape_markdown("some_name")
 
 
 def test_escape_markdown_escapes_backslash_first():
     # backslash must be escaped before other chars to avoid double-escaping
-    result = _escape_markdown("a\\b")
+    result = escape_markdown("a\\b")
     assert result.startswith("a\\\\b") or "\\\\" in result
+
+
+# ---------------------------------------------------------------------------
+# escape_code
+# ---------------------------------------------------------------------------
+
+
+def test_escape_code_plain_text_unchanged():
+    assert escape_code("hello world") == "hello world"
+
+
+def test_escape_code_escapes_backtick():
+    assert escape_code("foo`bar") == "foo\\`bar"
+
+
+def test_escape_code_escapes_backslash():
+    assert escape_code("a\\b") == "a\\\\b"
+
+
+def test_escape_code_does_not_escape_underscore():
+    assert escape_code("some_name") == "some_name"
+
+
+def test_escape_code_does_not_escape_dot():
+    assert escape_code("3.14") == "3.14"
 
 
 # ---------------------------------------------------------------------------
