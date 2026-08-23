@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [7.4.0] - 2026-08-23
+
+### What's Changed
+* Refactor: _escape_markdown is a private cross-module import — promote to public API — [#196](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/196)
+* 🔧 Fix nightly AI review: update Gemini models and sync workflow with tedee-auto — [#194](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/194)
+* Correctness: filter_by_lookback silently passes events with unparseable timestamps — [#192](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/192)
+* Perf: /status opens two DB connections per instance — merge into one — [#191](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/191)
+* Flatten instance directories: name session files at data root, remove per-instance subdirs — [#190](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/190)
+* DRY: extract shared row-builder in EventRepository to remove mark_processed duplication — [#189](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/189)
+**Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v7.3.0...v7.4.0
+
+
 ## [7.3.0] - 2026-08-22
 
 ### What's Changed
