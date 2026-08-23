@@ -47,7 +47,7 @@ def escape_markdown(value: str) -> str:
     return escaped
 
 
-def _escape_code(value: str) -> str:
+def escape_code(value: str) -> str:
     """Escape a value for a MarkdownV2 inline-code span.
 
     Inside `` `...` `` only backslash and backtick are special; every other
@@ -150,7 +150,7 @@ class Notifier:
         )
 
     def login_code_request(self, instance: str) -> bool:
-        safe_instance = _escape_code(instance)
+        safe_instance = escape_code(instance)
         return self._send_with_markup(
             self._header("🔐", "2FA Code Required") + f"Instance: `{safe_instance}`\n"
             "Just reply here with your 6\\-digit authenticator code\\.\n"
@@ -164,7 +164,7 @@ class Notifier:
         )
 
     def login_code_timeout(self, instance: str) -> bool:
-        safe_instance = _escape_code(instance)
+        safe_instance = escape_code(instance)
         return self._send(
             self._header("⏱", "2FA Timeout")
             + f"The code request for `{safe_instance}` has expired\\.\n"
@@ -178,7 +178,7 @@ class Notifier:
         )
 
     def error(self, exc: Exception) -> bool:
-        safe_error = _escape_code(f"{type(exc).__name__}: {exc}")
+        safe_error = escape_code(f"{type(exc).__name__}: {exc}")
         return self._send(self._header("❌", "Sync Failed") + f"Error: `{safe_error}`")
 
     def fetch_summary(
@@ -200,7 +200,7 @@ class Notifier:
         )
 
     def unknown_event_type(self, event_type: str) -> bool:
-        safe_type = _escape_code(event_type)
+        safe_type = escape_code(event_type)
         return self._send(
             self._header("⚠️", "Unknown Event Type")
             + f"Event type `{safe_type}` is not recognised\\.\n"
@@ -209,8 +209,8 @@ class Notifier:
         )
 
     def missing_api_result(self, event_id: str, missing_indices: list[int]) -> bool:
-        safe_id = _escape_code(event_id)
-        safe_indices = _escape_code(", ".join(str(i) for i in missing_indices))
+        safe_id = escape_code(event_id)
+        safe_indices = escape_code(", ".join(str(i) for i in missing_indices))
         return self._send(
             self._header("⚠️", "Incomplete API Response")
             + f"Event `{safe_id}` has no result for record index\\(es\\): `{safe_indices}`\\.\n"
@@ -237,8 +237,8 @@ class Notifier:
         ]
         if self._fetch_context is not None:
             ctx = self._fetch_context
-            safe_since = _escape_code(ctx["since"])
-            safe_until = _escape_code(ctx["until"])
+            safe_since = escape_code(ctx["since"])
+            safe_until = escape_code(ctx["until"])
             lines.append(
                 f"Period: `{safe_since}` → `{safe_until}`\n"
                 f"Fetched: *{ctx['fetched']}* · New: *{ctx['new']}* · Already synced: *{ctx['skipped']}*\n"
@@ -262,9 +262,9 @@ class Notifier:
     ) -> bool:
         safe = self._safe_owner()
         safe_mode = escape_markdown(mode.capitalize())
-        safe_period = _escape_code(period)
-        safe_from = _escape_code(date_from)
-        safe_to = _escape_code(date_to)
+        safe_period = escape_code(period)
+        safe_from = escape_code(date_from)
+        safe_to = escape_code(date_to)
         records = counts.get("records", 0)
         accounts = counts.get("accounts", 0)
         categories = counts.get("categories", 0)
@@ -281,5 +281,5 @@ class Notifier:
             removed = escape_markdown(str(counts["monthly_removed"]))
             lines.append(f"Monthly files removed: *{removed}*")
         if filename:
-            lines.append(f"File: `{_escape_code(filename)}`")
+            lines.append(f"File: `{escape_code(filename)}`")
         return self._send("\n".join(lines))

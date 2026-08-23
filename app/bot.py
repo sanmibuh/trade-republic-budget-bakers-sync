@@ -63,7 +63,7 @@ from app.main import (
     run as _main_run,
     run_resync as _main_run_resync,
 )
-from app.notifier import Notifier, escape_markdown as _esc
+from app.notifier import Notifier, escape_code as _esc_code, escape_markdown as _esc
 from app.wallet_client import WalletClient
 
 log = logging.getLogger(__name__)
@@ -147,7 +147,8 @@ class BotConfig:
 # ---------------------------------------------------------------------------
 # Markdown helpers (MarkdownV2)
 # ---------------------------------------------------------------------------
-# _esc is imported from app.notifier.escape_markdown — single source of truth.
+# _esc is imported from app.notifier.escape_markdown — for bold/plain text contexts.
+# _esc_code is imported from app.notifier.escape_code — for inline-code (backtick) spans.
 
 
 def _auth_icon(auth: bool | None) -> str:
@@ -450,7 +451,7 @@ class TelegramBot:
         }
         handler = dispatch.get(raw_cmd)
         if handler is None:
-            self._send_message(f"❓ Unknown command: `{_esc(raw_cmd)}`\\.")
+            self._send_message(f"❓ Unknown command: `{_esc_code(raw_cmd)}`\\.")
             return
         handler(args)
 
@@ -523,7 +524,7 @@ class TelegramBot:
         instance_key = parts[1].lower()
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
-            self._send_message(f"❓ Unknown instance: `{_esc(instance_key)}`")
+            self._send_message(f"❓ Unknown instance: `{_esc_code(instance_key)}`")
             return
         self._send_message(
             f"🔁 *Resync* — Choose date for *{_esc(inst.name)}*:",
@@ -539,7 +540,7 @@ class TelegramBot:
         instance_key = parts[2].lower()
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
-            self._send_message(f"❓ Unknown instance: `{_esc(instance_key)}`")
+            self._send_message(f"❓ Unknown instance: `{_esc_code(instance_key)}`")
             return
         self._launch_resync(inst, date_str)
 
@@ -563,7 +564,7 @@ class TelegramBot:
         instance_key = parts[-1].lower()
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
-            self._send_message(f"❓ Unknown instance: `{_esc(instance_key)}`")
+            self._send_message(f"❓ Unknown instance: `{_esc_code(instance_key)}`")
             return
 
         if cmd == "sync":
@@ -628,7 +629,7 @@ class TelegramBot:
             datetime.date.fromisoformat(date_str)
         except ValueError:
             self._send_message(
-                f"⚠️ Invalid date: `{_esc(date_str)}`\\. "
+                f"⚠️ Invalid date: `{_esc_code(date_str)}`\\. "
                 "Expected format: `YYYY\\-MM\\-DD`\\."
             )
             return
@@ -655,7 +656,7 @@ class TelegramBot:
         instance_key, code = args[0].lower(), args[1]
         inst = self._cfg.instances.get(instance_key)
         if inst is None:
-            self._send_message(f"❓ Unknown instance: `{_esc(args[0])}`")
+            self._send_message(f"❓ Unknown instance: `{_esc_code(args[0])}`")
             return
         if not code.isdigit():
             self._send_message("⚠️ The code must contain digits only\\.")
@@ -694,7 +695,7 @@ class TelegramBot:
                 )
         else:
             self._send_message(
-                f"⚠️ Unknown backup type: `{_esc(type_arg)}`\\. Use `monthly` or `yearly`\\."
+                f"⚠️ Unknown backup type: `{_esc_code(type_arg)}`\\. Use `monthly` or `yearly`\\."
             )
 
     def _launch_backup(self, mode: str, period: str) -> None:
@@ -732,7 +733,7 @@ class TelegramBot:
             else:
                 log.warning("Unknown backup mode %r — ignoring", mode)
                 self._send_message(
-                    f"⚠️ Unknown backup mode: `{_esc(mode)}`\\. Expected `monthly` or `yearly`\\."
+                    f"⚠️ Unknown backup mode: `{_esc_code(mode)}`\\. Expected `monthly` or `yearly`\\."
                 )
         except Exception as exc:
             log.exception("Backup failed (mode=%s period=%s): %s", mode, period, exc)
@@ -779,7 +780,7 @@ class TelegramBot:
         except Exception as exc:
             log.exception("Resync failed for instance %s date %s", inst.name, date_str)
             self._send_message(
-                f"❌ Resync error for *{_esc(inst.name)}* `{_esc(date_str)}`: {_esc(str(exc))}"
+                f"❌ Resync error for *{_esc(inst.name)}* `{_esc_code(date_str)}`: {_esc(str(exc))}"
             )
 
     def _maybe_submit_pending_code(self, code: str) -> bool:
