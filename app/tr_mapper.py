@@ -35,18 +35,28 @@ def filter_by_lookback(
     until: datetime | None = None,
 ) -> list[dict[str, Any]]:
     filtered = []
+    time_keys = ("timestamp", "createdAt", "created_at", "date", "recordDate")
     for event in events:
-        event_time = normalize_event_time(event)
+        raw = next(
+            (event[k] for k in time_keys if event.get(k)),
+            None,
+        )
+        if raw is None:
+            log.warning(
+                "Event has no recognisable timestamp field — skipping: %r", event
+            )
+            continue
+        event_time = str(raw) if not isinstance(raw, datetime) else raw.isoformat()
+        event_time = re.sub(r"([+-])(\d{2})(\d{2})$", r"\1\2:\3", event_time)
         parsed = None
         try:
             parsed = datetime.fromisoformat(event_time.replace("Z", "+00:00"))
         except ValueError:
-            parsed = None
-        if parsed is not None and parsed.tzinfo is None:
+            log.warning("Event has unparseable timestamp %r — skipping", event_time)
+            continue
+        if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=UTC)
-        if (parsed is None or parsed >= since) and (
-            until is None or parsed is None or parsed < until
-        ):
+        if parsed >= since and (until is None or parsed < until):
             filtered.append(event)
     return filtered
 

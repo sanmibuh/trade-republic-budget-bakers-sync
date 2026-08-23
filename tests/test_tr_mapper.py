@@ -1098,18 +1098,28 @@ def test_filter_by_lookback_keeps_event_on_boundary():
     assert len(filter_by_lookback([_make_event("2024-01-10T00:00:00Z")], since)) == 1
 
 
-def test_filter_by_lookback_keeps_event_with_unparseable_timestamp():
+def test_filter_by_lookback_excludes_event_with_unparseable_timestamp(caplog):
+    import logging
+
     from app.tr_mapper import filter_by_lookback
 
     since = datetime(2024, 1, 10, tzinfo=UTC)
-    assert len(filter_by_lookback([{"timestamp": "not-a-date"}], since)) == 1
+    with caplog.at_level(logging.WARNING, logger="app.tr_mapper"):
+        result = filter_by_lookback([{"timestamp": "not-a-date"}], since)
+    assert result == []
+    assert any("unparseable" in r.message.lower() for r in caplog.records)
 
 
-def test_filter_by_lookback_keeps_event_without_timestamp():
+def test_filter_by_lookback_excludes_event_without_timestamp(caplog):
+    import logging
+
     from app.tr_mapper import filter_by_lookback
 
     since = datetime(2024, 1, 10, tzinfo=UTC)
-    assert len(filter_by_lookback([{"amount": "5"}], since)) == 1
+    with caplog.at_level(logging.WARNING, logger="app.tr_mapper"):
+        result = filter_by_lookback([{"amount": "5"}], since)
+    assert result == []
+    assert any("no recognisable timestamp" in r.message.lower() for r in caplog.records)
 
 
 def test_filter_by_lookback_naive_timestamp_treated_as_utc():
