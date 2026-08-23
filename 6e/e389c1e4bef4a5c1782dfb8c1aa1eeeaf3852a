@@ -1,0 +1,16 @@
+.github/workflows/qodana_code_quality.yml
+  h_97a91c9e567f87 1-49
+qodana.yaml
+  h_97a91c9e567f87 1-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "6ee389c1e4bef4a5c1782dfb8c1aa1eeeaf3852a",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
