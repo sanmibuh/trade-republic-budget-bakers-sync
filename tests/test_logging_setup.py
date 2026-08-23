@@ -111,6 +111,53 @@ def test_setup_logging_idempotent(tmp_path):
                 h.close()
 
 
+_NOISY_LOGGERS = ("httpx", "telegram", "hpack")
+
+
+def test_setup_logging_suppresses_noisy_library_loggers(tmp_path):
+    """httpx / telegram / hpack loggers must be set to WARNING after setup_logging."""
+    root = logging.getLogger()
+    before = set(root.handlers)
+    original_levels = {name: logging.getLogger(name).level for name in _NOISY_LOGGERS}
+    try:
+        setup_logging(tmp_path)
+        for name in _NOISY_LOGGERS:
+            assert logging.getLogger(name).level == logging.WARNING, (
+                f"Logger {name!r} should be WARNING after setup_logging"
+            )
+    finally:
+        for h in root.handlers[:]:
+            if h not in before:
+                root.removeHandler(h)
+                h.close()
+        for name, level in original_levels.items():
+            logging.getLogger(name).setLevel(level)
+
+
+def test_configure_logging_suppresses_noisy_library_loggers():
+    """httpx / telegram / hpack loggers must be set to WARNING after configure_logging."""
+    root = logging.getLogger()
+    before = set(root.handlers)
+    original_levels = {name: logging.getLogger(name).level for name in _NOISY_LOGGERS}
+    try:
+        for h in root.handlers[:]:
+            root.removeHandler(h)
+        configure_logging()
+        for name in _NOISY_LOGGERS:
+            assert logging.getLogger(name).level == logging.WARNING, (
+                f"Logger {name!r} should be WARNING after configure_logging"
+            )
+    finally:
+        for h in root.handlers[:]:
+            if h not in before:
+                root.removeHandler(h)
+                h.close()
+        for h in before:
+            root.addHandler(h)
+        for name, level in original_levels.items():
+            logging.getLogger(name).setLevel(level)
+
+
 def test_setup_logging_and_configure_logging_use_same_format(tmp_path):
     """Both functions must produce handlers with identical formatter settings."""
     root = logging.getLogger()

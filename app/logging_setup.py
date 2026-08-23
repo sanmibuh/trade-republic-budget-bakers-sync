@@ -7,6 +7,17 @@ from pathlib import Path
 _LOG_FMT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 _DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
+# Third-party libraries that are very chatty at INFO/DEBUG level.  We cap them
+# at WARNING so that the application logs stay readable without noise from HTTP
+# wire traffic and Telegram protocol internals.
+_NOISY_LOGGERS = ("httpx", "telegram", "hpack")
+
+
+def _suppress_noisy_loggers() -> None:
+    """Set chatty third-party loggers to WARNING so they do not pollute INFO output."""
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
 
 def _make_formatter() -> logging.Formatter:
     return logging.Formatter(fmt=_LOG_FMT, datefmt=_DATE_FMT)
@@ -56,6 +67,7 @@ def setup_logging(log_dir: Path) -> None:
 
     root.addHandler(fh)
     root.addHandler(ch)
+    _suppress_noisy_loggers()
 
 
 def configure_logging() -> None:
@@ -75,3 +87,4 @@ def configure_logging() -> None:
     ch.setLevel(logging.INFO)
     ch.setFormatter(_make_formatter())
     root.addHandler(ch)
+    _suppress_noisy_loggers()
