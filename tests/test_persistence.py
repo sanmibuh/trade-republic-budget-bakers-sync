@@ -88,6 +88,22 @@ def test_dedup_event_id_different_events_produce_different_hashes():
     assert dedup_event_id(e1) != dedup_event_id(e2)
 
 
+def test_dedup_event_id_zero_amount_differs_from_missing_amount():
+    """amount=0 and no amount must produce distinct hashes (0 must not be treated as missing)."""
+    base = {"eventType": "PAYMENT", "timestamp": "2024-06-01T10:00:00Z", "title": "T"}
+    with_zero = {**base, "amount": 0}
+    without_amount = {**base}
+    assert dedup_event_id(with_zero) != dedup_event_id(without_amount)
+
+
+def test_dedup_event_id_zero_value_differs_from_missing_value():
+    """value=0 and no value must produce distinct hashes."""
+    base = {"eventType": "PAYMENT", "timestamp": "2024-06-01T10:00:00Z", "title": "T"}
+    with_zero = {**base, "value": 0}
+    without_value = {**base}
+    assert dedup_event_id(with_zero) != dedup_event_id(without_value)
+
+
 # ---------------------------------------------------------------------------
 # init_db
 # ---------------------------------------------------------------------------
@@ -407,6 +423,77 @@ def test_get_wallet_record_id_returns_none_when_id_is_null(db):
         repo.commit()
         result = repo.get_wallet_record_id(event)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# EventRepository — _build_event_row (private helper)
+# ---------------------------------------------------------------------------
+
+
+def test_build_event_row_returns_correct_tuple(db):
+    """_build_event_row should return a tuple with the expected 8 fields and exact values."""
+    event = {
+        "id": "row-evt",
+        "timestamp": "2026-07-01T12:00:00Z",
+        "amount": 42.5,
+        "type": "payment",
+    }
+    wallet_record_id = "wid-row"
+    with EventRepository(db, instance="test-instance") as repo:
+        row = repo._build_event_row(event, wallet_record_id)
+
+    assert len(row) == 8
+    eid, instance, event_type, event_timestamp, amount, raw, synced_at, wrid = row
+    assert eid == "row-evt"
+    assert instance == "test-instance"
+    assert event_type == "PAYMENT"
+    assert event_timestamp == "2026-07-01T12:00:00Z"
+    assert amount == "42.5"
+    parsed = json.loads(raw)
+    assert parsed["id"] == "row-evt"
+    assert synced_at is not None
+    assert wrid == "wid-row"
+
+
+def test_build_event_row_zero_amount_stored_as_zero_string(db):
+    """_build_event_row must store '0' for amount=0, not an empty string."""
+    event = {"id": "zero-amt", "timestamp": "2026-07-01T12:00:00Z", "amount": 0}
+    with EventRepository(db) as repo:
+        row = repo._build_event_row(event, None)
+
+    amount = row[4]
+    assert amount == "0"
+
+
+def test_build_event_row_wallet_record_id_none(db):
+    """_build_event_row stores None when wallet_record_id is not provided."""
+    event = {"id": "row-none", "timestamp": "2026-07-01T12:00:00Z"}
+    with EventRepository(db) as repo:
+        row = repo._build_event_row(event, None)
+
+    assert row[-1] is None
+
+
+def test_build_event_row_falls_back_to_str_on_type_error(db):
+    """_build_event_row falls back to str(event) when json.dumps raises TypeError."""
+    from unittest.mock import patch
+
+    event = {"id": "row-fallback", "timestamp": "2026-07-01T00:00:00Z"}
+    with (
+        patch("app.persistence.json.dumps", side_effect=TypeError("not serialisable")),
+        EventRepository(db) as repo,
+    ):
+        row = repo._build_event_row(event, None)
+
+    raw = row[5]
+    assert "row-fallback" in raw
+
+
+def test_insert_processed_event_raises_on_invalid_conflict(db):
+    """_insert_processed_event must raise ValueError for unsupported conflict values."""
+    event = {"id": "bad-conflict", "timestamp": "2026-07-01T00:00:00Z"}
+    with EventRepository(db) as repo, pytest.raises(ValueError, match="conflict"):
+        repo._insert_processed_event(event, None, conflict="UPDATE")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
