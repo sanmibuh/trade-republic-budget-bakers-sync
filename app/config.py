@@ -452,7 +452,11 @@ _CRON_FIELD_RANGES: tuple[tuple[int, int], ...] = (
 
 
 def _validate_cron_field_ranges(field_name: str, value: str) -> None:
-    """Raise ``ValueError`` if any numeric value in a cron expression is out of range.
+    """Raise ``ValueError`` if any base numeric value in a cron expression is out of range.
+
+    Only the base values are checked — step values (``/S``) are intentionally
+    ignored because the cron daemon accepts any positive step regardless of the
+    field range.
 
     Must be called after syntax validation (``_CRON_SCHEDULE_RE``).
     """
@@ -472,7 +476,7 @@ def _validate_cron_field_ranges(field_name: str, value: str) -> None:
                 num = int(part)
                 if not (low <= num <= high):
                     raise ValueError(
-                        f"{field_name} has an out-of-range value in field {position} "
+                        f"{field_name} has an out-of-range value in field {position + 1} "
                         f"({num!r} is outside {low}–{high}) — got: {value!r}"
                     )
 
