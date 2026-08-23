@@ -1821,6 +1821,24 @@ def test_instance_status_direct_db_error_returns_none_auth(tmp_path):
     assert result.last_sync is None
 
 
+def test_instance_status_direct_db_error_with_invalid_session_returns_false_auth(
+    tmp_path,
+):
+    """When the DB raises and session is already invalid, auth is False (not None)."""
+    from app.persistence import EventRepository, init_db
+
+    db_path = tmp_path / "sync.db"
+    init_db(db_path)
+
+    with (
+        patch("app.bot.has_valid_session", return_value=False),
+        patch.object(EventRepository, "__enter__", side_effect=Exception("boom")),
+    ):
+        result = _instance_status_direct(tmp_path, db_path, "user1")
+    assert result.auth is False
+    assert result.last_sync is None
+
+
 def test_instance_status_direct_opens_only_one_connection(tmp_path):
     """_instance_status_direct must open exactly one EventRepository, not two."""
     from app.persistence import EventRepository, init_db

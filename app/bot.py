@@ -214,7 +214,7 @@ def _instance_status_direct(
             auth_status = repo.get_auth_state(instance)
             run_info = repo.get_sync_run(instance)
     except Exception:
-        return InstanceStatus(auth=None, last_sync=None)
+        return InstanceStatus(auth=False if not session_ok else None, last_sync=None)
 
     if not session_ok:
         auth: bool | None = False
