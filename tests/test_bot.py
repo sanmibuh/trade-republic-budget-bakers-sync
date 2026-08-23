@@ -1750,6 +1750,22 @@ def test_instance_status_direct_no_cookies_no_db(tmp_path):
     assert result.last_sync is None
 
 
+def test_instance_status_direct_no_cookies_still_shows_last_sync(tmp_path):
+    """Even when session is invalid, last_sync must still be read from the DB."""
+    from app.persistence import EventRepository, init_db
+
+    db_path = tmp_path / "sync.db"
+    init_db(db_path)
+    with EventRepository(db_path) as repo:
+        repo.set_sync_run("user1", status="success", saved=2, failed=0, excluded=0)
+
+    with patch("app.bot.has_valid_session", return_value=False):
+        result = _instance_status_direct(tmp_path, db_path, "user1")
+    assert result.auth is False
+    assert result.last_sync is not None
+    assert "success" in result.last_sync
+
+
 def test_instance_status_direct_valid_session_no_db(tmp_path):
     """With valid session but no DB, auth is True and last_sync is None."""
     with patch("app.bot.has_valid_session", return_value=True):

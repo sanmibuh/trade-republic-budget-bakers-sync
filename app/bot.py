@@ -192,17 +192,22 @@ def _instance_status_direct(
     opens compared with calling ``_check_session_direct`` and
     ``_last_sync_summary_direct`` separately.
 
+    The last sync info is always read from the DB regardless of the current
+    session/cookie state, so ``/status`` keeps showing the last sync summary
+    even when the user is logged out.
+
     Returns:
         An :class:`InstanceStatus` with ``auth`` set to ``True``/``False``/``None``
         and ``last_sync`` set to a human-readable summary string or ``None``.
     """
     from app.persistence import EventRepository
 
-    if not has_valid_session(data_dir):
-        return InstanceStatus(auth=False, last_sync=None)
+    session_ok = has_valid_session(data_dir)
 
     if not shared_db_path.exists():
-        return InstanceStatus(auth=True, last_sync=None)
+        return InstanceStatus(
+            auth=bool(session_ok) if session_ok else False, last_sync=None
+        )
 
     try:
         with EventRepository(shared_db_path, instance=instance) as repo:
@@ -211,9 +216,12 @@ def _instance_status_direct(
     except Exception:
         return InstanceStatus(auth=None, last_sync=None)
 
-    auth: bool | None = True
-    if auth_status in ("failed", "expired"):
+    if not session_ok:
+        auth: bool | None = False
+    elif auth_status in ("failed", "expired"):
         auth = False
+    else:
+        auth = True
 
     last_sync = _build_sync_summary(run_info)
     return InstanceStatus(auth=auth, last_sync=last_sync)
