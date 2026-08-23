@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from app.logging_setup import configure_logging, setup_logging
+from app.logging_setup import _suppress_noisy_loggers, configure_logging, setup_logging
 
 _EXPECTED_FMT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 _EXPECTED_DATEFMT = "%Y-%m-%d %H:%M:%S"
@@ -176,6 +176,26 @@ def test_suppress_noisy_loggers_does_not_lower_stricter_level(tmp_path):
                 root.removeHandler(h)
                 h.close()
         logging.getLogger(probe).setLevel(original_level)
+
+
+def test_suppress_noisy_loggers_respects_effective_level_via_parent():
+    """A logger at NOTSET inheriting ERROR from root must not be set to WARNING."""
+    root = logging.getLogger()
+    probe = "httpx"
+    original_explicit = logging.getLogger(probe).level
+    original_root = root.level
+    try:
+        logging.getLogger(probe).setLevel(logging.NOTSET)
+        root.setLevel(logging.ERROR)
+        _suppress_noisy_loggers()
+        # Logger must remain NOTSET — effective level (ERROR) was already >= WARNING.
+        assert logging.getLogger(probe).level == logging.NOTSET, (
+            f"Logger {probe!r} was NOTSET (inheriting ERROR from root); "
+            "_suppress_noisy_loggers must not lower it to WARNING"
+        )
+    finally:
+        logging.getLogger(probe).setLevel(original_explicit)
+        root.setLevel(original_root)
 
 
 def test_setup_logging_and_configure_logging_use_same_format(tmp_path):

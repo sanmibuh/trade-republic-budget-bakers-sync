@@ -21,7 +21,7 @@ def _suppress_noisy_loggers() -> None:
     """
     for name in _NOISY_LOGGERS:
         logger = logging.getLogger(name)
-        if logger.level == logging.NOTSET or logger.level < logging.WARNING:
+        if logger.getEffectiveLevel() < logging.WARNING:
             logger.setLevel(logging.WARNING)
 
 
