@@ -1,0 +1,19 @@
+app/tr_mapper.py
+  s_144b4fd64e7912::t_3c564d1cabafc2 13-20,28,48,53-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "443c548926c1cbcb18e5811efa89be3876e6b3e9",
+  "prompts": {},
+  "sessions": {
+    "s_144b4fd64e7912": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd264e76dffesLr6ggfHD9Pwzv",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
