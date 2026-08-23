@@ -82,10 +82,26 @@ class Config:
     def shared_db_path(self) -> Path:
         """Path to the shared ``sync.db`` at the root data directory level.
 
-        ``data_dir`` is ``{root}/sync/{instance}``; the shared database lives at
-        ``{root}/sync.db`` — two levels above the instance subdirectory.
+        ``data_dir`` is ``{root}/tr_session_{instance}``; the shared database
+        lives at ``{root}/sync.db`` — one level above the session directory.
         """
-        return self.data_dir.parent.parent / "sync.db"
+        return self.data_dir.parent / "sync.db"
+
+    @property
+    def twofa_code_file(self) -> Path:
+        """Path to the instance-specific 2FA code file at the root data level.
+
+        Format: ``{root}/.tr_2fa_code_{instance}``
+        """
+        return self.data_dir.parent / f".tr_2fa_code_{self.instance}"
+
+    @property
+    def twofa_pending_file(self) -> Path:
+        """Path to the instance-specific 2FA pending marker at the root data level.
+
+        Format: ``{root}/.tr_2fa_pending_{instance}``
+        """
+        return self.data_dir.parent / f".tr_2fa_pending_{self.instance}"
 
 
 @dataclass(frozen=True)
@@ -502,8 +518,8 @@ class SyncConfig:
 class InstancesConfig:
     """Configuration for all sync instances, loaded from ``/app/config/instances.yml``.
 
-    Each instance gets its own ``data_dir`` subdirectory:
-    ``{root_data_dir}/{instance.name}/``.
+    Each instance gets its own session directory at the data root:
+    ``{root_data_dir}/tr_session_{instance.name}/``.
 
     Required YAML layout::
 
@@ -637,7 +653,7 @@ class InstancesConfig:
             telegram_chat_id=self.telegram_chat_id,
             lookback_days=inst.lookback_days,
             dedup_ttl_days=inst.dedup_ttl_days,
-            data_dir=self.data_dir / "sync" / inst.name,
+            data_dir=self.data_dir / f"tr_session_{inst.name}",
             instance=inst.name,
             allow_insecure_ssl=self.allow_insecure_ssl,
             label_ids=dict(inst.label_ids),

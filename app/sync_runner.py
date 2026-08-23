@@ -70,7 +70,8 @@ def _build_code_provider(
     """Choose how the authenticator 2FA code is obtained for this environment."""
     telegram_configured = bool(cfg.telegram_bot_token and cfg.telegram_chat_id)
     return select_code_provider(
-        data_dir=cfg.data_dir,
+        code_file=cfg.twofa_code_file,
+        pending_file=cfg.twofa_pending_file,
         notifier=notifier,
         instance=cfg.instance,
         isatty=sys.stdin.isatty(),
