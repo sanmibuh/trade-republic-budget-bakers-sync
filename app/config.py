@@ -488,9 +488,9 @@ def _validate_cron_term(
 def _validate_cron_field_ranges(field_name: str, value: str) -> None:
     """Raise ``ValueError`` if any base numeric value in a cron expression is out of range.
 
-    Only the base values are checked — step values (``/S``) are intentionally
-    ignored because the cron daemon accepts any positive step regardless of the
-    field range.
+    Base values are checked against their field-specific range.  Step values
+    (``/S``) are not range-checked, but must be a positive integer (>= 1) —
+    a step of 0 is invalid and would be silently ignored by the cron daemon.
 
     Must be called after syntax validation (``_CRON_SCHEDULE_RE``).
     """
