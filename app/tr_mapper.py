@@ -10,6 +10,14 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+_TIME_KEYS: tuple[str, ...] = (
+    "timestamp",
+    "createdAt",
+    "created_at",
+    "date",
+    "recordDate",
+)
+
 
 # ---------------------------------------------------------------------------
 # Time normalisation
@@ -17,7 +25,7 @@ log = logging.getLogger(__name__)
 
 
 def normalize_event_time(event: dict[str, Any]) -> str:
-    for key in ("timestamp", "createdAt", "created_at", "date", "recordDate"):
+    for key in _TIME_KEYS:
         value = event.get(key)
         if not value:
             continue
@@ -35,15 +43,15 @@ def filter_by_lookback(
     until: datetime | None = None,
 ) -> list[dict[str, Any]]:
     filtered = []
-    time_keys = ("timestamp", "createdAt", "created_at", "date", "recordDate")
     for event in events:
         raw = next(
-            (event[k] for k in time_keys if event.get(k)),
+            (event[k] for k in _TIME_KEYS if event.get(k)),
             None,
         )
         if raw is None:
             log.warning(
-                "Event has no recognisable timestamp field — skipping: %r", event
+                "Event has no recognisable timestamp field — skipping (keys: %s)",
+                list(event.keys()),
             )
             continue
         event_time = str(raw) if not isinstance(raw, datetime) else raw.isoformat()
