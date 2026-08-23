@@ -173,6 +173,87 @@ def _format_sync_timestamp(raw: str) -> str:
         return raw
 
 
+@dataclass
+class InstanceStatus:
+    """Combined auth and last-sync status for a single instance."""
+
+    auth: bool | None
+    last_sync: str | None
+
+
+def _instance_status_direct(
+    data_dir: Path, shared_db_path: Path, instance: str
+) -> InstanceStatus:
+    """Read auth state and last sync run from a single DB connection.
+
+    Opens ``EventRepository`` at most once, fetching both ``auth_state`` and
+    ``sync_runs`` in a single connection.  This is the preferred call site for
+    :meth:`TelegramBot._instance_status_line`; it halves the number of SQLite
+    opens compared with calling ``_check_session_direct`` and
+    ``_last_sync_summary_direct`` separately.
+
+    The last sync info is always read from the DB regardless of the current
+    session/cookie state, so ``/status`` keeps showing the last sync summary
+    even when the user is logged out.
+
+    Returns:
+        An :class:`InstanceStatus` with ``auth`` set to ``True``/``False``/``None``
+        and ``last_sync`` set to a human-readable summary string or ``None``.
+    """
+    from app.persistence import EventRepository
+
+    session_ok = has_valid_session(data_dir)
+
+    if not shared_db_path.exists():
+        return InstanceStatus(
+            auth=bool(session_ok) if session_ok else False, last_sync=None
+        )
+
+    try:
+        with EventRepository(shared_db_path, instance=instance) as repo:
+            auth_status = repo.get_auth_state(instance)
+            run_info = repo.get_sync_run(instance)
+    except Exception:
+        return InstanceStatus(auth=False if not session_ok else None, last_sync=None)
+
+    if not session_ok:
+        auth: bool | None = False
+    elif auth_status in ("failed", "expired"):
+        auth = False
+    else:
+        auth = True
+
+    last_sync = _build_sync_summary(run_info)
+    return InstanceStatus(auth=auth, last_sync=last_sync)
+
+
+def _build_sync_summary(run_info: dict | None) -> str | None:
+    """Convert a raw sync-run dict to a human-readable summary string."""
+    if run_info is None:
+        return None
+
+    status = run_info.get("status")
+    ran_at = run_info.get("ran_at")
+
+    if status not in {"success", "partial", "failed"}:
+        return None
+
+    icon: dict[str, str] = {"success": "✅", "partial": "⚠️", "failed": "❌"}
+    parts = [f"{icon[status]} {status}"]
+    if ran_at:
+        parts[0] = f"{parts[0]} at {_format_sync_timestamp(ran_at)}"
+    saved = run_info.get("saved")
+    failed = run_info.get("failed")
+    excluded = run_info.get("excluded")
+    if saved is not None:
+        parts.append(f"saved {saved}")
+    if failed is not None:
+        parts.append(f"failed {failed}")
+    if excluded is not None:
+        parts.append(f"excluded {excluded}")
+    return " · ".join(parts)
+
+
 def _check_session_direct(
     data_dir: Path, shared_db_path: Path, instance: str
 ) -> bool | None:
@@ -215,29 +296,7 @@ def _last_sync_summary_direct(shared_db_path: Path, instance: str) -> str | None
     except Exception:
         return None
 
-    if run_info is None:
-        return None
-
-    status = run_info.get("status")
-    ran_at = run_info.get("ran_at")
-
-    if status not in {"success", "partial", "failed"}:
-        return None
-
-    icon: dict[str, str] = {"success": "✅", "partial": "⚠️", "failed": "❌"}
-    parts = [f"{icon[status]} {status}"]
-    if ran_at:
-        parts[0] = f"{parts[0]} at {_format_sync_timestamp(ran_at)}"
-    saved = run_info.get("saved")
-    failed = run_info.get("failed")
-    excluded = run_info.get("excluded")
-    if saved is not None:
-        parts.append(f"saved {saved}")
-    if failed is not None:
-        parts.append(f"failed {failed}")
-    if excluded is not None:
-        parts.append(f"excluded {excluded}")
-    return " · ".join(parts)
+    return _build_sync_summary(run_info)
 
 
 # ---------------------------------------------------------------------------
@@ -543,19 +602,16 @@ class TelegramBot:
 
     def _instance_status_line(self, inst: InstanceConfig) -> str:
         """Build a Telegram-formatted status line for a single sync instance."""
-        auth = _check_session_direct(
+        status = _instance_status_direct(
             inst.config.data_dir,
             inst.config.shared_db_path,
             inst.config.instance,
         )
-        last_sync = _last_sync_summary_direct(
-            inst.config.shared_db_path, inst.config.instance
-        )
-        auth_icon = _auth_icon(auth)
+        auth_icon = _auth_icon(status.auth)
         return (
             f"• *{_esc(inst.name)}*"
             f"\n  auth: {auth_icon}"
-            f"\n  last: {_esc(last_sync or 'unavailable')}"
+            f"\n  last: {_esc(status.last_sync or 'unavailable')}"
         )
 
     def _cmd_sync(self, _args: list[str]) -> None:

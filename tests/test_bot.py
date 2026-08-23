@@ -10,10 +10,12 @@ from app.bot import (
     _BACKUP_ICONS,
     BotConfig,
     InstanceConfig,
+    InstanceStatus,
     TelegramBot,
     _auth_icon,
     _check_session_direct,
     _format_sync_timestamp,
+    _instance_status_direct,
     _last_sync_summary_direct,
 )
 from app.config import BackupConfig, Config
@@ -1736,6 +1738,130 @@ def test_last_sync_summary_direct_no_run_for_instance_returns_none(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# _instance_status_direct
+# ---------------------------------------------------------------------------
+
+
+def test_instance_status_direct_no_cookies_no_db(tmp_path):
+    """When there are no cookies and no DB, auth is False and last_sync is None."""
+    result = _instance_status_direct(tmp_path, tmp_path / "sync.db", "user1")
+    assert isinstance(result, InstanceStatus)
+    assert result.auth is False
+    assert result.last_sync is None
+
+
+def test_instance_status_direct_no_cookies_still_shows_last_sync(tmp_path):
+    """Even when session is invalid, last_sync must still be read from the DB."""
+    from app.persistence import EventRepository, init_db
+
+    db_path = tmp_path / "sync.db"
+    init_db(db_path)
+    with EventRepository(db_path) as repo:
+        repo.set_sync_run("user1", status="success", saved=2, failed=0, excluded=0)
+
+    with patch("app.bot.has_valid_session", return_value=False):
+        result = _instance_status_direct(tmp_path, db_path, "user1")
+    assert result.auth is False
+    assert result.last_sync is not None
+    assert "success" in result.last_sync
+
+
+def test_instance_status_direct_valid_session_no_db(tmp_path):
+    """With valid session but no DB, auth is True and last_sync is None."""
+    with patch("app.bot.has_valid_session", return_value=True):
+        result = _instance_status_direct(tmp_path, tmp_path / "sync.db", "user1")
+    assert result.auth is True
+    assert result.last_sync is None
+
+
+def test_instance_status_direct_valid_session_with_sync_run(tmp_path):
+    """With valid session and a sync run, both auth and last_sync are populated."""
+    from app.persistence import EventRepository, init_db
+
+    db_path = tmp_path / "sync.db"
+    init_db(db_path)
+    with EventRepository(db_path) as repo:
+        repo.set_auth_state("user1", "ok")
+        repo.set_sync_run("user1", status="success", saved=3, failed=0, excluded=0)
+
+    with patch("app.bot.has_valid_session", return_value=True):
+        result = _instance_status_direct(tmp_path, db_path, "user1")
+    assert result.auth is True
+    assert result.last_sync is not None
+    assert "success" in result.last_sync
+
+
+def test_instance_status_direct_auth_failed_in_db(tmp_path):
+    """When auth_state is 'failed' in DB, auth returns False."""
+    from app.persistence import EventRepository, init_db
+
+    db_path = tmp_path / "sync.db"
+    init_db(db_path)
+    with EventRepository(db_path) as repo:
+        repo.set_auth_state("user1", "failed")
+
+    with patch("app.bot.has_valid_session", return_value=True):
+        result = _instance_status_direct(tmp_path, db_path, "user1")
+    assert result.auth is False
+
+
+def test_instance_status_direct_db_error_returns_none_auth(tmp_path):
+    """When the DB raises an exception, auth is None and last_sync is None."""
+    db_path = tmp_path / "sync.db"
+    db_path.touch()  # file exists so the DB path check passes
+
+    with (
+        patch("app.bot.has_valid_session", return_value=True),
+        patch("app.persistence.sqlite3.connect", side_effect=Exception("boom")),
+    ):
+        result = _instance_status_direct(tmp_path, db_path, "user1")
+    assert result.auth is None
+    assert result.last_sync is None
+
+
+def test_instance_status_direct_db_error_with_invalid_session_returns_false_auth(
+    tmp_path,
+):
+    """When the DB raises and session is already invalid, auth is False (not None)."""
+    db_path = tmp_path / "sync.db"
+    db_path.touch()  # file exists so the DB path check passes
+
+    with (
+        patch("app.bot.has_valid_session", return_value=False),
+        patch("app.persistence.sqlite3.connect", side_effect=Exception("boom")),
+    ):
+        result = _instance_status_direct(tmp_path, db_path, "user1")
+    assert result.auth is False
+    assert result.last_sync is None
+
+
+def test_instance_status_direct_opens_only_one_connection(tmp_path):
+    """_instance_status_direct must open exactly one SQLite connection, not two."""
+    from app.persistence import init_db
+
+    db_path = tmp_path / "sync.db"
+    init_db(db_path)
+
+    import app.persistence as _persistence
+
+    original_connect = _persistence.sqlite3.connect
+    connect_count = 0
+
+    def counting_connect(*args, **kwargs):
+        nonlocal connect_count
+        connect_count += 1
+        return original_connect(*args, **kwargs)
+
+    with (
+        patch("app.bot.has_valid_session", return_value=True),
+        patch("app.persistence.sqlite3.connect", side_effect=counting_connect),
+    ):
+        _instance_status_direct(tmp_path, db_path, "user1")
+
+    assert connect_count == 1
+
+
+# ---------------------------------------------------------------------------
 # _cmd_status — direct checks (no Docker)
 # ---------------------------------------------------------------------------
 
@@ -1744,10 +1870,11 @@ def test_cmd_status_shows_checkmark_for_authenticated_instance(tmp_path):
     """✅ icon when the session check passes for an instance."""
     bot = _bot(tmp_path=tmp_path)
     with (
-        patch("app.bot._check_session_direct", return_value=True),
         patch(
-            "app.bot._last_sync_summary_direct",
-            return_value="✅ success at 2026/08/11 10:00 UTC",
+            "app.bot._instance_status_direct",
+            return_value=InstanceStatus(
+                auth=True, last_sync="✅ success at 2026/08/11 10:00 UTC"
+            ),
         ),
         patch.object(bot, "_send_message") as mock_send,
     ):
@@ -1760,8 +1887,10 @@ def test_cmd_status_shows_warning_for_unauthenticated_instance(tmp_path):
     """⚠️ icon when the session check fails for an instance."""
     bot = _bot(tmp_path=tmp_path)
     with (
-        patch("app.bot._check_session_direct", return_value=False),
-        patch("app.bot._last_sync_summary_direct", return_value=None),
+        patch(
+            "app.bot._instance_status_direct",
+            return_value=InstanceStatus(auth=False, last_sync=None),
+        ),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._cmd_status([])
@@ -1774,8 +1903,10 @@ def test_cmd_status_shows_question_mark_for_unknown_state(tmp_path):
     """❓ icon when the session state is unknown (DB error)."""
     bot = _bot(tmp_path=tmp_path)
     with (
-        patch("app.bot._check_session_direct", return_value=None),
-        patch("app.bot._last_sync_summary_direct", return_value=None),
+        patch(
+            "app.bot._instance_status_direct",
+            return_value=InstanceStatus(auth=None, last_sync=None),
+        ),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._cmd_status([])
@@ -1784,15 +1915,17 @@ def test_cmd_status_shows_question_mark_for_unknown_state(tmp_path):
 
 
 def test_cmd_status_checks_each_instance(tmp_path):
-    """_check_session_direct must be called once per configured instance."""
+    """_instance_status_direct must be called once per configured instance."""
     bot = _bot(tmp_path=tmp_path)
     with (
-        patch("app.bot._check_session_direct", return_value=True) as mock_check,
-        patch("app.bot._last_sync_summary_direct", return_value=None),
+        patch(
+            "app.bot._instance_status_direct",
+            return_value=InstanceStatus(auth=True, last_sync=None),
+        ) as mock_status,
         patch.object(bot, "_send_message"),
     ):
         bot._cmd_status([])
-    assert mock_check.call_count == len(bot._cfg.instances)
+    assert mock_status.call_count == len(bot._cfg.instances)
 
 
 # ---------------------------------------------------------------------------
@@ -1947,8 +2080,10 @@ def test_cmd_status_mentions_backup_not_configured_when_absent(tmp_path):
     """When backup_cfg is None, the status message must say it is not configured."""
     bot = _bot(backup_cfg=None, tmp_path=tmp_path)
     with (
-        patch("app.bot._check_session_direct", return_value=None),
-        patch("app.bot._last_sync_summary_direct", return_value=None),
+        patch(
+            "app.bot._instance_status_direct",
+            return_value=InstanceStatus(auth=None, last_sync=None),
+        ),
         patch.object(bot, "_send_message") as mock_send,
     ):
         bot._cmd_status([])
