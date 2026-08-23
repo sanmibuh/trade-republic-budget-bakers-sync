@@ -1,0 +1,19 @@
+tests/test_twofa.py
+  s_8f3fa06b220e32::t_af97589b7c08fb 147-148,160-161,173-174,185,187-188,194,199-200,283-284,362-478
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "3af6427a17451d445237b779b99d24475ff3e840",
+  "prompts": {},
+  "sessions": {
+    "s_8f3fa06b220e32": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd29eb578ffexcEwK17B6QfVLH",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
