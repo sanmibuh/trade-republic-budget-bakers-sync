@@ -512,7 +512,7 @@ def test_instances_config_get_instance_not_found(tmp_path):
 
 
 def test_instances_config_to_config_data_dir_is_subdirectory(tmp_path):
-    """to_config() sets data_dir to {root_data_dir}/sync/{instance_name}/."""
+    """to_config() sets data_dir to {root_data_dir}/tr_session_{instance_name}/."""
     from pathlib import Path
 
     from app.config import InstancesConfig
@@ -533,7 +533,7 @@ sync:
 
     cfg = InstancesConfig.load(cfg_file).to_config("user1")
 
-    assert cfg.data_dir == Path(tmp_path) / "sync" / "user1"
+    assert cfg.data_dir == Path(tmp_path) / "tr_session_user1"
 
 
 def test_instances_config_to_config_inherits_global_telegram(tmp_path):
@@ -1785,7 +1785,7 @@ def test_config_shared_db_path_is_root_sync_db(tmp_path):
     from app.config import Config
 
     root = tmp_path / "data"
-    instance_data_dir = root / "sync" / "alice"
+    instance_data_dir = root / "tr_session_alice"
     cfg = Config(
         owner_name="Alice",
         phone_number="+34600000000",
@@ -1829,3 +1829,75 @@ def test_instances_config_to_config_shared_db_path(tmp_path):
     cfg = InstancesConfig.load(cfg_file).to_config("user1")
 
     assert cfg.shared_db_path == tmp_path / "sync.db"
+
+
+# ---------------------------------------------------------------------------
+# Config.twofa_code_file / twofa_pending_file properties (issue #174)
+# ---------------------------------------------------------------------------
+
+
+def _make_config_for_instance(root, instance: str):
+    from app.config import Config
+
+    return Config(
+        owner_name=instance.capitalize(),
+        phone_number="+34600000000",
+        pin="1234",
+        wallet_api_key="key",
+        wallet_cash_account_id="cash",
+        wallet_portfolio_account_id="port",
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        lookback_days=7,
+        dedup_ttl_days=60,
+        data_dir=root / f"tr_session_{instance}",
+        instance=instance,
+    )
+
+
+def test_config_twofa_code_file_at_root_with_instance_suffix(tmp_path):
+    """twofa_code_file must be {root}/.tr_2fa_code_{instance}."""
+    cfg = _make_config_for_instance(tmp_path, "alice")
+    assert cfg.twofa_code_file == tmp_path / ".tr_2fa_code_alice"
+
+
+def test_config_twofa_pending_file_at_root_with_instance_suffix(tmp_path):
+    """twofa_pending_file must be {root}/.tr_2fa_pending_{instance}."""
+    cfg = _make_config_for_instance(tmp_path, "alice")
+    assert cfg.twofa_pending_file == tmp_path / ".tr_2fa_pending_alice"
+
+
+def test_config_twofa_files_different_instances_do_not_collide(tmp_path):
+    """Two different instances must have different 2FA file paths."""
+    cfg_a = _make_config_for_instance(tmp_path, "alice")
+    cfg_b = _make_config_for_instance(tmp_path, "bob")
+    assert cfg_a.twofa_code_file != cfg_b.twofa_code_file
+    assert cfg_a.twofa_pending_file != cfg_b.twofa_pending_file
+
+
+def test_instances_config_to_config_twofa_files_at_root(tmp_path):
+    """to_config() must produce 2FA files at root level with instance suffix."""
+    import textwrap
+
+    from app.config import InstancesConfig
+
+    yaml_content = textwrap.dedent(f"""\
+        data_dir: {tmp_path}
+        telegram_bot_token: "tok"
+        telegram_chat_id: "cid"
+        sync:
+          wallet_api_key: "key"
+          instances:
+            - name: user1
+              phone: "+34600000000"
+              pin: "1234"
+              wallet_cash_account_id: "cash"
+              wallet_portfolio_account_id: "port"
+    """)
+    cfg_file = tmp_path / "i.yml"
+    cfg_file.write_text(yaml_content)
+
+    cfg = InstancesConfig.load(cfg_file).to_config("user1")
+
+    assert cfg.twofa_code_file == tmp_path / ".tr_2fa_code_user1"
+    assert cfg.twofa_pending_file == tmp_path / ".tr_2fa_pending_user1"

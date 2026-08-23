@@ -92,15 +92,13 @@ def submit_code(instance: str, code: str) -> None:
     Exits with an error if no login is currently waiting (the pending marker
     file is absent), so stale /code submissions are rejected cleanly.
     """
-    from app.twofa import CODE_FILENAME, PENDING_FILENAME
-
     cfg, _ = _resolve_instance_cfg(instance)
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
-    pending_file = cfg.data_dir / PENDING_FILENAME
+    pending_file = cfg.twofa_pending_file
     if not pending_file.exists():
         click.echo("No active login request for this instance.")
         sys.exit(1)
-    (cfg.data_dir / CODE_FILENAME).write_text(code.strip())
+    cfg.twofa_code_file.write_text(code.strip())
 
 
 @cli.command(name="check-pending")
@@ -121,10 +119,8 @@ def check_pending(instance: str) -> None:
         0 — the pending-login marker file is present (container awaiting code).
         1 — no active 2FA request for this instance.
     """
-    from app.twofa import PENDING_FILENAME
-
     cfg, _ = _resolve_instance_cfg(instance)
-    pending_file = cfg.data_dir / PENDING_FILENAME
+    pending_file = cfg.twofa_pending_file
     sys.exit(0 if pending_file.exists() else 1)
 
 

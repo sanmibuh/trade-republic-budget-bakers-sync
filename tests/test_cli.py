@@ -316,11 +316,14 @@ def test_backup_yearly_invalid_param_exits(tmp_path):
 
 def test_submit_code_writes_code_file(tmp_path):
     from app.config import Config, InstancesConfig
-    from app.twofa import CODE_FILENAME, PENDING_FILENAME
 
-    (tmp_path / PENDING_FILENAME).write_text("")
+    pending_file = tmp_path / ".tr_2fa_pending_user1"
+    code_file = tmp_path / ".tr_2fa_code_user1"
+    pending_file.write_text("")
     mock_cfg = MagicMock(spec=Config)
     mock_cfg.data_dir = tmp_path
+    mock_cfg.twofa_pending_file = pending_file
+    mock_cfg.twofa_code_file = code_file
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
     mock_instances.data_dir = tmp_path
@@ -328,7 +331,7 @@ def test_submit_code_writes_code_file(tmp_path):
         result = _runner().invoke(cli, ["submit-code", "--instance", "user1", "123456"])
 
     assert result.exit_code == 0
-    assert (tmp_path / CODE_FILENAME).read_text() == "123456"
+    assert code_file.read_text() == "123456"
 
 
 def test_submit_code_rejects_when_no_pending_marker(tmp_path):
@@ -337,6 +340,8 @@ def test_submit_code_rejects_when_no_pending_marker(tmp_path):
 
     mock_cfg = MagicMock(spec=Config)
     mock_cfg.data_dir = tmp_path
+    mock_cfg.twofa_pending_file = tmp_path / ".tr_2fa_pending_user1"
+    mock_cfg.twofa_code_file = tmp_path / ".tr_2fa_code_user1"
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
     mock_instances.data_dir = tmp_path
@@ -350,17 +355,19 @@ def test_submit_code_rejects_when_no_pending_marker(tmp_path):
 def test_submit_code_pending_marker_absent_does_not_write_code_file(tmp_path):
     """When no pending marker exists the code file must NOT be written."""
     from app.config import Config, InstancesConfig
-    from app.twofa import CODE_FILENAME
 
+    code_file = tmp_path / ".tr_2fa_code_user1"
     mock_cfg = MagicMock(spec=Config)
     mock_cfg.data_dir = tmp_path
+    mock_cfg.twofa_pending_file = tmp_path / ".tr_2fa_pending_user1"
+    mock_cfg.twofa_code_file = code_file
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
     mock_instances.data_dir = tmp_path
     with patch("app.config.InstancesConfig.load", return_value=mock_instances):
         _runner().invoke(cli, ["submit-code", "--instance", "user1", "999999"])
 
-    assert not (tmp_path / CODE_FILENAME).exists()
+    assert not code_file.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -401,11 +408,12 @@ def test_bot_calls_run():
 def test_check_pending_exits_zero_when_pending_file_present(tmp_path):
     """check-pending exits 0 when the .tr_2fa_pending marker exists."""
     from app.config import Config, InstancesConfig
-    from app.twofa import PENDING_FILENAME
 
-    (tmp_path / PENDING_FILENAME).touch()
+    pending_file = tmp_path / ".tr_2fa_pending_user1"
+    pending_file.touch()
     mock_cfg = MagicMock(spec=Config)
     mock_cfg.data_dir = tmp_path
+    mock_cfg.twofa_pending_file = pending_file
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
     mock_instances.data_dir = tmp_path
@@ -420,6 +428,7 @@ def test_check_pending_exits_one_when_pending_file_absent(tmp_path):
 
     mock_cfg = MagicMock(spec=Config)
     mock_cfg.data_dir = tmp_path
+    mock_cfg.twofa_pending_file = tmp_path / ".tr_2fa_pending_user1"
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
     mock_instances.data_dir = tmp_path
@@ -868,23 +877,26 @@ def test_resync_without_instance_flag_exits_with_error():
 
 
 def test_submit_code_with_instance_flag_writes_code_file(tmp_path):
-    """submit-code --instance <name> writes code to the correct data_dir."""
+    """submit-code --instance <name> writes code to the correct instance 2FA path."""
     from app.config import Config, InstancesConfig
-    from app.twofa import CODE_FILENAME, PENDING_FILENAME
+
+    pending_file = tmp_path / ".tr_2fa_pending_user1"
+    code_file = tmp_path / ".tr_2fa_code_user1"
+    pending_file.write_text("")
 
     mock_cfg = MagicMock(spec=Config)
     mock_cfg.data_dir = tmp_path
+    mock_cfg.twofa_pending_file = pending_file
+    mock_cfg.twofa_code_file = code_file
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
     mock_instances.data_dir = tmp_path
-
-    (tmp_path / PENDING_FILENAME).write_text("")
 
     with patch("app.config.InstancesConfig.load", return_value=mock_instances):
         result = _runner().invoke(cli, ["submit-code", "--instance", "user1", "123456"])
 
     assert result.exit_code == 0
-    assert (tmp_path / CODE_FILENAME).read_text() == "123456"
+    assert code_file.read_text() == "123456"
 
 
 def test_submit_code_without_instance_flag_exits_with_error():
@@ -896,15 +908,16 @@ def test_submit_code_without_instance_flag_exits_with_error():
 def test_check_pending_with_instance_flag_exits_zero(tmp_path):
     """check-pending --instance exits 0 when pending file is present."""
     from app.config import Config, InstancesConfig
-    from app.twofa import PENDING_FILENAME
+
+    pending_file = tmp_path / ".tr_2fa_pending_user1"
+    pending_file.touch()
 
     mock_cfg = MagicMock(spec=Config)
     mock_cfg.data_dir = tmp_path
+    mock_cfg.twofa_pending_file = pending_file
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
     mock_instances.data_dir = tmp_path
-
-    (tmp_path / PENDING_FILENAME).touch()
 
     with patch("app.config.InstancesConfig.load", return_value=mock_instances):
         result = _runner().invoke(cli, ["check-pending", "--instance", "user1"])

@@ -730,22 +730,19 @@ class TelegramBot:
         """Submit *code* to the instance awaiting 2FA during a sync.
 
         For single-instance setups, submits directly.  For multi-instance
-        setups, probes the ``PENDING_FILENAME`` marker in each instance's
-        ``data_dir`` to discover which one is awaiting a code.
+        setups, probes each instance's ``twofa_pending_file`` at the data root
+        to discover which one is awaiting a code.
         """
         return self._submit_code_no_pending(code)
 
     def _submit_code_to(self, inst: InstanceConfig, code: str) -> bool:
         """Write *code* to *inst*'s 2FA code file directly. Returns True on success."""
-        from app.twofa import CODE_FILENAME, PENDING_FILENAME
-
-        data_dir = inst.config.data_dir
-        pending_file = data_dir / PENDING_FILENAME
+        pending_file = inst.config.twofa_pending_file
         if not pending_file.exists():
             self._send_message(f"⚠️ No active login request for *{_esc(inst.name)}*\\.")
             return False
         try:
-            (data_dir / CODE_FILENAME).write_text(code.strip())
+            inst.config.twofa_code_file.write_text(code.strip())
             return True
         except Exception as exc:
             self._send_message(
@@ -757,7 +754,7 @@ class TelegramBot:
         """Submit *code* to the instance currently awaiting a 2FA code.
 
         For a single-instance setup submits directly.  For multi-instance setups,
-        probes the ``PENDING_FILENAME`` marker in each instance's ``data_dir`` to
+        probes each instance's ``twofa_pending_file`` at the data root to
         discover which one is awaiting a code, falling back to a generic
         disambiguation prompt when no instance is waiting.
         """
@@ -784,16 +781,14 @@ class TelegramBot:
     def _probe_pending(
         self, instances: dict[str, InstanceConfig]
     ) -> dict[str, InstanceConfig]:
-        """Check each instance's ``data_dir`` for the pending-login marker file.
+        """Check each instance's 2FA pending marker file.
 
-        Returns those instances whose ``PENDING_FILENAME`` marker is present.
+        Returns those instances whose ``twofa_pending_file`` marker is present.
         Short-circuits after finding two (result is already ambiguous).
         """
-        from app.twofa import PENDING_FILENAME
-
         pending: dict[str, InstanceConfig] = {}
         for name, inst in instances.items():
-            if (inst.config.data_dir / PENDING_FILENAME).exists():
+            if inst.config.twofa_pending_file.exists():
                 pending[name] = inst
                 if len(pending) > 1:
                     break

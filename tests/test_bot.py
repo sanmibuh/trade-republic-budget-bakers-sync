@@ -909,13 +909,12 @@ def test_run_sync_for_instance_sends_error_on_exception(tmp_path):
 
 
 def test_handle_message_digit_string_submitted_when_pending_marker_present(tmp_path):
-    """A digit-only reply is treated as 2FA code when the PENDING_FILENAME marker exists."""
+    """A digit-only reply is treated as 2FA code when the twofa_pending_file marker exists."""
     bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
 
-    # Create pending marker file so submit succeeds (multi-instance probe path)
-    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
-    (inst.config.data_dir / ".tr_2fa_pending").touch()
+    # Create pending marker at the root-level instance-suffixed path
+    inst.config.twofa_pending_file.touch()
 
     with (
         patch.object(bot, "_send_message"),
@@ -923,7 +922,7 @@ def test_handle_message_digit_string_submitted_when_pending_marker_present(tmp_p
     ):
         bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
 
-    assert (inst.config.data_dir / ".tr_2fa_code").read_text() == "123456"
+    assert inst.config.twofa_code_file.read_text() == "123456"
     mock_delete.assert_called_once_with(77)
 
 
@@ -947,11 +946,10 @@ def test_handle_message_digit_string_not_deleted_when_no_pending_login_multi_ins
 def test_handle_message_digit_string_not_deleted_when_multiple_pending_markers(
     tmp_path,
 ):
-    """Digit message is not deleted when multiple instances have PENDING_FILENAME markers."""
+    """Digit message is not deleted when multiple instances have twofa_pending_file markers."""
     bot = _bot(tmp_path=tmp_path)
     for inst in bot._cfg.instances.values():
-        inst.config.data_dir.mkdir(parents=True, exist_ok=True)
-        (inst.config.data_dir / ".tr_2fa_pending").touch()
+        inst.config.twofa_pending_file.touch()
     with (
         patch.object(bot, "_send_message"),
         patch.object(bot, "_delete_message") as mock_delete,
@@ -998,14 +996,13 @@ def test_maybe_submit_pending_code_single_instance_with_pending_submits(tmp_path
         )
     }
     bot = _bot(instances=single_instance, tmp_path=tmp_path)
-    data_dir = tmp_path / "user1"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    (data_dir / ".tr_2fa_pending").touch()
+    inst = bot._cfg.instances["user1"]
+    inst.config.twofa_pending_file.touch()
 
     with patch.object(bot, "_send_message"):
         result = bot._maybe_submit_pending_code("123456")
     assert result is True
-    assert (data_dir / ".tr_2fa_code").read_text() == "123456"
+    assert inst.config.twofa_code_file.read_text() == "123456"
 
 
 def test_handle_message_digit_cron_single_instance_submits_code(tmp_path):
@@ -1017,16 +1014,15 @@ def test_handle_message_digit_cron_single_instance_submits_code(tmp_path):
         )
     }
     bot = _bot(instances=single_instance, tmp_path=tmp_path)
-    data_dir = tmp_path / "user1"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    (data_dir / ".tr_2fa_pending").touch()
+    inst = bot._cfg.instances["user1"]
+    inst.config.twofa_pending_file.touch()
 
     with (
         patch.object(bot, "_send_message"),
         patch.object(bot, "_delete_message") as mock_delete,
     ):
         bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
-    assert (data_dir / ".tr_2fa_code").read_text() == "123456"
+    assert inst.config.twofa_code_file.read_text() == "123456"
     mock_delete.assert_called_once_with(77)
 
 
@@ -1058,25 +1054,22 @@ def test_handle_message_digit_cron_multi_instance_sends_disambiguation(tmp_path)
 def test_maybe_submit_pending_code_single_file_pending_submits_directly(tmp_path):
     """When exactly one instance has a pending marker, the code is submitted to that instance."""
     bot = _bot(tmp_path=tmp_path)  # user1 + user2
-    user1_dir = tmp_path / "user1"
-    user1_dir.mkdir(parents=True, exist_ok=True)
-    (user1_dir / ".tr_2fa_pending").touch()
+    user1_inst = bot._cfg.instances["user1"]
+    user1_inst.config.twofa_pending_file.touch()
 
     with patch.object(bot, "_send_message"):
         result = bot._maybe_submit_pending_code("123456")
 
     assert result is True
-    assert (user1_dir / ".tr_2fa_code").read_text() == "123456"
+    assert user1_inst.config.twofa_code_file.read_text() == "123456"
 
 
 def test_maybe_submit_pending_code_multiple_file_pending_sends_disambiguation(tmp_path):
     """When _pending_login is empty but multiple instances have pending markers,
     the user is asked to specify with /code <instance> <code>."""
     bot = _bot(tmp_path=tmp_path)  # user1 + user2
-    for name in ("user1", "user2"):
-        d = tmp_path / name
-        d.mkdir(parents=True, exist_ok=True)
-        (d / ".tr_2fa_pending").touch()
+    for inst in bot._cfg.instances.values():
+        inst.config.twofa_pending_file.touch()
 
     with (
         patch.object(bot, "_send_message") as mock_send,
@@ -1093,9 +1086,8 @@ def test_handle_message_digit_single_file_pending_submits_and_deletes(tmp_path):
     """Plain-digit reply on multi-instance setup is submitted and deleted when
     exactly one instance has a pending marker file."""
     bot = _bot(tmp_path=tmp_path)  # user1 + user2
-    user1_dir = tmp_path / "user1"
-    user1_dir.mkdir(parents=True, exist_ok=True)
-    (user1_dir / ".tr_2fa_pending").touch()
+    user1_inst = bot._cfg.instances["user1"]
+    user1_inst.config.twofa_pending_file.touch()
 
     with (
         patch.object(bot, "_send_message"),
@@ -1103,7 +1095,7 @@ def test_handle_message_digit_single_file_pending_submits_and_deletes(tmp_path):
     ):
         bot._handle_message({"chat": {"id": 42}, "text": "123456", "message_id": 77})
 
-    assert (user1_dir / ".tr_2fa_code").read_text() == "123456"
+    assert user1_inst.config.twofa_code_file.read_text() == "123456"
     mock_delete.assert_called_once_with(77)
 
 
@@ -1121,14 +1113,11 @@ def test_probe_pending_short_circuits_after_two(tmp_path):
         ),
     }
     bot = _bot(instances=three_instances, tmp_path=tmp_path)
-    # Mark user1 and user2 as pending
-    for name in ("user1", "user2"):
-        d = tmp_path / name
-        d.mkdir(parents=True, exist_ok=True)
-        (d / ".tr_2fa_pending").touch()
-    # user3 dir does not exist — probe should short-circuit before reaching it
-    (tmp_path / "user3").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "user3" / ".tr_2fa_pending").touch()
+    # Mark user1 and user2 as pending using instance-suffixed paths
+    bot._cfg.instances["user1"].config.twofa_pending_file.touch()
+    bot._cfg.instances["user2"].config.twofa_pending_file.touch()
+    # Also touch user3 — probe should short-circuit before reaching it
+    bot._cfg.instances["user3"].config.twofa_pending_file.touch()
 
     result = bot._probe_pending(three_instances)
     # Only two are returned (short-circuits after 2 found)
@@ -1144,15 +1133,14 @@ def test_handle_message_unknown_plain_text_ignored_from_other_chat(tmp_path):
 
 
 def test_cmd_code_writes_file_to_data_dir(tmp_path):
-    """_cmd_code writes the authenticator code directly to the instance data_dir."""
+    """_cmd_code writes the authenticator code to the instance-suffixed 2FA path."""
     bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
-    inst.config.data_dir.mkdir(parents=True, exist_ok=True)
-    (inst.config.data_dir / ".tr_2fa_pending").touch()
+    inst.config.twofa_pending_file.touch()
 
     with patch.object(bot, "_send_message"):
         bot._cmd_code(["user1", "123456"])
-    assert (inst.config.data_dir / ".tr_2fa_code").read_text() == "123456"
+    assert inst.config.twofa_code_file.read_text() == "123456"
 
 
 def test_cmd_code_missing_args_sends_usage(tmp_path):

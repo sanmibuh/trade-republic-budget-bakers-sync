@@ -235,7 +235,7 @@ execution paths before any `EventRepository` is opened.
     restart the container. A `SIGTERM`/`SIGINT` trap ensures both children are stopped cleanly on
     `docker stop`.
   - All instances share one log file: `{DATA_DIR}/sync.log`.
-  - Instance data lives under `{DATA_DIR}/sync/{instance_name}/`.
+  - Per-instance session state lives under `{DATA_DIR}/tr_session_{instance_name}/`; 2FA marker files live at the data root as `{DATA_DIR}/.tr_2fa_{code|pending}_{instance_name}`.
   - Exits with an error if no instance has a schedule defined.
 - `TZ` env var must be set in the container for cron to interpret hours in local time (default is UTC).
 
@@ -330,7 +330,7 @@ The `sync:` section is **required** — files without it raise `ValueError` with
 pointing to `instances.yml.example`.
 
 **Key behaviours:**
-- Each instance gets its own `data_dir/sync/{name}/` subdirectory (session files, 2FA markers).
+- Each instance gets its own `data_dir/tr_session_{name}/` session directory (pytr cookies/credentials). 2FA marker files live at the data root: `data_dir/.tr_2fa_code_{name}` / `data_dir/.tr_2fa_pending_{name}`.
 - All instances share a single `data_dir/sync.db` (the shared database; see Database schema section).
 - Global `telegram_*` and `allow_insecure_ssl` are inherited by all instances.
 - `sync.*` fields (`wallet_api_key`, `lookback_days`, `category_strategy`, `schedule`) are global
@@ -470,15 +470,20 @@ image publish workflows.
 `/app/data` (mounted from host) contains:
 - `sync.db` — shared SQLite database for all instances with `processed_events`, `auth_state`, and `sync_runs` tables
 - `sync.log` — rotating log file shared by all services (bot, sync, backup); written to `{DATA_DIR}/sync.log`
-- `sync/{name}/` — pytr session/cookie files per instance (login state)
-- `sync/{name}/.tr_2fa_pending` — transient marker created by `TelegramCodeProvider` while waiting for a code
-- `sync/{name}/.tr_2fa_code` — transient file where `submit-code` drops the authenticator code
+- `tr_session_{name}/` — pytr session/cookie files per instance (login state); one flat directory per instance at the data root
+- `.tr_2fa_pending_{name}` — transient marker created by `TelegramCodeProvider` while waiting for a code (one per instance)
+- `.tr_2fa_code_{name}` — transient file where `submit-code` drops the authenticator code (one per instance)
 - `backups/monthly/` — monthly JSON snapshots (permanent)
 - `backups/yearly/` — yearly JSON snapshots (permanent)
 
 **Legacy layout** (pre-issue #173): each instance had its own `sync/{name}/sync.db`.  All production
 deployments were migrated to the shared `sync.db` as part of #173.  The old per-instance files can be
 deleted manually if still present.
+
+**Legacy layout** (pre-issue #174): session and 2FA files lived under `sync/{name}/`.  Existing
+deployments must move each `sync/{name}/cookies.txt` to `tr_session_{name}/cookies.txt` (and similarly
+for `credentials.json`) and move the 2FA marker files to the new instance-suffixed paths at the data
+root — otherwise the instance will require a fresh login on next run.
 
 ---
 

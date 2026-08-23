@@ -144,7 +144,8 @@ def test_telegram_provider_ignores_empty_file(tmp_path):
 
 def test_select_returns_terminal_when_tty(tmp_path):
     provider = select_code_provider(
-        data_dir=tmp_path,
+        code_file=tmp_path / ".tr_2fa_code_david",
+        pending_file=tmp_path / ".tr_2fa_pending_david",
         notifier=MagicMock(),
         instance="david",
         isatty=True,
@@ -156,7 +157,8 @@ def test_select_returns_terminal_when_tty(tmp_path):
 def test_select_returns_telegram_when_no_tty_but_configured(tmp_path):
     notifier = MagicMock()
     provider = select_code_provider(
-        data_dir=tmp_path,
+        code_file=tmp_path / ".tr_2fa_code_david",
+        pending_file=tmp_path / ".tr_2fa_pending_david",
         notifier=notifier,
         instance="david",
         isatty=False,
@@ -168,7 +170,8 @@ def test_select_returns_telegram_when_no_tty_but_configured(tmp_path):
 def test_select_telegram_prompt_calls_notifier_with_instance(tmp_path):
     notifier = MagicMock()
     provider = select_code_provider(
-        data_dir=tmp_path,
+        code_file=tmp_path / ".tr_2fa_code_david",
+        pending_file=tmp_path / ".tr_2fa_pending_david",
         notifier=notifier,
         instance="david",
         isatty=False,
@@ -179,19 +182,22 @@ def test_select_telegram_prompt_calls_notifier_with_instance(tmp_path):
 
 
 def test_select_telegram_uses_expected_code_file_path(tmp_path):
+    code_file = tmp_path / ".tr_2fa_code_david"
     provider = select_code_provider(
-        data_dir=tmp_path,
+        code_file=code_file,
+        pending_file=tmp_path / ".tr_2fa_pending_david",
         notifier=MagicMock(),
         instance="david",
         isatty=False,
         telegram_configured=True,
     )
-    assert provider._code_file == tmp_path / ".tr_2fa_code"
+    assert provider._code_file == code_file
 
 
 def test_select_returns_none_when_no_tty_and_not_configured(tmp_path):
     provider = select_code_provider(
-        data_dir=tmp_path,
+        code_file=tmp_path / ".tr_2fa_code_david",
+        pending_file=tmp_path / ".tr_2fa_pending_david",
         notifier=MagicMock(),
         instance="david",
         isatty=False,
@@ -274,7 +280,8 @@ def test_select_telegram_wires_on_timeout_to_notifier(tmp_path):
     """select_code_provider must wire on_timeout to notifier.login_code_timeout(instance)."""
     notifier = MagicMock()
     provider = select_code_provider(
-        data_dir=tmp_path,
+        code_file=tmp_path / ".tr_2fa_code_david",
+        pending_file=tmp_path / ".tr_2fa_pending_david",
         notifier=notifier,
         instance="david",
         isatty=False,
@@ -352,3 +359,120 @@ def test_telegram_provider_clears_pending_marker_on_timeout(tmp_path):
         provider.get_code()
 
     assert not pending_file.exists()
+
+
+# ---------------------------------------------------------------------------
+# TelegramCodeProvider — explicit pending_file parameter (issue #174)
+# ---------------------------------------------------------------------------
+
+
+def test_telegram_provider_uses_explicit_pending_file(tmp_path):
+    """When pending_file is passed explicitly, it must be used instead of the default."""
+    code_file = tmp_path / ".tr_2fa_code_alice"
+    explicit_pending = tmp_path / ".tr_2fa_pending_alice"
+    marker_seen: list[bool] = []
+
+    def _sleep(_seconds: float) -> None:
+        marker_seen.append(explicit_pending.exists())
+        code_file.write_text("999999")
+
+    provider = TelegramCodeProvider(
+        code_file,
+        MagicMock(),
+        pending_file=explicit_pending,
+        timeout=100.0,
+        poll_interval=1.0,
+        sleep=_sleep,
+        now=_fake_clock(),
+    )
+
+    provider.get_code()
+    assert any(marker_seen), "Explicit pending marker was never observed"
+    assert not explicit_pending.exists()
+
+
+def test_telegram_provider_explicit_pending_file_does_not_collide_with_default(
+    tmp_path,
+):
+    """Explicit pending_file must not touch the default derived pending path."""
+    code_file = tmp_path / ".tr_2fa_code_alice"
+    explicit_pending = tmp_path / ".tr_2fa_pending_alice"
+    default_pending = code_file.parent / PENDING_FILENAME  # would be .tr_2fa_pending
+
+    def _sleep(_s: float) -> None:
+        code_file.write_text("123456")
+
+    TelegramCodeProvider(
+        code_file,
+        MagicMock(),
+        pending_file=explicit_pending,
+        timeout=100.0,
+        poll_interval=1.0,
+        sleep=_sleep,
+        now=_fake_clock(),
+    ).get_code()
+
+    assert not default_pending.exists(), "Default pending file must not be created"
+
+
+# ---------------------------------------------------------------------------
+# select_code_provider — flat file paths (issue #174)
+# ---------------------------------------------------------------------------
+
+
+def test_select_code_provider_uses_provided_code_file(tmp_path):
+    """select_code_provider must pass code_file directly to TelegramCodeProvider."""
+    code_file = tmp_path / ".tr_2fa_code_alice"
+    pending_file = tmp_path / ".tr_2fa_pending_alice"
+    provider = select_code_provider(
+        code_file=code_file,
+        pending_file=pending_file,
+        notifier=MagicMock(),
+        instance="alice",
+        isatty=False,
+        telegram_configured=True,
+    )
+    assert isinstance(provider, TelegramCodeProvider)
+    assert provider._code_file == code_file
+
+
+def test_select_code_provider_uses_provided_pending_file(tmp_path):
+    """select_code_provider must pass pending_file directly to TelegramCodeProvider."""
+    code_file = tmp_path / ".tr_2fa_code_alice"
+    pending_file = tmp_path / ".tr_2fa_pending_alice"
+    provider = select_code_provider(
+        code_file=code_file,
+        pending_file=pending_file,
+        notifier=MagicMock(),
+        instance="alice",
+        isatty=False,
+        telegram_configured=True,
+    )
+    assert isinstance(provider, TelegramCodeProvider)
+    assert provider._pending_file == pending_file
+
+
+def test_select_code_provider_returns_terminal_when_isatty(tmp_path):
+    """When isatty=True, select_code_provider must return TerminalCodeProvider."""
+    provider = select_code_provider(
+        code_file=tmp_path / ".tr_2fa_code_x",
+        pending_file=tmp_path / ".tr_2fa_pending_x",
+        notifier=MagicMock(),
+        instance="x",
+        isatty=True,
+        telegram_configured=True,
+    )
+    assert isinstance(provider, TerminalCodeProvider)
+
+
+def test_select_code_provider_returns_none_when_no_tty_no_telegram(tmp_path):
+    """When isatty=False and telegram_configured=False, must return None."""
+    provider = select_code_provider(
+        code_file=tmp_path / ".tr_2fa_code_x",
+        pending_file=tmp_path / ".tr_2fa_pending_x",
+        notifier=MagicMock(),
+        instance="x",
+        isatty=False,
+        telegram_configured=False,
+    )
+    assert provider is None

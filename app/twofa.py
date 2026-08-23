@@ -53,6 +53,7 @@ class TelegramCodeProvider:
         code_file: Path | str,
         prompt: Callable[[], Any],
         *,
+        pending_file: Path | str | None = None,
         timeout: float = _DEFAULT_TIMEOUT,
         poll_interval: float = _DEFAULT_POLL_INTERVAL,
         sleep: Callable[[float], Any] = time.sleep,
@@ -60,7 +61,11 @@ class TelegramCodeProvider:
         on_timeout: Callable[[], Any] | None = None,
     ) -> None:
         self._code_file = Path(code_file)
-        self._pending_file = self._code_file.parent / PENDING_FILENAME
+        self._pending_file = (
+            Path(pending_file)
+            if pending_file is not None
+            else self._code_file.parent / PENDING_FILENAME
+        )
         self._prompt = prompt
         self._timeout = timeout
         self._poll_interval = poll_interval
@@ -110,7 +115,8 @@ class TelegramCodeProvider:
 
 def select_code_provider(
     *,
-    data_dir: Path,
+    code_file: Path,
+    pending_file: Path,
     notifier: Any,
     instance: str,
     isatty: bool,
@@ -120,10 +126,10 @@ def select_code_provider(
     if isatty:
         return TerminalCodeProvider()
     if telegram_configured:
-        code_file = data_dir / CODE_FILENAME
         return TelegramCodeProvider(
             code_file,
             lambda: notifier.login_code_request(instance),
+            pending_file=pending_file,
             on_timeout=lambda: notifier.login_code_timeout(instance),
         )
     return None
