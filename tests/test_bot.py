@@ -1617,6 +1617,77 @@ def test_read_todays_logs_single_line_exceeds_reduced_limit_after_truncation(tmp
     )
 
 
+def test_read_todays_logs_exactly_fitting_multiline_not_trimmed(tmp_path):
+    """Multiple lines whose joined length equals _MAX_LOG_CHARS must not be trimmed.
+
+    Over-counting bug: total_chars was ``sum(len) + N`` but the actual join length is
+    ``sum(len) + (N-1)`` — the phantom +1 for the last line forced unnecessary trimming.
+    """
+    import datetime as dt
+
+    from app.bot import _MAX_LOG_CHARS, _TRUNCATION_MARKER, _read_todays_logs
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+
+    # Two synthetic lines (NOTSET level accepted with min_level_num=0) whose join
+    # is exactly _MAX_LOG_CHARS.  Format: today_str + body so startswith() matches.
+    # len(line1) + 1 + len(line2) == _MAX_LOG_CHARS
+    # Use equal halves: each = (_MAX_LOG_CHARS - 1) // 2
+    half = (_MAX_LOG_CHARS - 1) // 2
+    line1 = today + "a" * (half - len(today))
+    line2 = today + "b" * (_MAX_LOG_CHARS - 1 - half - len(today))
+    assert len(line1) + 1 + len(line2) == _MAX_LOG_CHARS
+
+    (log_dir / "sync.log").write_text(line1 + "\n" + line2)
+
+    result = _read_todays_logs(
+        log_dir / "sync.log", today, 0
+    )  # 0 = NOTSET, accepts any line
+    assert _TRUNCATION_MARKER not in result, (
+        "Lines fitting exactly within _MAX_LOG_CHARS must not be trimmed"
+    )
+    assert len(result) == _MAX_LOG_CHARS
+
+
+def test_read_todays_logs_subsequent_lines_after_single_line_clamp_stay_within_limit(
+    tmp_path,
+):
+    """After single-line clamping sets truncated=True, subsequent lines must not
+    push marker+body beyond _MAX_LOG_CHARS.
+
+    Bug: single-line clamp did not reduce ``limit``, so _trim_excess_lines allowed
+    the body to grow to _MAX_LOG_CHARS before trimming — marker+body exceeded the cap.
+
+    A short subsequent line (len ≤ 18) stays with the clamped giant inside the
+    buggy limit=3800, producing marker(20)+giant[:3780]+newline+short > 3800.
+    """
+    import datetime as dt
+
+    from app.bot import _MAX_LOG_CHARS, _read_todays_logs
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+
+    # Giant line: stripped length > _MAX_LOG_CHARS — triggers single-line clamp.
+    giant = today + "g" * (_MAX_LOG_CHARS - len(today) + 1)
+    # Short subsequent line: len = 18 (today prefix + 8 extra chars).
+    # With the bug, clamped_giant(3780) stays in deque alongside this line because
+    # total_chars (3780+1 with over-count phantom, or 3780 fixed) + 19 = 3799/3799 ≤ 3800.
+    # The buggy final result is marker(20)+3780+newline+short = 3819 > 3800.
+    short = today + "s" * (18 - len(today))
+    assert len(short) == 18
+
+    (log_dir / "sync.log").write_text(giant + "\n" + short)
+
+    result = _read_todays_logs(log_dir / "sync.log", today, 0)  # 0 = NOTSET
+    assert len(result) <= _MAX_LOG_CHARS, (
+        f"result length {len(result)} exceeds _MAX_LOG_CHARS={_MAX_LOG_CHARS}"
+    )
+
+
 def test_trim_excess_lines_drops_oldest_and_sets_truncated():
     """_trim_excess_lines removes oldest lines until total fits within limit."""
     import collections

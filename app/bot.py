@@ -234,24 +234,26 @@ def _read_todays_logs(log_file: Path, today_str: str, min_level_num: int) -> str
             if _log_line_level(line) < min_level_num:
                 continue
             stripped = line.rstrip()
+            # Add the joining newline for every line except the first so that
+            # total_chars always equals len("\n".join(lines)) exactly.
+            total_chars += len(stripped) + (1 if lines else 0)
             lines.append(stripped)
-            total_chars += len(stripped) + 1  # +1 for the joining newline
             total_chars, truncated, limit = _trim_excess_lines(
                 lines, total_chars, truncated, limit
             )
             # Single oversized line: hard-truncate so marker + body stays within
-            # _MAX_LOG_CHARS.  Use len(lines[0]) directly (not total_chars, which
-            # carries a phantom +1 newline) and derive the body budget from whether
-            # the truncation marker will be prepended.
+            # _MAX_LOG_CHARS.  Use len(lines[0]) directly (total_chars equals the
+            # actual join length after the over-counting fix) and derive the body
+            # budget from whether the truncation marker will be prepended.
             if len(lines) == 1:
                 body_limit = _MAX_LOG_CHARS - (
                     _TRUNCATION_MARKER_LEN if truncated else 0
                 )
                 if len(lines[0]) > body_limit:
                     truncated = True
-                    clamped = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
-                    lines[0] = lines[0][:clamped]
-                    total_chars = clamped + 1
+                    limit = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+                    lines[0] = lines[0][:limit]
+                    total_chars = limit
     text = "\n".join(lines)
     if truncated:
         text = _TRUNCATION_MARKER + text
