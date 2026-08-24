@@ -1,0 +1,39 @@
+app/backup.py
+  s_502793ed8d70a6::t_7eb782dbe70076 21,91,112,145,176
+app/bot.py
+  s_502793ed8d70a6::t_0b2c2124458e54 361,577,724-725,956,973,975,1028-1029,1040-1041,1044-1045,1048-1049,1052-1053,1066
+app/persistence.py
+  s_502793ed8d70a6::t_4b4c8126630e9b 219,223,227,235,314
+app/sync_runner.py
+  s_327d51b0e15fec::t_493ed140db59cb 36-37,40,56,227,266-268,345,437,464,527,543,574,600,671-672,677
+app/wallet_client.py
+  s_327d51b0e15fec::t_34a54d58d7460c 82,118-120,129,132,135,138,157
+tests/test_main.py
+  s_327d51b0e15fec::t_dcc9f2eec508ca 83,316
+tests/test_sync_runner.py
+  s_327d51b0e15fec::t_5854860a2d40ae 1319,1332,1349,1369,1400,1429
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "13678029b677a549c73f7cad47655c1f548093d8",
+  "prompts": {},
+  "sessions": {
+    "s_327d51b0e15fec": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fca3386c9ffe4Sp3msisgCtK25",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    },
+    "s_502793ed8d70a6": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fca2bab4effeiWTUKRPeGD7mq5",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
