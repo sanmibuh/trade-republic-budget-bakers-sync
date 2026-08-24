@@ -1,0 +1,19 @@
+tests/test_logging_setup.py
+  s_470c1bb6830aa8::t_229008e8cf3a37 247-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "f7c52b6f3e38a4c1074072017c97388c2844fb8d",
+  "prompts": {},
+  "sessions": {
+    "s_470c1bb6830aa8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fcf5330c3ffep410vNvr0UxP0k",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
