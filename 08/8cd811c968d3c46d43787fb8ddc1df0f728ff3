@@ -1,0 +1,21 @@
+tests/test_backup.py
+  s_470c1bb6830aa8::t_19994bd2f6d589 182-202,271-290
+tests/test_notifier.py
+  s_470c1bb6830aa8::t_cefa6e78b11a0a 156-170,178-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "088cd811c968d3c46d43787fb8ddc1df0f728ff3",
+  "prompts": {},
+  "sessions": {
+    "s_470c1bb6830aa8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fcf5330c3ffep410vNvr0UxP0k",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
