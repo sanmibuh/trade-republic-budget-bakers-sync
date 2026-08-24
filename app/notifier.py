@@ -136,6 +136,7 @@ class Notifier:
         )
 
     def login_required(self) -> bool:
+        log.info("Login required — initiating 2FA flow for owner: %s", self._owner_name)
         return self._send(
             self._header("🔐", "Login Required")
             + "No saved session found\\. A new 2FA login has been initiated\\.\n"
@@ -172,6 +173,7 @@ class Notifier:
         )
 
     def login_success(self) -> bool:
+        log.info("Login successful — session saved for owner: %s", self._owner_name)
         return self._send(
             self._header("✅", "Login Successful")
             + "Session saved\\. Future syncs will run automatically\\."

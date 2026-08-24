@@ -143,12 +143,19 @@ def run_monthly(
     month: int,
 ) -> dict:
     """Generate (or overwrite) a monthly backup. Returns counts dict."""
+    log.info("Backup starting: mode=monthly period=%04d-%02d", year, month)
     path = _monthly_path(data_dir, year, month)
     date_from, date_to = _month_range(year, month)
     payload = _fetch_snapshot(client, date_from, date_to, "monthly")
     _write_json(path, payload)
 
     counts = _payload_counts(payload)
+    log.info(
+        "Backup complete: mode=monthly period=%04d-%02d records=%d",
+        year,
+        month,
+        counts["records"],
+    )
     notifier.backup_complete(
         mode="monthly",
         period=f"{year:04d}-{month:02d}",
@@ -167,6 +174,7 @@ def run_yearly(
     year: int,
 ) -> dict:
     """Generate (or overwrite) a yearly backup and clean up covered monthly files."""
+    log.info("Backup starting: mode=yearly period=%d", year)
     path = _yearly_path(data_dir, year)
     date_from, date_to = _year_range(year)
     payload = _fetch_snapshot(client, date_from, date_to, "yearly")
@@ -183,6 +191,11 @@ def run_yearly(
 
     counts = _payload_counts(payload)
     counts["monthly_removed"] = removed
+    log.info(
+        "Backup complete: mode=yearly period=%d records=%d",
+        year,
+        counts["records"],
+    )
     notifier.backup_complete(
         mode="yearly",
         period=str(year),
