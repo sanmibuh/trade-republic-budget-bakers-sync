@@ -216,15 +216,15 @@ class EventRepository:
         ).fetchone()
         return row[0] if row else None
 
-    def is_processed(self, event_id: str) -> bool:
+    def is_processed(self, eid: str) -> bool:
         """Return True if the given event_id has been marked as processed."""
         row = self._conn.execute(
             "SELECT 1 FROM processed_events WHERE event_id = ? AND instance = ?",
-            (event_id, self._instance),
+            (eid, self._instance),
         ).fetchone()
         return row is not None
 
-    def get_raw(self, event_id: str) -> str | None:
+    def get_raw(self, eid: str) -> str | None:
         """Return the stored raw payload for the given event_id, or None if not found.
 
         The value is normally valid JSON, but may be a plain ``str(event)`` fallback
@@ -232,7 +232,7 @@ class EventRepository:
         """
         row = self._conn.execute(
             "SELECT raw FROM processed_events WHERE event_id = ? AND instance = ?",
-            (event_id, self._instance),
+            (eid, self._instance),
         ).fetchone()
         return row[0] if row else None
 
@@ -311,7 +311,7 @@ class EventRepository:
         )
         self._conn.commit()
 
-    def get_sync_run(self, instance: str) -> dict | None:
+    def get_sync_run(self, instance: str) -> dict[str, Any] | None:
         """Return the last sync run result for *instance*, or ``None`` if absent."""
         row = self._conn.execute(
             "SELECT status, ran_at, saved, failed, excluded "

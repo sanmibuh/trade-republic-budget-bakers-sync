@@ -7,7 +7,6 @@ from app.config import Config
 from app.notifier import Notifier
 from app.persistence import EventRepository
 from app.sync_runner import (  # noqa: F401 — re-exported for backward compatibility
-    _SYNC_DB,
     AuthenticationError,
     SyncRunner,
     _Batch,
@@ -61,14 +60,14 @@ def run(cfg: Config) -> int:
 
         recent_events = filter_by_lookback(events, since)
         new_events = repo.filter_unprocessed(recent_events)
-        skipped_count = runner._notify_fetch_summary(since, recent_events, new_events)
+        skipped_count = runner.notify_fetch_summary(since, recent_events, new_events)
 
         counts = _SyncCounts()
         try:
             wallet_client = WalletClient(api_key=cfg.wallet_api_key)
             batch = runner.build_batch(new_events, repo, wallet_client=wallet_client)
             counts.excluded = batch.excluded_count  # preserved for finally on exception
-            counts = runner._submit_batch(
+            counts = runner.submit_batch(
                 batch, wallet_client, repo, new_events=new_events
             )
             log.info(

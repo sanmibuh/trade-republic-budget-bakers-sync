@@ -4,6 +4,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 # Default data directory.
 _DEFAULT_DATA_DIR = "/app/data"
@@ -189,7 +190,7 @@ def _parse_yaml_bool(field_name: str, value: object) -> bool:
     )
 
 
-def _validate_instance_name(raw_inst: dict, idx: int) -> str:
+def _validate_instance_name(raw_inst: dict[str, Any], idx: int) -> str:
     """Extract, coerce, strip, and validate the instance name from a raw dict.
 
     Allowed characters: ASCII alphanumerics, hyphens, underscores, and dots
@@ -197,8 +198,6 @@ def _validate_instance_name(raw_inst: dict, idx: int) -> str:
     - filesystem paths (no separators or control chars)
     - shell arguments in cron job lines (no metacharacters)
     """
-    import re
-
     raw_name = raw_inst.get("name")
     name = str(raw_name).strip() if raw_name is not None else ""
     if not name:
@@ -213,20 +212,20 @@ def _validate_instance_name(raw_inst: dict, idx: int) -> str:
     return name
 
 
-def _parse_positive_int(name: str, field: str, raw: object, default: int) -> int:
+def _parse_positive_int(name: str, field_name: str, raw: object, default: int) -> int:
     """Parse *raw* as a positive integer, raising a descriptive ``ValueError`` on failure."""
     try:
         value = int(raw if raw is not None else default)
     except (ValueError, TypeError) as err:
         raise ValueError(
-            f"instance '{name}': {field} must be an integer, got: {raw!r}"
+            f"instance '{name}': {field_name} must be an integer, got: {raw!r}"
         ) from err
     if value <= 0:
-        raise ValueError(f"instance '{name}': {field} must be a positive integer")
+        raise ValueError(f"instance '{name}': {field_name} must be a positive integer")
     return value
 
 
-def _parse_instance_numerics(name: str, raw_inst: dict) -> tuple[int, int]:
+def _parse_instance_numerics(name: str, raw_inst: dict[str, Any]) -> tuple[int, int]:
     """Parse and validate lookback_days and dedup_ttl_days for an instance."""
     lookback_days = _parse_positive_int(
         name, "lookback_days", raw_inst.get("lookback_days"), default=7
@@ -237,7 +236,7 @@ def _parse_instance_numerics(name: str, raw_inst: dict) -> tuple[int, int]:
     return lookback_days, dedup_ttl_days
 
 
-def _parse_instance_labels(name: str, raw_inst: dict) -> dict[str, str]:
+def _parse_instance_labels(name: str, raw_inst: dict[str, Any]) -> dict[str, str]:
     """Parse and validate the labels mapping for an instance.
 
     Keys and values are coerced to ``str``; null or blank values are rejected.
@@ -264,7 +263,7 @@ def _parse_instance_labels(name: str, raw_inst: dict) -> dict[str, str]:
 
 def _resolve_category_strategy(
     name: str,
-    raw_inst: dict,
+    raw_inst: dict[str, Any],
     global_category_strategy: str | None,
 ) -> str:
     """Resolve ``category_strategy`` for an instance with global inheritance and validation.
@@ -286,7 +285,7 @@ def _resolve_category_strategy(
 
 def _resolve_instance_wallet_key(
     name: str,
-    raw_inst: dict,
+    raw_inst: dict[str, Any],
     global_wallet_api_key: str | None,
 ) -> str:
     """Resolve ``wallet_api_key`` for a single instance.
@@ -377,7 +376,7 @@ def _parse_instance(
     )
 
 
-def _parse_global_wallet_key(raw_sync: dict) -> str | None:
+def _parse_global_wallet_key(raw_sync: dict[str, Any]) -> str | None:
     """Return ``sync.wallet_api_key`` stripped, or ``None`` if the field is absent.
 
     Raises ``ValueError`` when the field is present but blank or null.
@@ -394,7 +393,7 @@ def _parse_global_wallet_key(raw_sync: dict) -> str | None:
     return key
 
 
-def _parse_global_lookback(raw_sync: dict) -> int | None:
+def _parse_global_lookback(raw_sync: dict[str, Any]) -> int | None:
     """Return ``sync.lookback_days`` as a positive integer, or ``None`` if absent.
 
     Raises ``ValueError`` for non-integer or non-positive values.
@@ -413,7 +412,7 @@ def _parse_global_lookback(raw_sync: dict) -> int | None:
     return value
 
 
-def _parse_global_category(raw_sync: dict) -> str | None:
+def _parse_global_category(raw_sync: dict[str, Any]) -> str | None:
     """Return ``sync.category_strategy`` normalized to lowercase, or ``None`` if absent.
 
     Raises ``ValueError`` when the value is blank or not in
@@ -529,8 +528,8 @@ def _validate_cron_schedule(field_name: str, value: str) -> None:
 
 
 def _parse_sync_section(
-    raw_sync: dict,
-) -> tuple[list, str | None, int | None, str | None, str | None]:
+    raw_sync: dict[str, Any],
+) -> tuple[list[Any], str | None, int | None, str | None, str | None]:
     """Parse the ``sync:`` mapping and return its five components.
 
     Returns a tuple of:

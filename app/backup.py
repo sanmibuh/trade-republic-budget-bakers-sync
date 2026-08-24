@@ -18,6 +18,7 @@ import logging
 import tempfile
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 from app.notifier import Notifier
 from app.wallet_client import WalletClient
@@ -87,7 +88,7 @@ def _write_json(path: Path, payload: dict) -> None:
     log.info("Written %s", path)
 
 
-def _payload_counts(payload: dict) -> dict[str, int]:
+def _payload_counts(payload: dict[str, Any]) -> dict[str, int]:
     """Extract resource counts from a snapshot payload."""
     return {
         "records": len(payload["records"]),
@@ -108,7 +109,7 @@ def _fetch_snapshot(
     date_from: str,
     date_to: str,
     mode: str,
-) -> dict:
+) -> dict[str, Any]:
     """Fetch all resources for the given period and return the backup payload."""
     log.info("Fetching snapshot mode=%s %s → %s", mode, date_from, date_to)
     accounts = client.get_accounts()
@@ -141,7 +142,7 @@ def run_monthly(
     data_dir: Path,
     year: int,
     month: int,
-) -> dict:
+) -> dict[str, int]:
     """Generate (or overwrite) a monthly backup. Returns counts dict."""
     log.info("Backup starting: mode=monthly period=%04d-%02d", year, month)
     path = _monthly_path(data_dir, year, month)
@@ -172,7 +173,7 @@ def run_yearly(
     notifier: Notifier,
     data_dir: Path,
     year: int,
-) -> dict:
+) -> dict[str, int]:
     """Generate (or overwrite) a yearly backup and clean up covered monthly files."""
     log.info("Backup starting: mode=yearly period=%d", year)
     path = _yearly_path(data_dir, year)

@@ -33,11 +33,11 @@ except Exception:  # pragma: no cover
     class AuthenticationError(Exception):  # type: ignore[no-redef]  # pragma: no cover
         """Sentinel: raised only by pytr when it IS installed."""
 
+        def __init__(self, message: str = "") -> None:  # pragma: no cover
+            super().__init__(message)
+
 
 log = logging.getLogger(__name__)
-
-_SYNC_DB = "sync.db"
-
 
 # ---------------------------------------------------------------------------
 # Result value objects
@@ -53,7 +53,7 @@ class _SyncCounts:
 
 @dataclass
 class _Batch:
-    records: list[dict]
+    records: list[dict[str, Any]]
     event_record_indices: list[list[int]]
     excluded_count: int
     categorizer: HistoryCategorizer | None = None
@@ -224,7 +224,7 @@ class SyncRunner:
         provided, a :class:`~app.categorizer.HistoryCategorizer` is used to
         look up a category for each record based on its ``note``.
         """
-        all_records: list[dict] = []
+        all_records: list[dict[str, Any]] = []
         event_record_indices: list[list[int]] = [[] for _ in new_events]
         excluded_count = 0
 
@@ -263,7 +263,9 @@ class SyncRunner:
         return _Batch(all_records, event_record_indices, excluded_count, categorizer)
 
     @staticmethod
-    def _apply_category(recs: list[dict], categorizer: HistoryCategorizer) -> None:
+    def _apply_category(
+        recs: list[dict[str, Any]], categorizer: HistoryCategorizer
+    ) -> None:
         """Look up a category for *recs* via *categorizer* and stamp it on each record.
 
         Uses the ``note`` of the first record as the lookup key — all sub-records
@@ -340,7 +342,7 @@ class SyncRunner:
         self,
         event: dict[str, Any],
         record_indices: list[int],
-        results_by_index: dict[int, dict],
+        results_by_index: dict[int, dict[str, Any]],
         repo: EventRepository,
     ) -> tuple[int, int]:
         """Process the API result for one event.
@@ -432,7 +434,7 @@ class SyncRunner:
     # run() orchestration helpers
     # ------------------------------------------------------------------
 
-    def _notify_fetch_summary(
+    def notify_fetch_summary(
         self,
         since: datetime,
         recent_events: list[dict[str, Any]],
@@ -459,7 +461,7 @@ class SyncRunner:
         )
         return skipped_count
 
-    def _submit_batch(
+    def submit_batch(
         self,
         batch: _Batch,
         wallet_client: WalletClient,
@@ -522,7 +524,7 @@ class SyncRunner:
     def _resync_put_single(
         self,
         wid: str,
-        record: dict,
+        record: dict[str, Any],
         event: dict[str, Any],
         wallet_client: WalletClient,
     ) -> tuple[bool, str]:
@@ -538,7 +540,7 @@ class SyncRunner:
 
     def _resync_post_extra(
         self,
-        record: dict,
+        record: dict[str, Any],
         event: dict[str, Any],
         wallet_client: WalletClient,
     ) -> tuple[bool, str]:
@@ -569,7 +571,7 @@ class SyncRunner:
     def _resync_put_records(
         self,
         event: dict[str, Any],
-        recs: list[dict],
+        recs: list[dict[str, Any]],
         existing_ids: list[str],
         wallet_client: WalletClient,
     ) -> tuple[bool, list[str]]:
@@ -595,7 +597,7 @@ class SyncRunner:
     def _resync_post_records(
         self,
         event: dict[str, Any],
-        recs: list[dict],
+        recs: list[dict[str, Any]],
         wallet_client: WalletClient,
     ) -> tuple[bool, str | None]:
         """POST all records for an event that has no prior wallet ID.
@@ -666,11 +668,13 @@ class SyncRunner:
             return 0, 1, 0
 
         existing_ids = self._parse_existing_ids(repo.get_wallet_record_id(event))
+        failed: bool = False
+        wallet_record_id: str | None = None
         if existing_ids:
             failed, new_ids = self._resync_put_records(
                 event, recs, existing_ids, wallet_client
             )
-            wallet_record_id: str | None = ",".join(new_ids) if new_ids else None
+            wallet_record_id = ",".join(new_ids) if new_ids else None
         else:
             failed, wallet_record_id = self._resync_post_records(
                 event, recs, wallet_client
