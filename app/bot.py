@@ -184,7 +184,8 @@ def _log_line_level(line: str) -> int:
     parts = line.split(None, 3)
     if len(parts) < 3:
         return logging.NOTSET
-    return getattr(logging, parts[2], logging.NOTSET)
+    level = logging.getLevelName(parts[2].strip())
+    return level if isinstance(level, int) else logging.NOTSET
 
 
 def _trim_excess_lines(

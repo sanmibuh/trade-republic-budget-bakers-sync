@@ -1871,6 +1871,8 @@ def test_log_line_level_returns_notset_for_malformed_lines():
     assert _log_line_level("") == _logging.NOTSET
     assert _log_line_level("continuation line without a timestamp") == _logging.NOTSET
     assert _log_line_level("2026-08-24 10:00:00") == _logging.NOTSET  # only 2 parts
+    # third token matches a logging attribute that is not an int (e.g. a callable)
+    assert _log_line_level("2026-08-24 10:00:00 getLogger rest") == _logging.NOTSET
 
 
 # ---------------------------------------------------------------------------
