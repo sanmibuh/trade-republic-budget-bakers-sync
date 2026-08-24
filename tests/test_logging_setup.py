@@ -115,11 +115,14 @@ _NOISY_LOGGERS = ("httpx", "telegram", "hpack")
 
 
 def test_setup_logging_suppresses_noisy_library_loggers(tmp_path):
-    """httpx / telegram / hpack loggers must be set to WARNING after setup_logging."""
+    """httpx / telegram / hpack loggers must be raised to WARNING after setup_logging."""
     root = logging.getLogger()
     before = set(root.handlers)
     original_levels = {name: logging.getLogger(name).level for name in _NOISY_LOGGERS}
     try:
+        # Start from a known low level so the raise-to-WARNING is always exercised.
+        for name in _NOISY_LOGGERS:
+            logging.getLogger(name).setLevel(logging.DEBUG)
         setup_logging(tmp_path)
         for name in _NOISY_LOGGERS:
             assert logging.getLogger(name).level == logging.WARNING, (
@@ -135,13 +138,16 @@ def test_setup_logging_suppresses_noisy_library_loggers(tmp_path):
 
 
 def test_configure_logging_suppresses_noisy_library_loggers():
-    """httpx / telegram / hpack loggers must be set to WARNING after configure_logging."""
+    """httpx / telegram / hpack loggers must be raised to WARNING after configure_logging."""
     root = logging.getLogger()
     before = set(root.handlers)
     original_levels = {name: logging.getLogger(name).level for name in _NOISY_LOGGERS}
     try:
         for h in root.handlers[:]:
             root.removeHandler(h)
+        # Start from a known low level so the raise-to-WARNING is always exercised.
+        for name in _NOISY_LOGGERS:
+            logging.getLogger(name).setLevel(logging.DEBUG)
         configure_logging()
         for name in _NOISY_LOGGERS:
             assert logging.getLogger(name).level == logging.WARNING, (
