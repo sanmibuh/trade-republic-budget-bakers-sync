@@ -1281,11 +1281,11 @@ def test_handle_update_ignores_unknown_type(tmp_path):
 
 
 def test_cmd_logs_launches_fetch_in_thread(tmp_path):
-    """_cmd_logs must launch _fetch_and_send_logs in a background thread (no picker)."""
+    """_cmd_logs with an explicit level must launch _fetch_and_send_logs in a background thread."""
     bot = _bot(tmp_path=tmp_path)
     with patch("app.bot.threading.Thread") as mock_thread:
         mock_thread.return_value.start = MagicMock()
-        bot._cmd_logs([])
+        bot._cmd_logs(["info"])
     mock_thread.assert_called_once()
     assert mock_thread.call_args.kwargs["target"] == bot._fetch_and_send_logs
 
@@ -1695,7 +1695,8 @@ def test_fetch_and_send_logs_header_contains_level_label(tmp_path):
     with patch.object(bot, "_send_message") as mock_send:
         bot._fetch_and_send_logs(min_level="warning")
 
-    header = mock_send.call_args.args[0].split(today)[0]
+    # Header is the text before the first blank line (double newline separator).
+    header = mock_send.call_args.args[0].split("\n\n")[0]
     assert "WARNING" in header
 
 

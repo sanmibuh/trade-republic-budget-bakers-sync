@@ -96,6 +96,7 @@ __all__ = [
     "_format_sync_timestamp",
     "_last_sync_summary_direct",
     "_log_line_level",
+    "_read_todays_logs",
     "run",
 ]
 
@@ -180,6 +181,38 @@ def _log_line_level(line: str) -> int:
     if len(parts) < 3:
         return logging.NOTSET
     return getattr(logging, parts[2], logging.NOTSET)
+
+
+def _read_todays_logs(log_file: Path, today_str: str, min_level_num: int) -> str:
+    """Read and return today's log lines at or above *min_level_num* as a single string.
+
+    Lines from other dates and lines below *min_level_num* are skipped.  When
+    the accumulated text would exceed ``_MAX_LOG_CHARS``, the oldest lines are
+    dropped and a truncation marker is prepended to the result.  Returns an
+    empty string when the file does not exist or contains no matching lines.
+    """
+    if not log_file.exists():
+        return ""
+    lines: collections.deque[str] = collections.deque()
+    total_chars = 0
+    truncated = False
+    with log_file.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if not line.startswith(today_str):
+                continue
+            if _log_line_level(line) < min_level_num:
+                continue
+            stripped = line.rstrip()
+            lines.append(stripped)
+            total_chars += len(stripped) + 1  # +1 for the joining newline
+            while total_chars > _MAX_LOG_CHARS and len(lines) > 1:
+                removed = lines.popleft()
+                total_chars -= len(removed) + 1
+                truncated = True
+    text = "\n".join(lines)
+    if truncated:
+        text = "[... truncated ...]\n" + text
+    return text
 
 
 def _auth_icon(auth: bool | None) -> str:
@@ -903,28 +936,7 @@ class TelegramBot:
         header_plain = f"📋 Logs ({today_str} UTC ≥ {level_label})\n\n"
         min_level_num = _LOG_LEVEL_FILTER.get(min_level, logging.INFO)
         try:
-            if not log_file.exists():
-                text = ""
-            else:
-                lines: collections.deque[str] = collections.deque()
-                total_chars = 0
-                truncated = False
-                with log_file.open(encoding="utf-8", errors="replace") as fh:
-                    for line in fh:
-                        if not line.startswith(today_str):
-                            continue
-                        if _log_line_level(line) < min_level_num:
-                            continue
-                        stripped = line.rstrip()
-                        lines.append(stripped)
-                        total_chars += len(stripped) + 1  # +1 for the joining newline
-                        while total_chars > _MAX_LOG_CHARS and len(lines) > 1:
-                            removed = lines.popleft()
-                            total_chars -= len(removed) + 1
-                            truncated = True
-                text = "\n".join(lines)
-                if truncated:
-                    text = "[... truncated ...]\n" + text
+            text = _read_todays_logs(log_file, today_str, min_level_num)
         except Exception as exc:
             self._send_message(f"❌ Could not read logs: {_esc(str(exc))}")
             return
