@@ -80,6 +80,8 @@ _LOG_LEVEL_FILTER: dict[str, int] = {
     "warning": logging.WARNING,
     "error": logging.ERROR,
 }
+_TRUNCATION_MARKER = "[... truncated ...]\n"
+_TRUNCATION_MARKER_LEN = len(_TRUNCATION_MARKER)
 _LOG_LEVEL_DEFAULT = "info"
 
 __all__ = [
@@ -188,14 +190,19 @@ def _read_todays_logs(log_file: Path, today_str: str, min_level_num: int) -> str
 
     Lines from other dates and lines below *min_level_num* are skipped.  When
     the accumulated text would exceed ``_MAX_LOG_CHARS``, the oldest lines are
-    dropped and a truncation marker is prepended to the result.  Returns an
-    empty string when the file does not exist or contains no matching lines.
+    dropped and a truncation marker is prepended to the result.  Space for the
+    marker is reserved during trimming so the returned string never exceeds
+    ``_MAX_LOG_CHARS``.  Returns an empty string when the file does not exist
+    or contains no matching lines.
     """
     if not log_file.exists():
         return ""
     lines: collections.deque[str] = collections.deque()
     total_chars = 0
     truncated = False
+    # Once truncation starts, reserve space for the marker so the final
+    # string (marker + body) stays within _MAX_LOG_CHARS.
+    limit = _MAX_LOG_CHARS
     with log_file.open(encoding="utf-8", errors="replace") as fh:
         for line in fh:
             if not line.startswith(today_str):
@@ -205,13 +212,15 @@ def _read_todays_logs(log_file: Path, today_str: str, min_level_num: int) -> str
             stripped = line.rstrip()
             lines.append(stripped)
             total_chars += len(stripped) + 1  # +1 for the joining newline
-            while total_chars > _MAX_LOG_CHARS and len(lines) > 1:
+            while total_chars > limit and len(lines) > 1:
                 removed = lines.popleft()
                 total_chars -= len(removed) + 1
-                truncated = True
+                if not truncated:
+                    truncated = True
+                    limit = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
     text = "\n".join(lines)
     if truncated:
-        text = "[... truncated ...]\n" + text
+        text = _TRUNCATION_MARKER + text
     return text
 
 

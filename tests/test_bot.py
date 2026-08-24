@@ -1411,6 +1411,38 @@ def test_fetch_and_send_logs_truncation_preserves_tail_drops_head(tmp_path):
     )
 
 
+def test_fetch_and_send_logs_total_length_stays_within_limit_when_truncated(tmp_path):
+    """_read_todays_logs must return text whose length never exceeds _MAX_LOG_CHARS.
+
+    Before the fix, the truncation marker was prepended *after* trimming, so the
+    returned text could exceed the limit by ``len("[... truncated ...]\\n")``.
+    """
+    import datetime as dt
+
+    from app.bot import _MAX_LOG_CHARS, _read_todays_logs
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    # Each line is slightly under _MAX_LOG_CHARS so a single line fills the budget,
+    # forcing truncation and revealing whether the marker blows the limit.
+    line_body = "x" * (_MAX_LOG_CHARS - 60)
+    log_content = "\n".join(
+        f"{today} 10:00:{i:02d} INFO     app.foo: {line_body}" for i in range(5)
+    )
+    log_file = log_dir / "sync.log"
+    log_file.write_text(log_content)
+
+    import logging as _logging
+
+    result = _read_todays_logs(log_file, today, _logging.INFO)
+    assert result.startswith("[... truncated ...]"), "expected truncation marker"
+    assert len(result) <= _MAX_LOG_CHARS, (
+        f"_read_todays_logs returned {len(result)} chars, exceeds _MAX_LOG_CHARS={_MAX_LOG_CHARS}"
+    )
+
+
 def test_fetch_and_send_logs_opens_log_file_with_utf8_encoding(tmp_path):
     """sync.log is written with UTF-8; reading it must also use UTF-8 explicitly.
 
