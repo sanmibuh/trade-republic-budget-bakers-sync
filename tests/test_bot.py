@@ -1582,6 +1582,33 @@ def test_trim_excess_lines_single_line_not_dropped():
     assert truncated is False  # while condition len>1 never entered
 
 
+def test_trim_excess_lines_reserves_space_relative_to_passed_limit():
+    """_trim_excess_lines must reserve marker space relative to the caller-supplied limit,
+    not relative to the global _MAX_LOG_CHARS constant.
+
+    If the caller passes limit=50, the reduced limit after the first removal must
+    be 50 - _TRUNCATION_MARKER_LEN, not _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN.
+    """
+    import collections
+
+    from app.bot import _TRUNCATION_MARKER_LEN, _trim_excess_lines
+
+    custom_limit = 50
+    # Two lines totalling just over custom_limit, so one removal is triggered.
+    line_a = "a" * 30
+    line_b = "b" * 30
+    lines: collections.deque[str] = collections.deque([line_a, line_b])
+    total_chars = (30 + 1) + (30 + 1)  # 62 > 50
+
+    total_chars, truncated, new_limit = _trim_excess_lines(
+        lines, total_chars, False, custom_limit
+    )
+
+    assert truncated is True
+    # The reduced limit must be relative to custom_limit, not to _MAX_LOG_CHARS.
+    assert new_limit == custom_limit - _TRUNCATION_MARKER_LEN
+
+
 def test_fetch_and_send_logs_unknown_level_normalizes_to_default(tmp_path):
     """_fetch_and_send_logs called with an unknown level must use the default (INFO).
 

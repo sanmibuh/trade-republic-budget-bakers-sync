@@ -205,7 +205,7 @@ def _trim_excess_lines(
         total_chars -= len(removed) + 1
         if not truncated:
             truncated = True
-            limit = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+            limit = limit - _TRUNCATION_MARKER_LEN
     return total_chars, truncated, limit
 
 
@@ -462,7 +462,7 @@ class TelegramBot:
             },
             {
                 "command": "logs",
-                "description": "Show today's logs — choose level (default: INFO)",
+                "description": "Show today's logs — pick a level filter",
             },
             {
                 "command": "resync",
