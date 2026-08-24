@@ -99,6 +99,7 @@ __all__ = [
     "_last_sync_summary_direct",
     "_log_line_level",
     "_read_todays_logs",
+    "_trim_excess_lines",
     "run",
 ]
 
@@ -185,6 +186,29 @@ def _log_line_level(line: str) -> int:
     return getattr(logging, parts[2], logging.NOTSET)
 
 
+def _trim_excess_lines(
+    lines: collections.deque[str],
+    total_chars: int,
+    truncated: bool,
+    limit: int,
+) -> tuple[int, bool, int]:
+    """Drop the oldest lines from *lines* until *total_chars* fits within *limit*.
+
+    Reserves space for ``_TRUNCATION_MARKER`` on the first removal by reducing
+    *limit*.  Never drops the last remaining line — the caller handles the
+    single-oversized-line edge case separately.
+
+    Returns the updated ``(total_chars, truncated, limit)`` triple.
+    """
+    while total_chars > limit and len(lines) > 1:
+        removed = lines.popleft()
+        total_chars -= len(removed) + 1
+        if not truncated:
+            truncated = True
+            limit = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+    return total_chars, truncated, limit
+
+
 def _read_todays_logs(log_file: Path, today_str: str, min_level_num: int) -> str:
     """Read and return today's log lines at or above *min_level_num* as a single string.
 
@@ -212,12 +236,9 @@ def _read_todays_logs(log_file: Path, today_str: str, min_level_num: int) -> str
             stripped = line.rstrip()
             lines.append(stripped)
             total_chars += len(stripped) + 1  # +1 for the joining newline
-            while total_chars > limit and len(lines) > 1:
-                removed = lines.popleft()
-                total_chars -= len(removed) + 1
-                if not truncated:
-                    truncated = True
-                    limit = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+            total_chars, truncated, limit = _trim_excess_lines(
+                lines, total_chars, truncated, limit
+            )
             # Single oversized line: hard-truncate it so result stays within limit.
             if len(lines) == 1 and total_chars > _MAX_LOG_CHARS:
                 truncated = True

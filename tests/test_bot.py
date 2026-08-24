@@ -1702,13 +1702,18 @@ def test_on_cb_logs_level_launches_thread_with_level(tmp_path):
 
 
 def test_on_cb_logs_level_defaults_to_info_on_missing_part(tmp_path):
-    """If the callback_data has no level part, fall back to info."""
+    """If the callback_data has an empty level part, fall back to info.
+
+    The real dispatcher rejects data without a separator (len(parts) < 2) before
+    reaching the handler, so the realistic edge case is an empty second part
+    (e.g. ``"logs_level:"`` → parts ``["logs_level", ""]``).
+    """
     from app.bot import _LOG_LEVEL_DEFAULT
 
     bot = _bot(tmp_path=tmp_path)
     with patch("app.bot.threading.Thread") as mock_thread:
         mock_thread.return_value.start = MagicMock()
-        bot._on_cb_logs_level(["logs_level"], "logs_level")
+        bot._on_cb_logs_level(["logs_level", ""], "logs_level:")
     assert mock_thread.call_args.kwargs["kwargs"] == {"min_level": _LOG_LEVEL_DEFAULT}
 
 
