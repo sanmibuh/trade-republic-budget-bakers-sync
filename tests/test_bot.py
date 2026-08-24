@@ -1533,6 +1533,57 @@ def test_fetch_and_send_logs_header_has_no_markdown_chars_when_logs_present(tmp_
 # ---------------------------------------------------------------------------
 
 
+def test_read_todays_logs_single_line_exceeding_limit_is_hard_truncated(tmp_path):
+    """A single log line longer than _MAX_LOG_CHARS must be truncated, not sent as-is."""
+    import datetime as dt
+    import logging as _logging
+
+    from app.bot import _MAX_LOG_CHARS, _read_todays_logs
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    # One line that is way over the limit
+    giant_line = f"{today} 10:00:00 INFO     app.foo: {'x' * (_MAX_LOG_CHARS * 2)}"
+    (log_dir / "sync.log").write_text(giant_line)
+
+    result = _read_todays_logs(log_dir / "sync.log", today, _logging.INFO)
+    assert len(result) <= _MAX_LOG_CHARS, (
+        f"result length {len(result)} exceeds _MAX_LOG_CHARS={_MAX_LOG_CHARS}"
+    )
+
+
+def test_fetch_and_send_logs_unknown_level_normalizes_to_default(tmp_path):
+    """_fetch_and_send_logs called with an unknown level must use the default (INFO).
+
+    The header must display the normalised level, not the raw unknown string.
+    """
+    import datetime as dt
+
+    from app.bot import _LOG_LEVEL_DEFAULT
+
+    bot = _bot(tmp_path=tmp_path)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (log_dir / "sync.log").write_text(
+        f"{today} 10:00:00 INFO     app.foo: info line\n"
+        f"{today} 10:00:01 DEBUG    app.foo: debug line\n"
+    )
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(min_level="verbose")  # unknown level
+
+    sent = mock_send.call_args.args[0]
+    # Header must show the normalised default level, not "VERBOSE"
+    header = sent.split("\n\n")[0]
+    assert "VERBOSE" not in header
+    assert _LOG_LEVEL_DEFAULT.upper() in header
+    # DEBUG lines must not appear (INFO is the default filter)
+    assert "debug line" not in sent
+
+
 def test_log_line_level_returns_correct_numeric_level():
     import logging as _logging
 

@@ -218,6 +218,12 @@ def _read_todays_logs(log_file: Path, today_str: str, min_level_num: int) -> str
                 if not truncated:
                     truncated = True
                     limit = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+            # Single oversized line: hard-truncate it so result stays within limit.
+            if len(lines) == 1 and total_chars > _MAX_LOG_CHARS:
+                truncated = True
+                max_body = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+                lines[0] = lines[0][:max_body]
+                total_chars = max_body
     text = "\n".join(lines)
     if truncated:
         text = _TRUNCATION_MARKER + text
@@ -937,13 +943,15 @@ class TelegramBot:
         """
         today_str = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
         log_file = self._cfg.log_dir / "sync.log"
+        if min_level not in _LOG_LEVEL_FILTER:
+            min_level = _LOG_LEVEL_DEFAULT
         level_label = min_level.upper()
         # MarkdownV2 header — used only when there are no logs (plain-text message not needed).
         header_md = f"📋 Logs \\({_esc(today_str)} UTC ≥ {_esc(level_label)}\\)\n\n"
         # Plain-text header — used when the log body is sent with parse_mode=None so that
         # MarkdownV2 escape characters are not displayed literally in Telegram.
         header_plain = f"📋 Logs ({today_str} UTC ≥ {level_label})\n\n"
-        min_level_num = _LOG_LEVEL_FILTER.get(min_level, logging.INFO)
+        min_level_num = _LOG_LEVEL_FILTER[min_level]
         try:
             text = _read_todays_logs(log_file, today_str, min_level_num)
         except Exception as exc:
