@@ -95,6 +95,7 @@ __all__ = [
     "TelegramBot",
     "_auth_icon",
     "_check_session_direct",
+    "_clamp_single_line",
     "_format_sync_timestamp",
     "_last_sync_summary_direct",
     "_log_line_level",
@@ -209,6 +210,33 @@ def _trim_excess_lines(
     return total_chars, truncated, limit
 
 
+def _clamp_single_line(
+    lines: collections.deque[str],
+    total_chars: int,
+    truncated: bool,
+    limit: int,
+) -> tuple[int, bool, int]:
+    """Hard-truncate the only line in *lines* if it exceeds the body budget.
+
+    Does nothing when *lines* holds more than one entry (the caller's trimming
+    loop already handles multi-line overflow).  When truncation is needed the
+    line is clamped to ``_MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN`` characters
+    and *truncated* / *limit* are updated so subsequent calls respect the
+    reduced budget.
+
+    Returns the updated ``(total_chars, truncated, limit)`` triple.
+    """
+    if len(lines) != 1:
+        return total_chars, truncated, limit
+    body_limit = _MAX_LOG_CHARS - (_TRUNCATION_MARKER_LEN if truncated else 0)
+    if len(lines[0]) > body_limit:
+        truncated = True
+        limit = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+        lines[0] = lines[0][:limit]
+        total_chars = limit
+    return total_chars, truncated, limit
+
+
 def _read_todays_logs(log_file: Path, today_str: str, min_level_num: int) -> str:
     """Read and return today's log lines at or above *min_level_num* as a single string.
 
@@ -241,19 +269,9 @@ def _read_todays_logs(log_file: Path, today_str: str, min_level_num: int) -> str
             total_chars, truncated, limit = _trim_excess_lines(
                 lines, total_chars, truncated, limit
             )
-            # Single oversized line: hard-truncate so marker + body stays within
-            # _MAX_LOG_CHARS.  Use len(lines[0]) directly (total_chars equals the
-            # actual join length after the over-counting fix) and derive the body
-            # budget from whether the truncation marker will be prepended.
-            if len(lines) == 1:
-                body_limit = _MAX_LOG_CHARS - (
-                    _TRUNCATION_MARKER_LEN if truncated else 0
-                )
-                if len(lines[0]) > body_limit:
-                    truncated = True
-                    limit = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
-                    lines[0] = lines[0][:limit]
-                    total_chars = limit
+            total_chars, truncated, limit = _clamp_single_line(
+                lines, total_chars, truncated, limit
+            )
     text = "\n".join(lines)
     if truncated:
         text = _TRUNCATION_MARKER + text

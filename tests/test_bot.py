@@ -1688,6 +1688,75 @@ def test_read_todays_logs_subsequent_lines_after_single_line_clamp_stay_within_l
     )
 
 
+def test_clamp_single_line_no_op_when_multiple_lines():
+    """_clamp_single_line must return unchanged values when deque has more than one line."""
+    import collections
+
+    from app.bot import _clamp_single_line
+
+    lines: collections.deque[str] = collections.deque(["aaa", "bbb"])
+    total, truncated, limit = _clamp_single_line(lines, 7, False, 10)
+    assert total == 7
+    assert truncated is False
+    assert limit == 10
+    assert list(lines) == ["aaa", "bbb"]
+
+
+def test_clamp_single_line_truncates_oversized_line():
+    """_clamp_single_line must truncate the only line when it exceeds the body budget."""
+    import collections
+
+    from app.bot import (
+        _MAX_LOG_CHARS,
+        _TRUNCATION_MARKER_LEN,
+        _clamp_single_line,
+    )
+
+    oversized = "x" * (_MAX_LOG_CHARS + 1)
+    lines: collections.deque[str] = collections.deque([oversized])
+    total, truncated, limit = _clamp_single_line(
+        lines, len(oversized), False, _MAX_LOG_CHARS
+    )
+    assert truncated is True
+    assert len(lines[0]) == _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+    assert total == _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+    assert limit == _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+
+
+def test_clamp_single_line_no_op_when_line_fits():
+    """_clamp_single_line must leave a fitting single line untouched."""
+    import collections
+
+    from app.bot import _MAX_LOG_CHARS, _clamp_single_line
+
+    line = "x" * _MAX_LOG_CHARS
+    lines: collections.deque[str] = collections.deque([line])
+    _total, truncated, _limit = _clamp_single_line(
+        lines, len(line), False, _MAX_LOG_CHARS
+    )
+    assert truncated is False
+    assert len(lines[0]) == _MAX_LOG_CHARS
+
+
+def test_clamp_single_line_truncates_when_already_truncated():
+    """When truncated=True, body budget is limit (marker already reserved)."""
+    import collections
+
+    from app.bot import (
+        _MAX_LOG_CHARS,
+        _TRUNCATION_MARKER_LEN,
+        _clamp_single_line,
+    )
+
+    reduced = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN  # 3780
+    oversized = "x" * (reduced + 1)
+    lines: collections.deque[str] = collections.deque([oversized])
+    total, truncated, _limit = _clamp_single_line(lines, len(oversized), True, reduced)
+    assert truncated is True
+    assert len(lines[0]) == reduced
+    assert total == reduced
+
+
 def test_trim_excess_lines_drops_oldest_and_sets_truncated():
     """_trim_excess_lines removes oldest lines until total fits within limit."""
     import collections
