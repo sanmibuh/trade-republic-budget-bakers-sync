@@ -1764,7 +1764,9 @@ def test_trim_excess_lines_drops_oldest_and_sets_truncated():
     from app.bot import _trim_excess_lines
 
     lines: collections.deque[str] = collections.deque(["aaa", "bbb", "ccc"])
-    total_chars = 3 + 1 + 3 + 1 + 3 + 1  # each entry + newline = 12
+    total_chars = (
+        3 + 1 + 3 + 1 + 3
+    )  # len("\n".join(lines)) = sum(len) + (N-1) separators = 11
     total_chars, truncated, _limit = _trim_excess_lines(lines, total_chars, False, 8)
     assert truncated is True
     assert total_chars <= 8
