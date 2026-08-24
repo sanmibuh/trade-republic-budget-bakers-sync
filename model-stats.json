@@ -190,5 +190,17 @@
     "model": "gemini-2.0-flash-lite",
     "outcome": "nok",
     "reason": "not_available"
+  },
+  {
+    "date": "2026-08-24",
+    "model": "gemini-3.1-pro-preview",
+    "outcome": "nok",
+    "reason": "quota_exceeded"
+  },
+  {
+    "date": "2026-08-24",
+    "model": "gemini-3.7-flash",
+    "outcome": "ok",
+    "findings": 4
   }
 ]
