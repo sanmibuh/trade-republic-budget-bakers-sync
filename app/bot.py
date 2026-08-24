@@ -88,7 +88,6 @@ __all__ = [
     "_LOG_LEVEL_DEFAULT",
     "_LOG_LEVEL_FILTER",
     "_MAX_LOG_CHARS",
-    "_log_line_level",
     "BotConfig",
     "InstanceConfig",
     "TelegramBot",
@@ -96,6 +95,7 @@ __all__ = [
     "_check_session_direct",
     "_format_sync_timestamp",
     "_last_sync_summary_direct",
+    "_log_line_level",
     "run",
 ]
 
@@ -391,7 +391,10 @@ class TelegramBot:
                 "command": "status",
                 "description": "Show instances and backup service availability",
             },
-            {"command": "logs", "description": "Show today's logs — choose level (default: INFO)"},
+            {
+                "command": "logs",
+                "description": "Show today's logs — choose level (default: INFO)",
+            },
             {
                 "command": "resync",
                 "description": "Force re-sync of a specific day, bypassing dedup",

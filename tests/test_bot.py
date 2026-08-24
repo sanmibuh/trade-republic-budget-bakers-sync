@@ -1496,25 +1496,32 @@ def test_fetch_and_send_logs_header_has_no_markdown_chars_when_logs_present(tmp_
     )
 
 
-
 # ---------------------------------------------------------------------------
 # _log_line_level
 # ---------------------------------------------------------------------------
 
 
 def test_log_line_level_returns_correct_numeric_level():
-    from app.bot import _log_line_level
     import logging as _logging
 
-    assert _log_line_level("2026-08-24 10:00:00 DEBUG    app.foo: msg") == _logging.DEBUG
+    from app.bot import _log_line_level
+
+    assert (
+        _log_line_level("2026-08-24 10:00:00 DEBUG    app.foo: msg") == _logging.DEBUG
+    )
     assert _log_line_level("2026-08-24 10:00:00 INFO     app.foo: msg") == _logging.INFO
-    assert _log_line_level("2026-08-24 10:00:00 WARNING  app.foo: msg") == _logging.WARNING
-    assert _log_line_level("2026-08-24 10:00:00 ERROR    app.foo: msg") == _logging.ERROR
+    assert (
+        _log_line_level("2026-08-24 10:00:00 WARNING  app.foo: msg") == _logging.WARNING
+    )
+    assert (
+        _log_line_level("2026-08-24 10:00:00 ERROR    app.foo: msg") == _logging.ERROR
+    )
 
 
 def test_log_line_level_returns_notset_for_malformed_lines():
-    from app.bot import _log_line_level
     import logging as _logging
+
+    from app.bot import _log_line_level
 
     assert _log_line_level("") == _logging.NOTSET
     assert _log_line_level("continuation line without a timestamp") == _logging.NOTSET
@@ -1683,9 +1690,7 @@ def test_fetch_and_send_logs_header_contains_level_label(tmp_path):
     log_dir.mkdir(parents=True, exist_ok=True)
 
     today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
-    (log_dir / "sync.log").write_text(
-        f"{today} 10:00:00 WARNING  app.foo: warn msg\n"
-    )
+    (log_dir / "sync.log").write_text(f"{today} 10:00:00 WARNING  app.foo: warn msg\n")
 
     with patch.object(bot, "_send_message") as mock_send:
         bot._fetch_and_send_logs(min_level="warning")
