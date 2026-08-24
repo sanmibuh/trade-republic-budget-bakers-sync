@@ -1553,6 +1553,35 @@ def test_read_todays_logs_single_line_exceeding_limit_is_hard_truncated(tmp_path
     )
 
 
+def test_trim_excess_lines_drops_oldest_and_sets_truncated():
+    """_trim_excess_lines removes oldest lines until total fits within limit."""
+    import collections
+
+    from app.bot import _trim_excess_lines
+
+    lines: collections.deque[str] = collections.deque(["aaa", "bbb", "ccc"])
+    total_chars = 3 + 1 + 3 + 1 + 3 + 1  # each entry + newline = 12
+    total_chars, truncated, _limit = _trim_excess_lines(lines, total_chars, False, 8)
+    assert truncated is True
+    assert total_chars <= 8
+    # Oldest line(s) removed; newest retained
+    assert "ccc" in lines
+
+
+def test_trim_excess_lines_single_line_not_dropped():
+    """_trim_excess_lines never drops the last remaining line."""
+    import collections
+
+    from app.bot import _trim_excess_lines
+
+    lines: collections.deque[str] = collections.deque(["x" * 100])
+    total_chars = 101
+    total_chars, truncated, _limit = _trim_excess_lines(lines, total_chars, False, 10)
+    # Single line stays — caller handles hard-truncation separately
+    assert len(lines) == 1
+    assert truncated is False  # while condition len>1 never entered
+
+
 def test_fetch_and_send_logs_unknown_level_normalizes_to_default(tmp_path):
     """_fetch_and_send_logs called with an unknown level must use the default (INFO).
 
