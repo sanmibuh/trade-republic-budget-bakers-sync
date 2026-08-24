@@ -1,0 +1,19 @@
+tests/test_backup.py
+  s_699379953516c8::t_5cb30c6e27d9de 15-16,57,63,68,73,84,89,94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "b2b871e20ce8286734cba2ee65873d23c9b4a87a",
+  "prompts": {},
+  "sessions": {
+    "s_699379953516c8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fca3d6883ffej6t6NGQB1mjXR2",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
