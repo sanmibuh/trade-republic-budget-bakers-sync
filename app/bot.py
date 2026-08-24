@@ -47,6 +47,7 @@ from app.bot_keyboards import (
     backup_type_buttons as _backup_type_buttons_fn,
     instance_buttons as _instance_buttons_fn,
     instance_buttons_for_resync as _instance_buttons_for_resync_fn,
+    log_level_buttons as _log_level_buttons_fn,
     month_buttons as _month_buttons_fn,
     resync_date_buttons as _resync_date_buttons_fn,
     year_buttons as _year_buttons_fn,
@@ -71,10 +72,23 @@ log = logging.getLogger(__name__)
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 _MAX_LOG_CHARS = 3800  # safe limit below Telegram's 4096-char message cap
 
+# Valid log-level names accepted by /logs and the logs_level callback.
+# Maps user-facing name → logging module numeric level.
+_LOG_LEVEL_FILTER: dict[str, int] = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
+_LOG_LEVEL_DEFAULT = "info"
+
 __all__ = [
     "_BACKUP_ICONS",
     "_CB_SEP",
+    "_LOG_LEVEL_DEFAULT",
+    "_LOG_LEVEL_FILTER",
     "_MAX_LOG_CHARS",
+    "_log_line_level",
     "BotConfig",
     "InstanceConfig",
     "TelegramBot",
@@ -149,6 +163,23 @@ class BotConfig:
 # ---------------------------------------------------------------------------
 # _esc is imported from app.notifier.escape_markdown — for bold/plain text contexts.
 # _esc_code is imported from app.notifier.escape_code — for inline-code (backtick) spans.
+
+
+def _log_line_level(line: str) -> int:
+    """Return the numeric log level of a formatted log line.
+
+    The expected format is::
+
+        YYYY-MM-DD HH:MM:SS LEVELNAME logger.name: message
+
+    Splits on whitespace (max 4 parts) and looks up the third token in the
+    :mod:`logging` module.  Returns ``logging.NOTSET`` (0) when the line does
+    not match (e.g. continuation lines or malformed entries).
+    """
+    parts = line.split(None, 3)
+    if len(parts) < 3:
+        return logging.NOTSET
+    return getattr(logging, parts[2], logging.NOTSET)
 
 
 def _auth_icon(auth: bool | None) -> str:
@@ -360,7 +391,7 @@ class TelegramBot:
                 "command": "status",
                 "description": "Show instances and backup service availability",
             },
-            {"command": "logs", "description": "Show today's shared sync log"},
+            {"command": "logs", "description": "Show today's logs — choose level (default: INFO)"},
             {
                 "command": "resync",
                 "description": "Force re-sync of a specific day, bypassing dedup",
@@ -491,6 +522,7 @@ class TelegramBot:
             "backup_type": self._on_cb_backup_type,
             "backup_yearly": self._on_cb_backup_yearly,
             "backup_monthly": self._on_cb_backup_monthly,
+            "logs_level": self._on_cb_logs_level,
             "resync_pick_date": self._on_cb_resync_pick_date,
             "resync": self._on_cb_resync,
         }
@@ -501,6 +533,16 @@ class TelegramBot:
             self._on_cb_instance_cmd(cmd, parts)
 
     # Callback sub-handlers ---------------------------------------------------
+
+    def _on_cb_logs_level(self, parts: list[str], _data: str) -> None:
+        level = parts[1].lower() if len(parts) > 1 else _LOG_LEVEL_DEFAULT
+        if level not in _LOG_LEVEL_FILTER:
+            level = _LOG_LEVEL_DEFAULT
+        threading.Thread(
+            target=self._fetch_and_send_logs,
+            kwargs={"min_level": level},
+            daemon=True,
+        ).start()
 
     def _on_cb_backup_type(self, parts: list[str], _data: str) -> None:
         subtype = parts[1]
@@ -615,9 +657,23 @@ class TelegramBot:
             keyboard=self._instance_buttons_for_resync(date_str),
         )
 
-    def _cmd_logs(self, _args: list[str]) -> None:
+    def _cmd_logs(self, args: list[str]) -> None:
+        if not args:
+            self._send_message(
+                "📋 *Logs* — Choose level:",
+                keyboard=self._log_level_buttons(),
+            )
+            return
+        level = args[0].lower()
+        if level not in _LOG_LEVEL_FILTER:
+            self._send_message(
+                f"⚠️ Unknown level: `{_esc_code(level)}`\\."
+                " Use `debug`, `info`, `warning` or `error`\\."
+            )
+            return
         threading.Thread(
             target=self._fetch_and_send_logs,
+            kwargs={"min_level": level},
             daemon=True,
         ).start()
 
@@ -827,15 +883,22 @@ class TelegramBot:
                     break
         return pending
 
-    def _fetch_and_send_logs(self) -> None:
-        """Fetch today's logs from the shared log file and send them to Telegram."""
+    def _fetch_and_send_logs(self, min_level: str = _LOG_LEVEL_DEFAULT) -> None:
+        """Fetch today's logs from the shared log file and send them to Telegram.
+
+        Args:
+            min_level: Minimum log level to include (``"debug"``, ``"info"``,
+                ``"warning"``, ``"error"``).  Defaults to ``"info"``.
+        """
         today_str = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
         log_file = self._cfg.log_dir / "sync.log"
+        level_label = min_level.upper()
         # MarkdownV2 header — used only when there are no logs (plain-text message not needed).
-        header_md = f"📋 Logs \\({_esc(today_str)} UTC\\)\n\n"
+        header_md = f"📋 Logs \\({_esc(today_str)} UTC ≥ {_esc(level_label)}\\)\n\n"
         # Plain-text header — used when the log body is sent with parse_mode=None so that
         # MarkdownV2 escape characters are not displayed literally in Telegram.
-        header_plain = f"📋 Logs ({today_str} UTC)\n\n"
+        header_plain = f"📋 Logs ({today_str} UTC ≥ {level_label})\n\n"
+        min_level_num = _LOG_LEVEL_FILTER.get(min_level, logging.INFO)
         try:
             if not log_file.exists():
                 text = ""
@@ -846,6 +909,8 @@ class TelegramBot:
                 with log_file.open(encoding="utf-8", errors="replace") as fh:
                     for line in fh:
                         if not line.startswith(today_str):
+                            continue
+                        if _log_line_level(line) < min_level_num:
                             continue
                         stripped = line.rstrip()
                         lines.append(stripped)
@@ -874,6 +939,9 @@ class TelegramBot:
     def _pick_instance(self, cmd: str, prompt: str) -> None:
         """Send *prompt* with an instance-picker inline keyboard for *cmd*."""
         self._send_message(prompt, keyboard=self._instance_buttons(cmd))
+
+    def _log_level_buttons(self) -> list[list[dict]]:
+        return _log_level_buttons_fn()
 
     def _instance_buttons(self, cmd: str) -> list[list[dict]]:
         names = [inst.name for inst in self._cfg.instances.values()]

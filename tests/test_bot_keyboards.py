@@ -13,6 +13,7 @@ from app.bot_keyboards import (
     backup_type_buttons,
     instance_buttons,
     instance_buttons_for_resync,
+    log_level_buttons,
     month_buttons,
     resync_date_buttons,
     year_buttons,
@@ -216,3 +217,24 @@ def test_resync_date_buttons_encode_instance():
 def test_instance_buttons_for_resync_empty_names_returns_empty():
     """instance_buttons_for_resync with no names must return an empty list."""
     assert instance_buttons_for_resync("2026-08-01", []) == []
+
+
+# ---------------------------------------------------------------------------
+# log_level_buttons
+# ---------------------------------------------------------------------------
+
+
+def test_log_level_buttons_returns_four_buttons():
+    """log_level_buttons must return exactly 4 buttons covering all supported levels."""
+    rows = log_level_buttons()
+    buttons = [b for row in rows for b in row]
+    assert len(buttons) == 4
+
+
+def test_log_level_buttons_callback_data_contains_all_levels():
+    """Each button's callback_data must encode its level and use the correct separator."""
+    rows = log_level_buttons()
+    cb_data = {b["callback_data"] for row in rows for b in row}
+    for level in ("debug", "info", "warning", "error"):
+        assert any(level in d for d in cb_data), f"no button found for level {level!r}"
+        assert any(d.startswith(f"logs_level{_CB_SEP}") for d in cb_data if level in d)

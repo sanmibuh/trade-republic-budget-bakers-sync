@@ -1496,6 +1496,223 @@ def test_fetch_and_send_logs_header_has_no_markdown_chars_when_logs_present(tmp_
     )
 
 
+
+# ---------------------------------------------------------------------------
+# _log_line_level
+# ---------------------------------------------------------------------------
+
+
+def test_log_line_level_returns_correct_numeric_level():
+    from app.bot import _log_line_level
+    import logging as _logging
+
+    assert _log_line_level("2026-08-24 10:00:00 DEBUG    app.foo: msg") == _logging.DEBUG
+    assert _log_line_level("2026-08-24 10:00:00 INFO     app.foo: msg") == _logging.INFO
+    assert _log_line_level("2026-08-24 10:00:00 WARNING  app.foo: msg") == _logging.WARNING
+    assert _log_line_level("2026-08-24 10:00:00 ERROR    app.foo: msg") == _logging.ERROR
+
+
+def test_log_line_level_returns_notset_for_malformed_lines():
+    from app.bot import _log_line_level
+    import logging as _logging
+
+    assert _log_line_level("") == _logging.NOTSET
+    assert _log_line_level("continuation line without a timestamp") == _logging.NOTSET
+    assert _log_line_level("2026-08-24 10:00:00") == _logging.NOTSET  # only 2 parts
+
+
+# ---------------------------------------------------------------------------
+# _cmd_logs — level picker and direct level argument
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_logs_no_args_sends_level_keyboard(tmp_path):
+    """Calling /logs with no args must show the level picker keyboard."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_logs([])
+    mock_send.assert_called_once()
+    call_kwargs = mock_send.call_args.kwargs
+    assert "keyboard" in call_kwargs
+    # Keyboard must contain all four level callbacks
+    buttons = [b for row in call_kwargs["keyboard"] for b in row]
+    cb_data = [b["callback_data"] for b in buttons]
+    assert any("debug" in d for d in cb_data)
+    assert any("info" in d for d in cb_data)
+    assert any("warning" in d for d in cb_data)
+    assert any("error" in d for d in cb_data)
+
+
+def test_cmd_logs_with_valid_level_launches_thread(tmp_path):
+    """Calling /logs info must start a background thread to fetch logs."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch("app.bot.threading.Thread") as mock_thread:
+        mock_thread.return_value.start = MagicMock()
+        bot._cmd_logs(["info"])
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["target"] == bot._fetch_and_send_logs
+    assert mock_thread.call_args.kwargs["kwargs"] == {"min_level": "info"}
+
+
+def test_cmd_logs_with_unknown_level_sends_error(tmp_path):
+    """An unrecognised level must produce an error message, not a thread."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._cmd_logs(["verbose"])
+    mock_thread.assert_not_called()
+    mock_send.assert_called_once()
+    assert "verbose" in mock_send.call_args.args[0].lower()
+
+
+# ---------------------------------------------------------------------------
+# _on_cb_logs_level callback
+# ---------------------------------------------------------------------------
+
+
+def test_on_cb_logs_level_launches_thread_with_level(tmp_path):
+    """logs_level callback must launch _fetch_and_send_logs with the chosen level."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch("app.bot.threading.Thread") as mock_thread:
+        mock_thread.return_value.start = MagicMock()
+        bot._on_cb_logs_level(["logs_level", "warning"], "logs_level:warning")
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["kwargs"] == {"min_level": "warning"}
+
+
+def test_on_cb_logs_level_defaults_to_info_on_missing_part(tmp_path):
+    """If the callback_data has no level part, fall back to info."""
+    from app.bot import _LOG_LEVEL_DEFAULT
+
+    bot = _bot(tmp_path=tmp_path)
+    with patch("app.bot.threading.Thread") as mock_thread:
+        mock_thread.return_value.start = MagicMock()
+        bot._on_cb_logs_level(["logs_level"], "logs_level")
+    assert mock_thread.call_args.kwargs["kwargs"] == {"min_level": _LOG_LEVEL_DEFAULT}
+
+
+def test_dispatch_callback_routes_logs_level(tmp_path):
+    """_dispatch_callback must route logs_level:info to _on_cb_logs_level."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_on_cb_logs_level") as mock_handler:
+        bot._dispatch_callback(["logs_level", "info"], "logs_level:info")
+    mock_handler.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _fetch_and_send_logs — level filtering
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_and_send_logs_filters_debug_lines_by_default(tmp_path):
+    """Default (info) must exclude DEBUG lines."""
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (log_dir / "sync.log").write_text(
+        f"{today} 10:00:00 DEBUG    app.foo: debug message\n"
+        f"{today} 10:00:01 INFO     app.foo: info message\n"
+    )
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs()  # default: info
+
+    sent = mock_send.call_args.args[0]
+    assert "info message" in sent
+    assert "debug message" not in sent
+
+
+def test_fetch_and_send_logs_debug_level_includes_all_lines(tmp_path):
+    """min_level='debug' must include DEBUG lines."""
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (log_dir / "sync.log").write_text(
+        f"{today} 10:00:00 DEBUG    app.foo: debug message\n"
+        f"{today} 10:00:01 INFO     app.foo: info message\n"
+    )
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(min_level="debug")
+
+    sent = mock_send.call_args.args[0]
+    assert "debug message" in sent
+    assert "info message" in sent
+
+
+def test_fetch_and_send_logs_warning_level_excludes_info(tmp_path):
+    """min_level='warning' must exclude INFO lines."""
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (log_dir / "sync.log").write_text(
+        f"{today} 10:00:00 INFO     app.foo: info message\n"
+        f"{today} 10:00:01 WARNING  app.foo: warning message\n"
+        f"{today} 10:00:02 ERROR    app.foo: error message\n"
+    )
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(min_level="warning")
+
+    sent = mock_send.call_args.args[0]
+    assert "warning message" in sent
+    assert "error message" in sent
+    assert "info message" not in sent
+
+
+def test_fetch_and_send_logs_header_contains_level_label(tmp_path):
+    """The plain-text header must show the active level filter."""
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (log_dir / "sync.log").write_text(
+        f"{today} 10:00:00 WARNING  app.foo: warn msg\n"
+    )
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(min_level="warning")
+
+    header = mock_send.call_args.args[0].split(today)[0]
+    assert "WARNING" in header
+
+
+def test_fetch_and_send_logs_no_matching_lines_sends_no_logs_notice(tmp_path):
+    """When all lines are filtered out, must send the 'No logs today' notice."""
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (log_dir / "sync.log").write_text(
+        f"{today} 10:00:00 DEBUG    app.foo: debug only\n"
+    )
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(min_level="warning")
+
+    assert "No logs" in mock_send.call_args.args[0]
+
+
 # ---------------------------------------------------------------------------
 # _register_commands includes /logs
 # ---------------------------------------------------------------------------
