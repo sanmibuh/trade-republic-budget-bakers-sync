@@ -179,6 +179,27 @@ def test_run_monthly_passes_date_range_to_client(tmp_path):
     client.get_records.assert_called_once_with("2026-03-01", "2026-03-31")
 
 
+def test_run_monthly_logs_start_and_completion_at_info(tmp_path, caplog):
+    """run_monthly must log start and completion milestones at INFO."""
+    import logging
+
+    client = _make_client()
+    notifier = _make_notifier()
+
+    with caplog.at_level(logging.INFO, logger="app.backup"):
+        run_monthly(client, notifier, tmp_path, 2026, 7)
+
+    messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+    assert any(
+        "monthly" in m.lower() and "2026" in m and "start" in m.lower()
+        for m in messages
+    ), "run_monthly must log a start milestone at INFO"
+    assert any(
+        "monthly" in m.lower() and "2026" in m and "complete" in m.lower()
+        for m in messages
+    ), "run_monthly must log a completion milestone at INFO"
+
+
 # ---------------------------------------------------------------------------
 # run_yearly
 # ---------------------------------------------------------------------------
@@ -245,6 +266,26 @@ def test_run_yearly_notifies(tmp_path):
     assert kwargs["period"] == "2025"
     assert kwargs["date_from"] == "2025-01-01"
     assert kwargs["date_to"] == "2025-12-31"
+
+
+def test_run_yearly_logs_start_and_completion_at_info(tmp_path, caplog):
+    """run_yearly must log start and completion milestones at INFO."""
+    import logging
+
+    client = _make_client()
+    notifier = _make_notifier()
+
+    with caplog.at_level(logging.INFO, logger="app.backup"):
+        run_yearly(client, notifier, tmp_path, 2025)
+
+    messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+    assert any(
+        "yearly" in m.lower() and "2025" in m and "start" in m.lower() for m in messages
+    ), "run_yearly must log a start milestone at INFO"
+    assert any(
+        "yearly" in m.lower() and "2025" in m and "complete" in m.lower()
+        for m in messages
+    ), "run_yearly must log a completion milestone at INFO"
 
 
 # ---------------------------------------------------------------------------

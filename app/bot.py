@@ -47,6 +47,7 @@ from app.bot_keyboards import (
     backup_type_buttons as _backup_type_buttons_fn,
     instance_buttons as _instance_buttons_fn,
     instance_buttons_for_resync as _instance_buttons_for_resync_fn,
+    log_level_buttons as _log_level_buttons_fn,
     month_buttons as _month_buttons_fn,
     resync_date_buttons as _resync_date_buttons_fn,
     year_buttons as _year_buttons_fn,
@@ -71,17 +72,35 @@ log = logging.getLogger(__name__)
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 _MAX_LOG_CHARS = 3800  # safe limit below Telegram's 4096-char message cap
 
+# Valid log-level names accepted by /logs and the logs_level callback.
+# Maps user-facing name → logging module numeric level.
+_LOG_LEVEL_FILTER: dict[str, int] = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
+_TRUNCATION_MARKER = "[... truncated ...]\n"
+_TRUNCATION_MARKER_LEN = len(_TRUNCATION_MARKER)
+_LOG_LEVEL_DEFAULT = "info"
+
 __all__ = [
     "_BACKUP_ICONS",
     "_CB_SEP",
+    "_LOG_LEVEL_DEFAULT",
+    "_LOG_LEVEL_FILTER",
     "_MAX_LOG_CHARS",
     "BotConfig",
     "InstanceConfig",
     "TelegramBot",
     "_auth_icon",
     "_check_session_direct",
+    "_clamp_single_line",
     "_format_sync_timestamp",
     "_last_sync_summary_direct",
+    "_log_line_level",
+    "_read_todays_logs",
+    "_trim_excess_lines",
     "run",
 ]
 
@@ -149,6 +168,117 @@ class BotConfig:
 # ---------------------------------------------------------------------------
 # _esc is imported from app.notifier.escape_markdown — for bold/plain text contexts.
 # _esc_code is imported from app.notifier.escape_code — for inline-code (backtick) spans.
+
+
+def _log_line_level(line: str) -> int:
+    """Return the numeric log level of a formatted log line.
+
+    The expected format is::
+
+        YYYY-MM-DD HH:MM:SS LEVELNAME logger.name: message
+
+    Splits on whitespace (max 4 parts) and looks up the third token in the
+    :mod:`logging` module.  Returns ``logging.NOTSET`` (0) when the line does
+    not match (e.g. continuation lines or malformed entries).
+    """
+    parts = line.split(None, 3)
+    if len(parts) < 3:
+        return logging.NOTSET
+    level = logging.getLevelName(parts[2].strip())
+    return level if isinstance(level, int) else logging.NOTSET
+
+
+def _trim_excess_lines(
+    lines: collections.deque[str],
+    total_chars: int,
+    truncated: bool,
+    limit: int,
+) -> tuple[int, bool, int]:
+    """Drop the oldest lines from *lines* until *total_chars* fits within *limit*.
+
+    Reserves space for ``_TRUNCATION_MARKER`` on the first removal by reducing
+    *limit*.  Never drops the last remaining line — the caller handles the
+    single-oversized-line edge case separately.
+
+    Returns the updated ``(total_chars, truncated, limit)`` triple.
+    """
+    while total_chars > limit and len(lines) > 1:
+        removed = lines.popleft()
+        total_chars -= len(removed) + 1
+        if not truncated:
+            truncated = True
+            limit = limit - _TRUNCATION_MARKER_LEN
+    return total_chars, truncated, limit
+
+
+def _clamp_single_line(
+    lines: collections.deque[str],
+    total_chars: int,
+    truncated: bool,
+    limit: int,
+) -> tuple[int, bool, int]:
+    """Hard-truncate the only line in *lines* if it exceeds the body budget.
+
+    Does nothing when *lines* holds more than one entry (the caller's trimming
+    loop already handles multi-line overflow).  When truncation is needed the
+    line is clamped relative to *limit*: if truncation has not yet started the
+    marker length is subtracted first so that marker + body stays within the
+    original budget; when already truncated the line is clamped to *limit*
+    directly.
+
+    Returns the updated ``(total_chars, truncated, limit)`` triple.
+    """
+    if len(lines) != 1:
+        return total_chars, truncated, limit
+    body_limit = limit
+    if len(lines[0]) > body_limit:
+        if not truncated:
+            truncated = True
+            limit = limit - _TRUNCATION_MARKER_LEN
+        lines[0] = lines[0][:limit]
+        total_chars = limit
+    return total_chars, truncated, limit
+
+
+def _read_todays_logs(log_file: Path, today_str: str, min_level_num: int) -> str:
+    """Read and return today's log lines at or above *min_level_num* as a single string.
+
+    Lines from other dates and lines below *min_level_num* are skipped.  When
+    the accumulated text would exceed ``_MAX_LOG_CHARS``, the oldest lines are
+    dropped and a truncation marker is prepended to the result.  Space for the
+    marker is reserved during trimming so the returned string never exceeds
+    ``_MAX_LOG_CHARS``.  Returns an empty string when the file does not exist
+    or contains no matching lines.
+    """
+    if not log_file.exists():
+        return ""
+    lines: collections.deque[str] = collections.deque()
+    total_chars = 0
+    truncated = False
+    # Once truncation starts, reserve space for the marker so the final
+    # string (marker + body) stays within _MAX_LOG_CHARS.
+    limit = _MAX_LOG_CHARS
+    with log_file.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if not line.startswith(today_str):
+                continue
+            if _log_line_level(line) < min_level_num:
+                continue
+            stripped = line.rstrip()
+            # Add the joining newline for every line except the first so that
+            # total_chars always equals len("\n".join(lines)) exactly.
+            total_chars += len(stripped) + (1 if lines else 0)
+            lines.append(stripped)
+            total_chars, truncated, limit = _trim_excess_lines(
+                lines, total_chars, truncated, limit
+            )
+            total_chars, truncated, limit = _clamp_single_line(
+                lines, total_chars, truncated, limit
+            )
+    text = "\n".join(lines)
+    if truncated:
+        text = _TRUNCATION_MARKER + text
+    return text
 
 
 def _auth_icon(auth: bool | None) -> str:
@@ -360,7 +490,10 @@ class TelegramBot:
                 "command": "status",
                 "description": "Show instances and backup service availability",
             },
-            {"command": "logs", "description": "Show today's shared sync log"},
+            {
+                "command": "logs",
+                "description": "Show today's logs — pick a level filter",
+            },
             {
                 "command": "resync",
                 "description": "Force re-sync of a specific day, bypassing dedup",
@@ -491,6 +624,7 @@ class TelegramBot:
             "backup_type": self._on_cb_backup_type,
             "backup_yearly": self._on_cb_backup_yearly,
             "backup_monthly": self._on_cb_backup_monthly,
+            "logs_level": self._on_cb_logs_level,
             "resync_pick_date": self._on_cb_resync_pick_date,
             "resync": self._on_cb_resync,
         }
@@ -501,6 +635,16 @@ class TelegramBot:
             self._on_cb_instance_cmd(cmd, parts)
 
     # Callback sub-handlers ---------------------------------------------------
+
+    def _on_cb_logs_level(self, parts: list[str], _data: str) -> None:
+        level = parts[1].lower() if len(parts) > 1 else _LOG_LEVEL_DEFAULT
+        if level not in _LOG_LEVEL_FILTER:
+            level = _LOG_LEVEL_DEFAULT
+        threading.Thread(
+            target=self._fetch_and_send_logs,
+            kwargs={"min_level": level},
+            daemon=True,
+        ).start()
 
     def _on_cb_backup_type(self, parts: list[str], _data: str) -> None:
         subtype = parts[1]
@@ -615,9 +759,23 @@ class TelegramBot:
             keyboard=self._instance_buttons_for_resync(date_str),
         )
 
-    def _cmd_logs(self, _args: list[str]) -> None:
+    def _cmd_logs(self, args: list[str]) -> None:
+        if not args:
+            self._send_message(
+                "📋 *Logs* — Choose level:",
+                keyboard=self._log_level_buttons(),
+            )
+            return
+        level = args[0].lower()
+        if level not in _LOG_LEVEL_FILTER:
+            self._send_message(
+                f"⚠️ Unknown level: `{_esc_code(level)}`\\."
+                " Use `debug`, `info`, `warning` or `error`\\."
+            )
+            return
         threading.Thread(
             target=self._fetch_and_send_logs,
+            kwargs={"min_level": level},
             daemon=True,
         ).start()
 
@@ -827,36 +985,26 @@ class TelegramBot:
                     break
         return pending
 
-    def _fetch_and_send_logs(self) -> None:
-        """Fetch today's logs from the shared log file and send them to Telegram."""
+    def _fetch_and_send_logs(self, min_level: str = _LOG_LEVEL_DEFAULT) -> None:
+        """Fetch today's logs from the shared log file and send them to Telegram.
+
+        Args:
+            min_level: Minimum log level to include (``"debug"``, ``"info"``,
+                ``"warning"``, ``"error"``).  Defaults to ``"info"``.
+        """
         today_str = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
         log_file = self._cfg.log_dir / "sync.log"
+        if min_level not in _LOG_LEVEL_FILTER:
+            min_level = _LOG_LEVEL_DEFAULT
+        level_label = min_level.upper()
         # MarkdownV2 header — used only when there are no logs (plain-text message not needed).
-        header_md = f"📋 Logs \\({_esc(today_str)} UTC\\)\n\n"
+        header_md = f"📋 Logs \\({_esc(today_str)} UTC ≥ {_esc(level_label)}\\)\n\n"
         # Plain-text header — used when the log body is sent with parse_mode=None so that
         # MarkdownV2 escape characters are not displayed literally in Telegram.
-        header_plain = f"📋 Logs ({today_str} UTC)\n\n"
+        header_plain = f"📋 Logs ({today_str} UTC ≥ {level_label})\n\n"
+        min_level_num = _LOG_LEVEL_FILTER[min_level]
         try:
-            if not log_file.exists():
-                text = ""
-            else:
-                lines: collections.deque[str] = collections.deque()
-                total_chars = 0
-                truncated = False
-                with log_file.open(encoding="utf-8", errors="replace") as fh:
-                    for line in fh:
-                        if not line.startswith(today_str):
-                            continue
-                        stripped = line.rstrip()
-                        lines.append(stripped)
-                        total_chars += len(stripped) + 1  # +1 for the joining newline
-                        while total_chars > _MAX_LOG_CHARS and len(lines) > 1:
-                            removed = lines.popleft()
-                            total_chars -= len(removed) + 1
-                            truncated = True
-                text = "\n".join(lines)
-                if truncated:
-                    text = "[... truncated ...]\n" + text
+            text = _read_todays_logs(log_file, today_str, min_level_num)
         except Exception as exc:
             self._send_message(f"❌ Could not read logs: {_esc(str(exc))}")
             return
@@ -874,6 +1022,9 @@ class TelegramBot:
     def _pick_instance(self, cmd: str, prompt: str) -> None:
         """Send *prompt* with an instance-picker inline keyboard for *cmd*."""
         self._send_message(prompt, keyboard=self._instance_buttons(cmd))
+
+    def _log_level_buttons(self) -> list[list[dict]]:
+        return _log_level_buttons_fn()
 
     def _instance_buttons(self, cmd: str) -> list[list[dict]]:
         names = [inst.name for inst in self._cfg.instances.values()]

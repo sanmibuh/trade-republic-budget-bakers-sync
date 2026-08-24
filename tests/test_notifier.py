@@ -153,11 +153,41 @@ def test_notifier_login_required_sends_message():
     mock_send.assert_called_once()
 
 
+def test_notifier_login_required_logs_at_info(caplog):
+    """login_required must emit an INFO log so the event is visible in /logs info."""
+    import logging
+
+    with (
+        patch("app.notifier.send_telegram_message", return_value=True),
+        caplog.at_level(logging.INFO, logger="app.notifier"),
+    ):
+        _make_notifier().login_required()
+    assert any(
+        "login" in r.message.lower() and r.levelno == logging.INFO
+        for r in caplog.records
+    ), "login_required must log at INFO level"
+
+
 def test_notifier_login_success_sends_message():
     with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
         result = _make_notifier().login_success()
     assert result is True
     mock_send.assert_called_once()
+
+
+def test_notifier_login_success_logs_at_info(caplog):
+    """login_success must emit an INFO log so the event is visible in /logs info."""
+    import logging
+
+    with (
+        patch("app.notifier.send_telegram_message", return_value=True),
+        caplog.at_level(logging.INFO, logger="app.notifier"),
+    ):
+        _make_notifier().login_success()
+    assert any(
+        "login" in r.message.lower() and r.levelno == logging.INFO
+        for r in caplog.records
+    ), "login_success must log at INFO level"
 
 
 def test_notifier_login_failed_sends_message():

@@ -116,6 +116,28 @@ def instance_buttons_for_resync(date_str: str, names: list[str]) -> list[list[di
     return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
 
 
+# ---------------------------------------------------------------------------
+# Log-level picker
+# ---------------------------------------------------------------------------
+
+_LOG_LEVEL_OPTIONS: list[tuple[str, str]] = [
+    ("🔍 Debug", "debug"),
+    ("ℹ️ Info", "info"),
+    ("⚠️ Warning", "warning"),
+    ("❌ Error", "error"),
+]
+
+
+def log_level_buttons() -> list[list[dict]]:
+    """Inline keyboard for the /logs level selector."""
+    return [
+        [
+            {"text": text, "callback_data": f"logs_level{_CB_SEP}{level}"}
+            for text, level in _LOG_LEVEL_OPTIONS
+        ]
+    ]
+
+
 def resync_date_buttons(
     instance_key: str, count: int = _RESYNC_DAY_COUNT
 ) -> list[list[dict]]:
