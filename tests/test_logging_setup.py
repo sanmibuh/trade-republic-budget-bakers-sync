@@ -244,6 +244,43 @@ def test_configure_logging_resuppresses_noisy_loggers_on_repeated_call():
             logging.getLogger(name).setLevel(level)
 
 
+def test_setup_logging_suppresses_notset_loggers_inheriting_debug_from_root(tmp_path):
+    """Noisy loggers at NOTSET must be suppressed on the first setup_logging call.
+
+    Before setup_logging runs, root is at WARNING (its default before any
+    explicit configuration).  A NOTSET noisy logger then inherits WARNING, so
+    the pre-guard suppression call sees effective=WARNING and skips it.  After
+    root is raised to DEBUG those loggers become verbose again.  The fix is to
+    call suppression *after* root.setLevel(DEBUG) on the first call too.
+    """
+    root = logging.getLogger()
+    before = set(root.handlers)
+    original_root = root.level
+    original_levels = {name: logging.getLogger(name).level for name in _NOISY_LOGGERS}
+    try:
+        root.setLevel(logging.WARNING)  # simulate default state before any setup call
+        for name in _NOISY_LOGGERS:
+            logging.getLogger(name).setLevel(
+                logging.NOTSET
+            )  # inherits WARNING → skipped
+        setup_logging(tmp_path)
+        # After setup_logging root is DEBUG; NOTSET loggers now inherit DEBUG.
+        # They must have been suppressed to WARNING.
+        for name in _NOISY_LOGGERS:
+            assert logging.getLogger(name).level == logging.WARNING, (
+                f"Logger {name!r} should be WARNING; suppression must run after "
+                "root.setLevel(DEBUG) so NOTSET loggers are caught"
+            )
+    finally:
+        for h in root.handlers[:]:
+            if h not in before:
+                root.removeHandler(h)
+                h.close()
+        root.setLevel(original_root)
+        for name, level in original_levels.items():
+            logging.getLogger(name).setLevel(level)
+
+
 def test_suppress_noisy_loggers_respects_effective_level_via_parent():
     """A logger at NOTSET inheriting ERROR from root must not be set to WARNING."""
     root = logging.getLogger()

@@ -77,6 +77,10 @@ def setup_logging(log_dir: Path) -> None:
 
     root.addHandler(fh)
     root.addHandler(ch)
+    # Run suppression again now that root is at DEBUG: loggers that were NOTSET
+    # and inherited root's pre-setup level (e.g. WARNING) were skipped by the
+    # pre-guard call above; they now inherit DEBUG and must be capped.
+    _suppress_noisy_loggers()
 
 
 def configure_logging() -> None:
@@ -98,3 +102,4 @@ def configure_logging() -> None:
     ch.setLevel(logging.INFO)
     ch.setFormatter(_make_formatter())
     root.addHandler(ch)
+    _suppress_noisy_loggers()
