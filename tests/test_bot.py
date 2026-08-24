@@ -1281,11 +1281,11 @@ def test_handle_update_ignores_unknown_type(tmp_path):
 
 
 def test_cmd_logs_launches_fetch_in_thread(tmp_path):
-    """_cmd_logs must launch _fetch_and_send_logs in a background thread (no picker)."""
+    """_cmd_logs with an explicit level must launch _fetch_and_send_logs in a background thread."""
     bot = _bot(tmp_path=tmp_path)
     with patch("app.bot.threading.Thread") as mock_thread:
         mock_thread.return_value.start = MagicMock()
-        bot._cmd_logs([])
+        bot._cmd_logs(["info"])
     mock_thread.assert_called_once()
     assert mock_thread.call_args.kwargs["target"] == bot._fetch_and_send_logs
 
@@ -1411,6 +1411,38 @@ def test_fetch_and_send_logs_truncation_preserves_tail_drops_head(tmp_path):
     )
 
 
+def test_fetch_and_send_logs_total_length_stays_within_limit_when_truncated(tmp_path):
+    """_read_todays_logs must return text whose length never exceeds _MAX_LOG_CHARS.
+
+    Before the fix, the truncation marker was prepended *after* trimming, so the
+    returned text could exceed the limit by ``len("[... truncated ...]\\n")``.
+    """
+    import datetime as dt
+
+    from app.bot import _MAX_LOG_CHARS, _read_todays_logs
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    # Each line is slightly under _MAX_LOG_CHARS so a single line fills the budget,
+    # forcing truncation and revealing whether the marker blows the limit.
+    line_body = "x" * (_MAX_LOG_CHARS - 60)
+    log_content = "\n".join(
+        f"{today} 10:00:{i:02d} INFO     app.foo: {line_body}" for i in range(5)
+    )
+    log_file = log_dir / "sync.log"
+    log_file.write_text(log_content)
+
+    import logging as _logging
+
+    result = _read_todays_logs(log_file, today, _logging.INFO)
+    assert result.startswith("[... truncated ...]"), "expected truncation marker"
+    assert len(result) <= _MAX_LOG_CHARS, (
+        f"_read_todays_logs returned {len(result)} chars, exceeds _MAX_LOG_CHARS={_MAX_LOG_CHARS}"
+    )
+
+
 def test_fetch_and_send_logs_opens_log_file_with_utf8_encoding(tmp_path):
     """sync.log is written with UTF-8; reading it must also use UTF-8 explicitly.
 
@@ -1494,6 +1526,573 @@ def test_fetch_and_send_logs_header_has_no_markdown_chars_when_logs_present(tmp_
     assert "\\" not in header, (
         f"MarkdownV2 escapes found in plain-text header: {header!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# _log_line_level
+# ---------------------------------------------------------------------------
+
+
+def test_read_todays_logs_single_line_exceeding_limit_is_hard_truncated(tmp_path):
+    """A single log line longer than _MAX_LOG_CHARS must be truncated, not sent as-is."""
+    import datetime as dt
+    import logging as _logging
+
+    from app.bot import _MAX_LOG_CHARS, _read_todays_logs
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    # One line that is way over the limit
+    giant_line = f"{today} 10:00:00 INFO     app.foo: {'x' * (_MAX_LOG_CHARS * 2)}"
+    (log_dir / "sync.log").write_text(giant_line)
+
+    result = _read_todays_logs(log_dir / "sync.log", today, _logging.INFO)
+    assert len(result) <= _MAX_LOG_CHARS, (
+        f"result length {len(result)} exceeds _MAX_LOG_CHARS={_MAX_LOG_CHARS}"
+    )
+
+
+def test_read_todays_logs_single_line_exactly_at_limit_not_truncated(tmp_path):
+    """A single line whose body equals _MAX_LOG_CHARS must NOT be truncated (fits exactly).
+
+    Bug (a): total_chars counts a phantom +1 newline, so comparing total_chars against
+    _MAX_LOG_CHARS would incorrectly truncate a line that is exactly _MAX_LOG_CHARS long.
+    """
+    import datetime as dt
+    import logging as _logging
+
+    from app.bot import _MAX_LOG_CHARS, _TRUNCATION_MARKER, _read_todays_logs
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    prefix = f"{today} 10:00:00 INFO     app.foo: "
+    # Pad so the whole stripped line is exactly _MAX_LOG_CHARS chars.
+    body = "x" * (_MAX_LOG_CHARS - len(prefix))
+    line = prefix + body
+    assert len(line) == _MAX_LOG_CHARS
+    (log_dir / "sync.log").write_text(line)
+
+    result = _read_todays_logs(log_dir / "sync.log", today, _logging.INFO)
+    assert _TRUNCATION_MARKER not in result, (
+        "A line of exactly _MAX_LOG_CHARS must not be truncated"
+    )
+    assert len(result) == _MAX_LOG_CHARS
+
+
+def test_read_todays_logs_single_line_exceeds_reduced_limit_after_truncation(tmp_path):
+    """Bug (b): when prior truncation has reduced limit, a line between limit and
+    _MAX_LOG_CHARS must still be clamped so marker + body <= _MAX_LOG_CHARS.
+    """
+    import datetime as dt
+    import logging as _logging
+
+    from app.bot import (
+        _MAX_LOG_CHARS,
+        _TRUNCATION_MARKER_LEN,
+        _read_todays_logs,
+    )
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    prefix = f"{today} 10:00:00 INFO     app.foo: "
+    reduced_limit = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN  # 3780
+
+    # First line: long enough to trigger truncation and reduce the limit.
+    # We need multiple lines so the while-loop can drop some; use two lines where
+    # the first pushes total over _MAX_LOG_CHARS.
+    filler_line = prefix + "a" * (_MAX_LOG_CHARS - len(prefix) + 1)
+    # Second line: within _MAX_LOG_CHARS but above the reduced limit (3780),
+    # so it slips through the while-loop guard but must be clamped.
+    slipping_body = "b" * (reduced_limit + 5 - len(prefix))
+    slipping_line = prefix + slipping_body
+
+    (log_dir / "sync.log").write_text(filler_line + "\n" + slipping_line)
+
+    result = _read_todays_logs(log_dir / "sync.log", today, _logging.INFO)
+    assert len(result) <= _MAX_LOG_CHARS, (
+        f"result length {len(result)} exceeds _MAX_LOG_CHARS={_MAX_LOG_CHARS}"
+    )
+
+
+def test_read_todays_logs_exactly_fitting_multiline_not_trimmed(tmp_path):
+    """Multiple lines whose joined length equals _MAX_LOG_CHARS must not be trimmed.
+
+    Over-counting bug: total_chars was ``sum(len) + N`` but the actual join length is
+    ``sum(len) + (N-1)`` — the phantom +1 for the last line forced unnecessary trimming.
+    """
+    import datetime as dt
+
+    from app.bot import _MAX_LOG_CHARS, _TRUNCATION_MARKER, _read_todays_logs
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+
+    # Two synthetic lines (NOTSET level accepted with min_level_num=0) whose join
+    # is exactly _MAX_LOG_CHARS.  Format: today_str + body so startswith() matches.
+    # len(line1) + 1 + len(line2) == _MAX_LOG_CHARS
+    # Use equal halves: each = (_MAX_LOG_CHARS - 1) // 2
+    half = (_MAX_LOG_CHARS - 1) // 2
+    line1 = today + "a" * (half - len(today))
+    line2 = today + "b" * (_MAX_LOG_CHARS - 1 - half - len(today))
+    assert len(line1) + 1 + len(line2) == _MAX_LOG_CHARS
+
+    (log_dir / "sync.log").write_text(line1 + "\n" + line2)
+
+    result = _read_todays_logs(
+        log_dir / "sync.log", today, 0
+    )  # 0 = NOTSET, accepts any line
+    assert _TRUNCATION_MARKER not in result, (
+        "Lines fitting exactly within _MAX_LOG_CHARS must not be trimmed"
+    )
+    assert len(result) == _MAX_LOG_CHARS
+
+
+def test_read_todays_logs_subsequent_lines_after_single_line_clamp_stay_within_limit(
+    tmp_path,
+):
+    """After single-line clamping sets truncated=True, subsequent lines must not
+    push marker+body beyond _MAX_LOG_CHARS.
+
+    Bug: single-line clamp did not reduce ``limit``, so _trim_excess_lines allowed
+    the body to grow to _MAX_LOG_CHARS before trimming — marker+body exceeded the cap.
+
+    A short subsequent line (len ≤ 18) stays with the clamped giant inside the
+    buggy limit=3800, producing marker(20)+giant[:3780]+newline+short > 3800.
+    """
+    import datetime as dt
+
+    from app.bot import _MAX_LOG_CHARS, _read_todays_logs
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+
+    # Giant line: stripped length > _MAX_LOG_CHARS — triggers single-line clamp.
+    giant = today + "g" * (_MAX_LOG_CHARS - len(today) + 1)
+    # Short subsequent line: len = 18 (today prefix + 8 extra chars).
+    # With the bug, clamped_giant(3780) stays in deque alongside this line because
+    # total_chars (3780+1 with over-count phantom, or 3780 fixed) + 19 = 3799/3799 ≤ 3800.
+    # The buggy final result is marker(20)+3780+newline+short = 3819 > 3800.
+    short = today + "s" * (18 - len(today))
+    assert len(short) == 18
+
+    (log_dir / "sync.log").write_text(giant + "\n" + short)
+
+    result = _read_todays_logs(log_dir / "sync.log", today, 0)  # 0 = NOTSET
+    assert len(result) <= _MAX_LOG_CHARS, (
+        f"result length {len(result)} exceeds _MAX_LOG_CHARS={_MAX_LOG_CHARS}"
+    )
+
+
+def test_clamp_single_line_no_op_when_multiple_lines():
+    """_clamp_single_line must return unchanged values when deque has more than one line."""
+    import collections
+
+    from app.bot import _clamp_single_line
+
+    lines: collections.deque[str] = collections.deque(["aaa", "bbb"])
+    total, truncated, limit = _clamp_single_line(lines, 7, False, 10)
+    assert total == 7
+    assert truncated is False
+    assert limit == 10
+    assert list(lines) == ["aaa", "bbb"]
+
+
+def test_clamp_single_line_truncates_oversized_line():
+    """_clamp_single_line must truncate the only line when it exceeds the body budget."""
+    import collections
+
+    from app.bot import (
+        _MAX_LOG_CHARS,
+        _TRUNCATION_MARKER_LEN,
+        _clamp_single_line,
+    )
+
+    oversized = "x" * (_MAX_LOG_CHARS + 1)
+    lines: collections.deque[str] = collections.deque([oversized])
+    total, truncated, limit = _clamp_single_line(
+        lines, len(oversized), False, _MAX_LOG_CHARS
+    )
+    assert truncated is True
+    assert len(lines[0]) == _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+    assert total == _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+    assert limit == _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+
+
+def test_clamp_single_line_no_op_when_line_fits():
+    """_clamp_single_line must leave a fitting single line untouched."""
+    import collections
+
+    from app.bot import _MAX_LOG_CHARS, _clamp_single_line
+
+    line = "x" * _MAX_LOG_CHARS
+    lines: collections.deque[str] = collections.deque([line])
+    _total, truncated, _limit = _clamp_single_line(
+        lines, len(line), False, _MAX_LOG_CHARS
+    )
+    assert truncated is False
+    assert len(lines[0]) == _MAX_LOG_CHARS
+
+
+def test_clamp_single_line_truncates_when_already_truncated():
+    """When truncated=True, body budget is limit (marker already reserved)."""
+    import collections
+
+    from app.bot import (
+        _MAX_LOG_CHARS,
+        _TRUNCATION_MARKER_LEN,
+        _clamp_single_line,
+    )
+
+    reduced = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN  # 3780
+    oversized = "x" * (reduced + 1)
+    lines: collections.deque[str] = collections.deque([oversized])
+    total, truncated, _limit = _clamp_single_line(lines, len(oversized), True, reduced)
+    assert truncated is True
+    assert len(lines[0]) == reduced
+    assert total == reduced
+
+
+def test_clamp_single_line_respects_custom_limit():
+    """_clamp_single_line must clamp relative to limit, not _MAX_LOG_CHARS.
+
+    A line that exceeds a custom (small) limit but fits within _MAX_LOG_CHARS
+    must still be truncated.
+    """
+    import collections
+
+    from app.bot import _TRUNCATION_MARKER_LEN, _clamp_single_line
+
+    custom_limit = 100
+    oversized = "x" * (
+        custom_limit + 1
+    )  # 101 chars — fits in _MAX_LOG_CHARS but not limit
+    lines: collections.deque[str] = collections.deque([oversized])
+    total, truncated, new_limit = _clamp_single_line(
+        lines, len(oversized), False, custom_limit
+    )
+    assert truncated is True
+    assert len(lines[0]) == custom_limit - _TRUNCATION_MARKER_LEN
+    assert total == custom_limit - _TRUNCATION_MARKER_LEN
+    assert new_limit == custom_limit - _TRUNCATION_MARKER_LEN
+
+
+def test_trim_excess_lines_drops_oldest_and_sets_truncated():
+    """_trim_excess_lines removes oldest lines until total fits within limit."""
+    import collections
+
+    from app.bot import _trim_excess_lines
+
+    lines: collections.deque[str] = collections.deque(["aaa", "bbb", "ccc"])
+    total_chars = (
+        3 + 1 + 3 + 1 + 3
+    )  # len("\n".join(lines)) = sum(len) + (N-1) separators = 11
+    total_chars, truncated, _limit = _trim_excess_lines(lines, total_chars, False, 8)
+    assert truncated is True
+    assert total_chars <= 8
+    # Oldest line(s) removed; newest retained
+    assert "ccc" in lines
+
+
+def test_trim_excess_lines_single_line_not_dropped():
+    """_trim_excess_lines never drops the last remaining line."""
+    import collections
+
+    from app.bot import _trim_excess_lines
+
+    lines: collections.deque[str] = collections.deque(["x" * 100])
+    total_chars = 101
+    total_chars, truncated, _limit = _trim_excess_lines(lines, total_chars, False, 10)
+    # Single line stays — caller handles hard-truncation separately
+    assert len(lines) == 1
+    assert truncated is False  # while condition len>1 never entered
+
+
+def test_trim_excess_lines_reserves_space_relative_to_passed_limit():
+    """_trim_excess_lines must reserve marker space relative to the caller-supplied limit,
+    not relative to the global _MAX_LOG_CHARS constant.
+
+    If the caller passes limit=50, the reduced limit after the first removal must
+    be 50 - _TRUNCATION_MARKER_LEN, not _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN.
+    """
+    import collections
+
+    from app.bot import _TRUNCATION_MARKER_LEN, _trim_excess_lines
+
+    custom_limit = 50
+    # Two lines totalling just over custom_limit, so one removal is triggered.
+    line_a = "a" * 30
+    line_b = "b" * 30
+    lines: collections.deque[str] = collections.deque([line_a, line_b])
+    total_chars = (30 + 1) + (30 + 1)  # 62 > 50
+
+    total_chars, truncated, new_limit = _trim_excess_lines(
+        lines, total_chars, False, custom_limit
+    )
+
+    assert truncated is True
+    # The reduced limit must be relative to custom_limit, not to _MAX_LOG_CHARS.
+    assert new_limit == custom_limit - _TRUNCATION_MARKER_LEN
+
+
+def test_fetch_and_send_logs_unknown_level_normalizes_to_default(tmp_path):
+    """_fetch_and_send_logs called with an unknown level must use the default (INFO).
+
+    The header must display the normalised level, not the raw unknown string.
+    """
+    import datetime as dt
+
+    from app.bot import _LOG_LEVEL_DEFAULT
+
+    bot = _bot(tmp_path=tmp_path)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (log_dir / "sync.log").write_text(
+        f"{today} 10:00:00 INFO     app.foo: info line\n"
+        f"{today} 10:00:01 DEBUG    app.foo: debug line\n"
+    )
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(min_level="verbose")  # unknown level
+
+    sent = mock_send.call_args.args[0]
+    # Header must show the normalised default level, not "VERBOSE"
+    header = sent.split("\n\n")[0]
+    assert "VERBOSE" not in header
+    assert _LOG_LEVEL_DEFAULT.upper() in header
+    # DEBUG lines must not appear (INFO is the default filter)
+    assert "debug line" not in sent
+
+
+def test_log_line_level_returns_correct_numeric_level():
+    import logging as _logging
+
+    from app.bot import _log_line_level
+
+    assert (
+        _log_line_level("2026-08-24 10:00:00 DEBUG    app.foo: msg") == _logging.DEBUG
+    )
+    assert _log_line_level("2026-08-24 10:00:00 INFO     app.foo: msg") == _logging.INFO
+    assert (
+        _log_line_level("2026-08-24 10:00:00 WARNING  app.foo: msg") == _logging.WARNING
+    )
+    assert (
+        _log_line_level("2026-08-24 10:00:00 ERROR    app.foo: msg") == _logging.ERROR
+    )
+
+
+def test_log_line_level_returns_notset_for_malformed_lines():
+    import logging as _logging
+
+    from app.bot import _log_line_level
+
+    assert _log_line_level("") == _logging.NOTSET
+    assert _log_line_level("continuation line without a timestamp") == _logging.NOTSET
+    assert _log_line_level("2026-08-24 10:00:00") == _logging.NOTSET  # only 2 parts
+    # third token matches a logging attribute that is not an int (e.g. a callable)
+    assert _log_line_level("2026-08-24 10:00:00 getLogger rest") == _logging.NOTSET
+
+
+# ---------------------------------------------------------------------------
+# _cmd_logs — level picker and direct level argument
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_logs_no_args_sends_level_keyboard(tmp_path):
+    """Calling /logs with no args must show the level picker keyboard."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_logs([])
+    mock_send.assert_called_once()
+    call_kwargs = mock_send.call_args.kwargs
+    assert "keyboard" in call_kwargs
+    # Keyboard must contain all four level callbacks
+    buttons = [b for row in call_kwargs["keyboard"] for b in row]
+    cb_data = [b["callback_data"] for b in buttons]
+    assert any("debug" in d for d in cb_data)
+    assert any("info" in d for d in cb_data)
+    assert any("warning" in d for d in cb_data)
+    assert any("error" in d for d in cb_data)
+
+
+def test_cmd_logs_with_valid_level_launches_thread(tmp_path):
+    """Calling /logs info must start a background thread to fetch logs."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch("app.bot.threading.Thread") as mock_thread:
+        mock_thread.return_value.start = MagicMock()
+        bot._cmd_logs(["info"])
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["target"] == bot._fetch_and_send_logs
+    assert mock_thread.call_args.kwargs["kwargs"] == {"min_level": "info"}
+
+
+def test_cmd_logs_with_unknown_level_sends_error(tmp_path):
+    """An unrecognised level must produce an error message, not a thread."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch("app.bot.threading.Thread") as mock_thread,
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._cmd_logs(["verbose"])
+    mock_thread.assert_not_called()
+    mock_send.assert_called_once()
+    assert "verbose" in mock_send.call_args.args[0].lower()
+
+
+# ---------------------------------------------------------------------------
+# _on_cb_logs_level callback
+# ---------------------------------------------------------------------------
+
+
+def test_on_cb_logs_level_launches_thread_with_level(tmp_path):
+    """logs_level callback must launch _fetch_and_send_logs with the chosen level."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch("app.bot.threading.Thread") as mock_thread:
+        mock_thread.return_value.start = MagicMock()
+        bot._on_cb_logs_level(["logs_level", "warning"], "logs_level:warning")
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["kwargs"] == {"min_level": "warning"}
+
+
+def test_on_cb_logs_level_defaults_to_info_on_missing_part(tmp_path):
+    """If the callback_data has an empty level part, fall back to info.
+
+    The real dispatcher rejects data without a separator (len(parts) < 2) before
+    reaching the handler, so the realistic edge case is an empty second part
+    (e.g. ``"logs_level:"`` → parts ``["logs_level", ""]``).
+    """
+    from app.bot import _LOG_LEVEL_DEFAULT
+
+    bot = _bot(tmp_path=tmp_path)
+    with patch("app.bot.threading.Thread") as mock_thread:
+        mock_thread.return_value.start = MagicMock()
+        bot._on_cb_logs_level(["logs_level", ""], "logs_level:")
+    assert mock_thread.call_args.kwargs["kwargs"] == {"min_level": _LOG_LEVEL_DEFAULT}
+
+
+def test_dispatch_callback_routes_logs_level(tmp_path):
+    """_dispatch_callback must route logs_level:info to _on_cb_logs_level."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_on_cb_logs_level") as mock_handler:
+        bot._dispatch_callback(["logs_level", "info"], "logs_level:info")
+    mock_handler.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _fetch_and_send_logs — level filtering
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_and_send_logs_filters_debug_lines_by_default(tmp_path):
+    """Default (info) must exclude DEBUG lines."""
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (log_dir / "sync.log").write_text(
+        f"{today} 10:00:00 DEBUG    app.foo: debug message\n"
+        f"{today} 10:00:01 INFO     app.foo: info message\n"
+    )
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs()  # default: info
+
+    sent = mock_send.call_args.args[0]
+    assert "info message" in sent
+    assert "debug message" not in sent
+
+
+def test_fetch_and_send_logs_debug_level_includes_all_lines(tmp_path):
+    """min_level='debug' must include DEBUG lines."""
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (log_dir / "sync.log").write_text(
+        f"{today} 10:00:00 DEBUG    app.foo: debug message\n"
+        f"{today} 10:00:01 INFO     app.foo: info message\n"
+    )
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(min_level="debug")
+
+    sent = mock_send.call_args.args[0]
+    assert "debug message" in sent
+    assert "info message" in sent
+
+
+def test_fetch_and_send_logs_warning_level_excludes_info(tmp_path):
+    """min_level='warning' must exclude INFO lines."""
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (log_dir / "sync.log").write_text(
+        f"{today} 10:00:00 INFO     app.foo: info message\n"
+        f"{today} 10:00:01 WARNING  app.foo: warning message\n"
+        f"{today} 10:00:02 ERROR    app.foo: error message\n"
+    )
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(min_level="warning")
+
+    sent = mock_send.call_args.args[0]
+    assert "warning message" in sent
+    assert "error message" in sent
+    assert "info message" not in sent
+
+
+def test_fetch_and_send_logs_header_contains_level_label(tmp_path):
+    """The plain-text header must show the active level filter."""
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (log_dir / "sync.log").write_text(f"{today} 10:00:00 WARNING  app.foo: warn msg\n")
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(min_level="warning")
+
+    # Header is the text before the first blank line (double newline separator).
+    header = mock_send.call_args.args[0].split("\n\n")[0]
+    assert "WARNING" in header
+
+
+def test_fetch_and_send_logs_no_matching_lines_sends_no_logs_notice(tmp_path):
+    """When all lines are filtered out, must send the 'No logs today' notice."""
+    import datetime as dt
+
+    bot = _bot(tmp_path=tmp_path)
+    log_dir = bot._cfg.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    (log_dir / "sync.log").write_text(
+        f"{today} 10:00:00 DEBUG    app.foo: debug only\n"
+    )
+
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._fetch_and_send_logs(min_level="warning")
+
+    assert "No logs" in mock_send.call_args.args[0]
 
 
 # ---------------------------------------------------------------------------
