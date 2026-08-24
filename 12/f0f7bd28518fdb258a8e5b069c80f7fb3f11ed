@@ -1,0 +1,16 @@
+app/bot.py
+  h_97a91c9e567f87 98,394-397
+tests/test_bot.py
+  h_97a91c9e567f87 1507-1511,1513-1518,1524-1525,1693
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "12f0f7bd28518fdb258a8e5b069c80f7fb3f11ed",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
