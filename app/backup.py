@@ -257,7 +257,7 @@ def run_auto(
 # ---------------------------------------------------------------------------
 
 
-def _parse_monthly_param(param: str | None) -> tuple[int, int]:
+def parse_monthly_param(param: str | None) -> tuple[int, int]:
     """Parse an optional YYYY-MM string. Returns (year, month); raises ValueError on bad input."""
     if param is not None:
         parsed = datetime.strptime(param, "%Y-%m")  # only year/month needed, no tz
@@ -265,7 +265,7 @@ def _parse_monthly_param(param: str | None) -> tuple[int, int]:
     return _previous_month(datetime.now(UTC).date())
 
 
-def _parse_yearly_param(param: str | None) -> int:
+def parse_yearly_param(param: str | None) -> int:
     """Parse an optional YYYY string. Returns year; raises ValueError on bad input."""
     if param is not None:
         return int(param)

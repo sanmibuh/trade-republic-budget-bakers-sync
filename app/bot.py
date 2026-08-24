@@ -859,10 +859,10 @@ class TelegramBot:
             if mode == "auto":
                 backup_module.run_auto(client, notifier, cfg.data_dir)
             elif mode == "monthly":
-                year, month = backup_module._parse_monthly_param(period)
+                year, month = backup_module.parse_monthly_param(period)
                 backup_module.run_monthly(client, notifier, cfg.data_dir, year, month)
             elif mode == "yearly":
-                year = backup_module._parse_yearly_param(period)
+                year = backup_module.parse_yearly_param(period)
                 backup_module.run_yearly(client, notifier, cfg.data_dir, year)
             else:
                 log.warning("Unknown backup mode %r — ignoring", mode)

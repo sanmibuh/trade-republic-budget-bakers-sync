@@ -157,8 +157,8 @@ def _run_backup_mode(
 ) -> None:
     """Dispatch to the correct backup runner based on *mode*."""
     from app.backup import (
-        _parse_monthly_param,
-        _parse_yearly_param,
+        parse_monthly_param,
+        parse_yearly_param,
         run_auto,
         run_monthly,
         run_yearly,
@@ -168,7 +168,7 @@ def _run_backup_mode(
         run_auto(client, notifier, data_dir)
     elif mode == "monthly":
         try:
-            year, month = _parse_monthly_param(param)
+            year, month = parse_monthly_param(param)
         except ValueError:
             raise click.BadParameter(
                 f"Expected YYYY-MM, got {param!r}", param_hint="PARAM"
@@ -176,7 +176,7 @@ def _run_backup_mode(
         run_monthly(client, notifier, data_dir, year, month)
     elif mode == "yearly":
         try:
-            year = _parse_yearly_param(param)
+            year = parse_yearly_param(param)
         except ValueError:
             raise click.BadParameter(
                 f"Expected YYYY, got {param!r}", param_hint="PARAM"
