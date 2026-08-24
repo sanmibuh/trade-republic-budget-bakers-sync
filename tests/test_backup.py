@@ -9,11 +9,11 @@ import pytest
 
 from app.backup import (
     _month_range,
-    _parse_monthly_param,
-    _parse_yearly_param,
     _previous_month,
     _write_json,
     _year_range,
+    parse_monthly_param,
+    parse_yearly_param,
     run_auto,
     run_monthly,
     run_yearly,
@@ -54,23 +54,23 @@ def test_previous_month_january_wraps():
 
 
 def test_parse_monthly_param_none_returns_previous_month():
-    year, month = _parse_monthly_param(None)
+    year, month = parse_monthly_param(None)
     assert isinstance(year, int)
     assert 1 <= month <= 12
 
 
 def test_parse_monthly_param_valid_string():
-    assert _parse_monthly_param("2026-03") == (2026, 3)
+    assert parse_monthly_param("2026-03") == (2026, 3)
 
 
 def test_parse_monthly_param_invalid_raises():
     with pytest.raises(ValueError):
-        _parse_monthly_param("not-a-date")
+        parse_monthly_param("not-a-date")
 
 
 def test_parse_monthly_param_wrong_format_raises():
     with pytest.raises(ValueError):
-        _parse_monthly_param("2026/03")
+        parse_monthly_param("2026/03")
 
 
 # ---------------------------------------------------------------------------
@@ -81,17 +81,17 @@ def test_parse_monthly_param_wrong_format_raises():
 def test_parse_yearly_param_none_returns_previous_year():
     from datetime import datetime
 
-    year = _parse_yearly_param(None)
+    year = parse_yearly_param(None)
     assert year == datetime.now(UTC).year - 1
 
 
 def test_parse_yearly_param_valid_string():
-    assert _parse_yearly_param("2025") == 2025
+    assert parse_yearly_param("2025") == 2025
 
 
 def test_parse_yearly_param_invalid_raises():
     with pytest.raises(ValueError):
-        _parse_yearly_param("not-a-year")
+        parse_yearly_param("not-a-year")
 
 
 # ---------------------------------------------------------------------------
