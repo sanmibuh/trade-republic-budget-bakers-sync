@@ -1553,6 +1553,70 @@ def test_read_todays_logs_single_line_exceeding_limit_is_hard_truncated(tmp_path
     )
 
 
+def test_read_todays_logs_single_line_exactly_at_limit_not_truncated(tmp_path):
+    """A single line whose body equals _MAX_LOG_CHARS must NOT be truncated (fits exactly).
+
+    Bug (a): total_chars counts a phantom +1 newline, so comparing total_chars against
+    _MAX_LOG_CHARS would incorrectly truncate a line that is exactly _MAX_LOG_CHARS long.
+    """
+    import datetime as dt
+    import logging as _logging
+
+    from app.bot import _MAX_LOG_CHARS, _TRUNCATION_MARKER, _read_todays_logs
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    prefix = f"{today} 10:00:00 INFO     app.foo: "
+    # Pad so the whole stripped line is exactly _MAX_LOG_CHARS chars.
+    body = "x" * (_MAX_LOG_CHARS - len(prefix))
+    line = prefix + body
+    assert len(line) == _MAX_LOG_CHARS
+    (log_dir / "sync.log").write_text(line)
+
+    result = _read_todays_logs(log_dir / "sync.log", today, _logging.INFO)
+    assert _TRUNCATION_MARKER not in result, (
+        "A line of exactly _MAX_LOG_CHARS must not be truncated"
+    )
+    assert len(result) == _MAX_LOG_CHARS
+
+
+def test_read_todays_logs_single_line_exceeds_reduced_limit_after_truncation(tmp_path):
+    """Bug (b): when prior truncation has reduced limit, a line between limit and
+    _MAX_LOG_CHARS must still be clamped so marker + body <= _MAX_LOG_CHARS.
+    """
+    import datetime as dt
+    import logging as _logging
+
+    from app.bot import (
+        _MAX_LOG_CHARS,
+        _TRUNCATION_MARKER_LEN,
+        _read_todays_logs,
+    )
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    today = dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%d")
+    prefix = f"{today} 10:00:00 INFO     app.foo: "
+    reduced_limit = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN  # 3780
+
+    # First line: long enough to trigger truncation and reduce the limit.
+    # We need multiple lines so the while-loop can drop some; use two lines where
+    # the first pushes total over _MAX_LOG_CHARS.
+    filler_line = prefix + "a" * (_MAX_LOG_CHARS - len(prefix) + 1)
+    # Second line: within _MAX_LOG_CHARS but above the reduced limit (3780),
+    # so it slips through the while-loop guard but must be clamped.
+    slipping_body = "b" * (reduced_limit + 5 - len(prefix))
+    slipping_line = prefix + slipping_body
+
+    (log_dir / "sync.log").write_text(filler_line + "\n" + slipping_line)
+
+    result = _read_todays_logs(log_dir / "sync.log", today, _logging.INFO)
+    assert len(result) <= _MAX_LOG_CHARS, (
+        f"result length {len(result)} exceeds _MAX_LOG_CHARS={_MAX_LOG_CHARS}"
+    )
+
+
 def test_trim_excess_lines_drops_oldest_and_sets_truncated():
     """_trim_excess_lines removes oldest lines until total fits within limit."""
     import collections

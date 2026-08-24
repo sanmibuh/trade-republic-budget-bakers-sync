@@ -239,12 +239,19 @@ def _read_todays_logs(log_file: Path, today_str: str, min_level_num: int) -> str
             total_chars, truncated, limit = _trim_excess_lines(
                 lines, total_chars, truncated, limit
             )
-            # Single oversized line: hard-truncate it so result stays within limit.
-            if len(lines) == 1 and total_chars > _MAX_LOG_CHARS:
-                truncated = True
-                max_body = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
-                lines[0] = lines[0][:max_body]
-                total_chars = max_body
+            # Single oversized line: hard-truncate so marker + body stays within
+            # _MAX_LOG_CHARS.  Use len(lines[0]) directly (not total_chars, which
+            # carries a phantom +1 newline) and derive the body budget from whether
+            # the truncation marker will be prepended.
+            if len(lines) == 1:
+                body_limit = _MAX_LOG_CHARS - (
+                    _TRUNCATION_MARKER_LEN if truncated else 0
+                )
+                if len(lines[0]) > body_limit:
+                    truncated = True
+                    clamped = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+                    lines[0] = lines[0][:clamped]
+                    total_chars = clamped + 1
     text = "\n".join(lines)
     if truncated:
         text = _TRUNCATION_MARKER + text
