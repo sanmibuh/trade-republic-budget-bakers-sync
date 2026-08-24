@@ -20,7 +20,7 @@ class _FetchContext(TypedDict):
     skipped: int
 
 
-def _escape_markdown(value: str) -> str:
+def escape_markdown(value: str) -> str:
     escaped = value
     for token in (
         "\\",
@@ -47,7 +47,7 @@ def _escape_markdown(value: str) -> str:
     return escaped
 
 
-def _escape_code(value: str) -> str:
+def escape_code(value: str) -> str:
     """Escape a value for a MarkdownV2 inline-code span.
 
     Inside `` `...` `` only backslash and backtick are special; every other
@@ -123,10 +123,10 @@ class Notifier:
         )
 
     def _safe_owner(self) -> str:
-        return _escape_markdown(self._owner_name)
+        return escape_markdown(self._owner_name)
 
     def _header(self, icon: str, title: str) -> str:
-        return f"{icon} *Trade Republic Sync: {_escape_markdown(title)}*\n\nOwner: *{self._safe_owner()}*\n"
+        return f"{icon} *Trade Republic Sync: {escape_markdown(title)}*\n\nOwner: *{self._safe_owner()}*\n"
 
     def authentication_required(self) -> bool:
         return self._send(
@@ -136,6 +136,7 @@ class Notifier:
         )
 
     def login_required(self) -> bool:
+        log.info("Login required — initiating 2FA flow for owner: %s", self._owner_name)
         return self._send(
             self._header("🔐", "Login Required")
             + "No saved session found\\. A new 2FA login has been initiated\\.\n"
@@ -150,7 +151,7 @@ class Notifier:
         )
 
     def login_code_request(self, instance: str) -> bool:
-        safe_instance = _escape_code(instance)
+        safe_instance = escape_code(instance)
         return self._send_with_markup(
             self._header("🔐", "2FA Code Required") + f"Instance: `{safe_instance}`\n"
             "Just reply here with your 6\\-digit authenticator code\\.\n"
@@ -164,7 +165,7 @@ class Notifier:
         )
 
     def login_code_timeout(self, instance: str) -> bool:
-        safe_instance = _escape_code(instance)
+        safe_instance = escape_code(instance)
         return self._send(
             self._header("⏱", "2FA Timeout")
             + f"The code request for `{safe_instance}` has expired\\.\n"
@@ -172,13 +173,14 @@ class Notifier:
         )
 
     def login_success(self) -> bool:
+        log.info("Login successful — session saved for owner: %s", self._owner_name)
         return self._send(
             self._header("✅", "Login Successful")
             + "Session saved\\. Future syncs will run automatically\\."
         )
 
     def error(self, exc: Exception) -> bool:
-        safe_error = _escape_markdown(f"{type(exc).__name__}: {exc}")
+        safe_error = escape_code(f"{type(exc).__name__}: {exc}")
         return self._send(self._header("❌", "Sync Failed") + f"Error: `{safe_error}`")
 
     def fetch_summary(
@@ -200,7 +202,7 @@ class Notifier:
         )
 
     def unknown_event_type(self, event_type: str) -> bool:
-        safe_type = _escape_markdown(event_type)
+        safe_type = escape_code(event_type)
         return self._send(
             self._header("⚠️", "Unknown Event Type")
             + f"Event type `{safe_type}` is not recognised\\.\n"
@@ -209,8 +211,8 @@ class Notifier:
         )
 
     def missing_api_result(self, event_id: str, missing_indices: list[int]) -> bool:
-        safe_id = _escape_markdown(event_id)
-        safe_indices = _escape_markdown(", ".join(str(i) for i in missing_indices))
+        safe_id = escape_code(event_id)
+        safe_indices = escape_code(", ".join(str(i) for i in missing_indices))
         return self._send(
             self._header("⚠️", "Incomplete API Response")
             + f"Event `{safe_id}` has no result for record index\\(es\\): `{safe_indices}`\\.\n"
@@ -233,18 +235,18 @@ class Notifier:
         else:
             icon, status = "⚠️", "Partial"
         lines = [
-            f"{icon} *Trade Republic Sync: {safe} — {_escape_markdown(status)}*\n",
+            f"{icon} *Trade Republic Sync: {safe} — {escape_markdown(status)}*\n",
         ]
         if self._fetch_context is not None:
             ctx = self._fetch_context
-            safe_since = _escape_markdown(ctx["since"])
-            safe_until = _escape_markdown(ctx["until"])
+            safe_since = escape_code(ctx["since"])
+            safe_until = escape_code(ctx["until"])
             lines.append(
                 f"Period: `{safe_since}` → `{safe_until}`\n"
                 f"Fetched: *{ctx['fetched']}* · New: *{ctx['new']}* · Already synced: *{ctx['skipped']}*\n"
             )
         lines.append(
-            f"Saved: *{synced}* · Failed: *{_escape_markdown(str(failed))}* · Skipped: *{skipped}*"
+            f"Saved: *{synced}* · Failed: *{escape_markdown(str(failed))}* · Skipped: *{skipped}*"
         )
         if excluded:
             lines.append(f"Excluded \\(zero amount\\): *{excluded}*")
@@ -261,10 +263,10 @@ class Notifier:
         filename: str | None = None,
     ) -> bool:
         safe = self._safe_owner()
-        safe_mode = _escape_markdown(mode.capitalize())
-        safe_period = _escape_markdown(period)
-        safe_from = _escape_markdown(date_from)
-        safe_to = _escape_markdown(date_to)
+        safe_mode = escape_markdown(mode.capitalize())
+        safe_period = escape_code(period)
+        safe_from = escape_code(date_from)
+        safe_to = escape_code(date_to)
         records = counts.get("records", 0)
         accounts = counts.get("accounts", 0)
         categories = counts.get("categories", 0)
@@ -278,8 +280,8 @@ class Notifier:
             f"Budgets: *{budgets}* · Labels: *{labels}*",
         ]
         if counts.get("monthly_removed"):
-            removed = _escape_markdown(str(counts["monthly_removed"]))
+            removed = escape_markdown(str(counts["monthly_removed"]))
             lines.append(f"Monthly files removed: *{removed}*")
         if filename:
-            lines.append(f"File: `{_escape_markdown(filename)}`")
+            lines.append(f"File: `{escape_code(filename)}`")
         return self._send("\n".join(lines))

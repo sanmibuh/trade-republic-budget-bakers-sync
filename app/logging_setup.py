@@ -7,6 +7,23 @@ from pathlib import Path
 _LOG_FMT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 _DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
+# Third-party libraries that are very chatty at INFO/DEBUG level.  We cap them
+# at WARNING so that the application logs stay readable without noise from HTTP
+# wire traffic and Telegram protocol internals.
+_NOISY_LOGGERS = ("httpx", "telegram", "hpack")
+
+
+def _suppress_noisy_loggers() -> None:
+    """Raise chatty third-party loggers to WARNING if their level is currently below it.
+
+    Only the effective level is raised; a stricter configuration (e.g. ERROR)
+    set by the caller or the environment is never lowered.
+    """
+    for name in _NOISY_LOGGERS:
+        logger = logging.getLogger(name)
+        if logger.getEffectiveLevel() < logging.WARNING:
+            logger.setLevel(logging.WARNING)
+
 
 def _make_formatter() -> logging.Formatter:
     return logging.Formatter(fmt=_LOG_FMT, datefmt=_DATE_FMT)
@@ -28,6 +45,10 @@ def setup_logging(log_dir: Path) -> None:
     log_file = log_dir / "sync.log"
 
     root = logging.getLogger()
+
+    # Always re-suppress noisy loggers, even on repeated calls (e.g. long-running
+    # processes where a library may have reset its log level between invocations).
+    _suppress_noisy_loggers()
 
     # Guard against duplicate handlers when called more than once in the same
     # process (e.g. during testing or if a CLI entry point calls it twice).
@@ -56,6 +77,10 @@ def setup_logging(log_dir: Path) -> None:
 
     root.addHandler(fh)
     root.addHandler(ch)
+    # Run suppression again now that root is at DEBUG: loggers that were NOTSET
+    # and inherited root's pre-setup level (e.g. WARNING) were skipped by the
+    # pre-guard call above; they now inherit DEBUG and must be capped.
+    _suppress_noisy_loggers()
 
 
 def configure_logging() -> None:
@@ -68,6 +93,8 @@ def configure_logging() -> None:
     ``list-instances``) run without any explicit logging configuration.
     """
     root = logging.getLogger()
+    # Always re-suppress noisy loggers, even on repeated calls.
+    _suppress_noisy_loggers()
     if root.handlers:
         return  # already configured
     root.setLevel(logging.DEBUG)
@@ -75,3 +102,4 @@ def configure_logging() -> None:
     ch.setLevel(logging.INFO)
     ch.setFormatter(_make_formatter())
     root.addHandler(ch)
+    _suppress_noisy_loggers()

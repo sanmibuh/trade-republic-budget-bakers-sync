@@ -1647,6 +1647,10 @@ sync:
         "30 3 1,15 * *",
         "0 0 * * 0",
         "59 23 31 12 7",
+        # boundary values — lower bounds
+        "0 0 1 1 0",
+        # step on wildcard
+        "*/30 */6 * * *",
     ],
 )
 def test_validate_cron_schedule_valid(expr):
@@ -1679,6 +1683,45 @@ def test_validate_cron_schedule_valid(expr):
 )
 def test_validate_cron_schedule_invalid(expr):
     """Invalid or injected schedule strings must raise ValueError."""
+    from app.config import _validate_cron_schedule
+
+    with pytest.raises(ValueError, match="schedule"):
+        _validate_cron_schedule("schedule", expr)
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        # Minute out of range
+        "60 * * * *",
+        "99 * * * *",
+        # Hour out of range
+        "0 24 * * *",
+        "0 25 * * *",
+        # Day of month out of range
+        "0 0 0 * *",
+        "0 0 32 * *",
+        # Month out of range
+        "0 0 1 0 *",
+        "0 0 1 13 *",
+        # Day of week out of range
+        "0 0 * * 8",
+        # Multiple fields all wrong
+        "99 99 99 99 99",
+        # Range with out-of-range boundary
+        "0 0-24 * * *",
+        "60-61 * * * *",
+        # List with one out-of-range value
+        "0 8,24 * * *",
+        "0 0 1,32 * *",
+        # Step of zero — silently ignored by cron daemon
+        "*/0 * * * *",
+        "0 */0 * * *",
+        "0-30/0 * * * *",
+    ],
+)
+def test_validate_cron_schedule_out_of_range(expr):
+    """Cron expressions with out-of-range field values must raise ValueError."""
     from app.config import _validate_cron_schedule
 
     with pytest.raises(ValueError, match="schedule"):

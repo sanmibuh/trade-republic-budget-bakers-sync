@@ -476,15 +476,6 @@ image publish workflows.
 - `backups/monthly/` — monthly JSON snapshots (permanent)
 - `backups/yearly/` — yearly JSON snapshots (permanent)
 
-**Legacy layout** (pre-issue #173): each instance had its own `sync/{name}/sync.db`.  All production
-deployments were migrated to the shared `sync.db` as part of #173.  The old per-instance files can be
-deleted manually if still present.
-
-**Legacy layout** (pre-issue #174): session and 2FA files lived under `sync/{name}/`.  Existing
-deployments must move each `sync/{name}/cookies.txt` to `tr_session_{name}/cookies.txt` (and similarly
-for `credentials.json`) and move the 2FA marker files to the new instance-suffixed paths at the data
-root — otherwise the instance will require a fresh login on next run.
-
 ---
 
 ## Test-Driven Development (TDD)
