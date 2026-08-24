@@ -1757,6 +1757,30 @@ def test_clamp_single_line_truncates_when_already_truncated():
     assert total == reduced
 
 
+def test_clamp_single_line_respects_custom_limit():
+    """_clamp_single_line must clamp relative to limit, not _MAX_LOG_CHARS.
+
+    A line that exceeds a custom (small) limit but fits within _MAX_LOG_CHARS
+    must still be truncated.
+    """
+    import collections
+
+    from app.bot import _TRUNCATION_MARKER_LEN, _clamp_single_line
+
+    custom_limit = 100
+    oversized = "x" * (
+        custom_limit + 1
+    )  # 101 chars — fits in _MAX_LOG_CHARS but not limit
+    lines: collections.deque[str] = collections.deque([oversized])
+    total, truncated, new_limit = _clamp_single_line(
+        lines, len(oversized), False, custom_limit
+    )
+    assert truncated is True
+    assert len(lines[0]) == custom_limit - _TRUNCATION_MARKER_LEN
+    assert total == custom_limit - _TRUNCATION_MARKER_LEN
+    assert new_limit == custom_limit - _TRUNCATION_MARKER_LEN
+
+
 def test_trim_excess_lines_drops_oldest_and_sets_truncated():
     """_trim_excess_lines removes oldest lines until total fits within limit."""
     import collections

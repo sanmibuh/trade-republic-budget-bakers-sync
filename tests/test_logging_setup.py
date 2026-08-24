@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import logging
 
-from app.logging_setup import _suppress_noisy_loggers, configure_logging, setup_logging
+from app.logging_setup import (
+    _NOISY_LOGGERS,
+    _suppress_noisy_loggers,
+    configure_logging,
+    setup_logging,
+)
 
 _EXPECTED_FMT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 _EXPECTED_DATEFMT = "%Y-%m-%d %H:%M:%S"
@@ -111,9 +116,6 @@ def test_setup_logging_idempotent(tmp_path):
                 h.close()
 
 
-_NOISY_LOGGERS = ("httpx", "telegram", "hpack")
-
-
 def test_setup_logging_suppresses_noisy_library_loggers(tmp_path):
     """httpx / telegram / hpack loggers must be raised to WARNING after setup_logging."""
     root = logging.getLogger()
@@ -182,6 +184,64 @@ def test_suppress_noisy_loggers_does_not_lower_stricter_level(tmp_path):
                 root.removeHandler(h)
                 h.close()
         logging.getLogger(probe).setLevel(original_level)
+
+
+def test_setup_logging_resuppresses_noisy_loggers_on_repeated_call(tmp_path):
+    """setup_logging must re-suppress noisy loggers even when handlers already exist.
+
+    If a noisy logger is reset to DEBUG between two setup_logging calls (e.g. in
+    a long-running process or between tests), the second call must still raise it
+    back to WARNING — the idempotency guard must not skip suppression.
+    """
+    root = logging.getLogger()
+    before = set(root.handlers)
+    original_levels = {name: logging.getLogger(name).level for name in _NOISY_LOGGERS}
+    try:
+        # First call: establishes handlers and suppresses noisy loggers.
+        setup_logging(tmp_path)
+        # Simulate noisy loggers being reset (e.g. by a library or test teardown).
+        for name in _NOISY_LOGGERS:
+            logging.getLogger(name).setLevel(logging.DEBUG)
+        # Second call hits the idempotency guard — suppression must still happen.
+        setup_logging(tmp_path)
+        for name in _NOISY_LOGGERS:
+            assert logging.getLogger(name).level == logging.WARNING, (
+                f"Logger {name!r} should be WARNING after repeated setup_logging call"
+            )
+    finally:
+        for h in root.handlers[:]:
+            if h not in before:
+                root.removeHandler(h)
+                h.close()
+        for name, level in original_levels.items():
+            logging.getLogger(name).setLevel(level)
+
+
+def test_configure_logging_resuppresses_noisy_loggers_on_repeated_call():
+    """configure_logging must re-suppress noisy loggers even when handlers already exist."""
+    root = logging.getLogger()
+    before = set(root.handlers)
+    original_levels = {name: logging.getLogger(name).level for name in _NOISY_LOGGERS}
+    try:
+        for h in root.handlers[:]:
+            root.removeHandler(h)
+        configure_logging()
+        for name in _NOISY_LOGGERS:
+            logging.getLogger(name).setLevel(logging.DEBUG)
+        configure_logging()  # hits the idempotency guard
+        for name in _NOISY_LOGGERS:
+            assert logging.getLogger(name).level == logging.WARNING, (
+                f"Logger {name!r} should be WARNING after repeated configure_logging call"
+            )
+    finally:
+        for h in root.handlers[:]:
+            if h not in before:
+                root.removeHandler(h)
+                h.close()
+        for h in before:
+            root.addHandler(h)
+        for name, level in original_levels.items():
+            logging.getLogger(name).setLevel(level)
 
 
 def test_suppress_noisy_loggers_respects_effective_level_via_parent():

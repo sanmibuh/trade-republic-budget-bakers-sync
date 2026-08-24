@@ -46,6 +46,10 @@ def setup_logging(log_dir: Path) -> None:
 
     root = logging.getLogger()
 
+    # Always re-suppress noisy loggers, even on repeated calls (e.g. long-running
+    # processes where a library may have reset its log level between invocations).
+    _suppress_noisy_loggers()
+
     # Guard against duplicate handlers when called more than once in the same
     # process (e.g. during testing or if a CLI entry point calls it twice).
     if any(
@@ -73,7 +77,6 @@ def setup_logging(log_dir: Path) -> None:
 
     root.addHandler(fh)
     root.addHandler(ch)
-    _suppress_noisy_loggers()
 
 
 def configure_logging() -> None:
@@ -86,6 +89,8 @@ def configure_logging() -> None:
     ``list-instances``) run without any explicit logging configuration.
     """
     root = logging.getLogger()
+    # Always re-suppress noisy loggers, even on repeated calls.
+    _suppress_noisy_loggers()
     if root.handlers:
         return  # already configured
     root.setLevel(logging.DEBUG)
@@ -93,4 +98,3 @@ def configure_logging() -> None:
     ch.setLevel(logging.INFO)
     ch.setFormatter(_make_formatter())
     root.addHandler(ch)
-    _suppress_noisy_loggers()

@@ -221,18 +221,20 @@ def _clamp_single_line(
 
     Does nothing when *lines* holds more than one entry (the caller's trimming
     loop already handles multi-line overflow).  When truncation is needed the
-    line is clamped to ``_MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN`` characters
-    and *truncated* / *limit* are updated so subsequent calls respect the
-    reduced budget.
+    line is clamped relative to *limit*: if truncation has not yet started the
+    marker length is subtracted first so that marker + body stays within the
+    original budget; when already truncated the line is clamped to *limit*
+    directly.
 
     Returns the updated ``(total_chars, truncated, limit)`` triple.
     """
     if len(lines) != 1:
         return total_chars, truncated, limit
-    body_limit = _MAX_LOG_CHARS - (_TRUNCATION_MARKER_LEN if truncated else 0)
+    body_limit = limit
     if len(lines[0]) > body_limit:
-        truncated = True
-        limit = _MAX_LOG_CHARS - _TRUNCATION_MARKER_LEN
+        if not truncated:
+            truncated = True
+            limit = limit - _TRUNCATION_MARKER_LEN
         lines[0] = lines[0][:limit]
         total_chars = limit
     return total_chars, truncated, limit
