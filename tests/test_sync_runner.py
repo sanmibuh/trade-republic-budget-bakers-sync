@@ -1890,3 +1890,75 @@ def test_process_results_force_updates_existing_wallet_record_id(tmp_path):
         repo.commit()
         runner.process_results(results, [event], [[0]], repo, force=True)
         assert repo.get_wallet_record_id(event) == "new-wid"
+
+
+# ---------------------------------------------------------------------------
+# submit_batch — reversal failure logging and notification
+# ---------------------------------------------------------------------------
+
+
+def _make_cancellation_runner(tmp_path):
+    """Helper: runner + canceled event pre-marked in DB."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "none"
+    cfg.instance = "tst"
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+    event = {
+        "id": "ev-reversal-fail",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    return runner, notifier, event
+
+
+def test_submit_batch_reversal_api_error_is_logged(tmp_path):
+    """When a reversal POST returns a per-item error, the failure must be logged
+    at ERROR level so it is visible in the container logs."""
+    runner, _notifier, event = _make_cancellation_runner(tmp_path)
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.mark_processed(event, wallet_record_id="old-wid")
+        repo.commit()
+        wallet_client = MagicMock()
+        wallet_client.post_records.return_value = [
+            {"inputIndex": 0, "error": "account not found"}
+        ]
+        batch = runner.build_batch([], repo, cancellation_events=[event])
+
+        with patch("app.sync_runner.log") as mock_log:
+            runner.submit_batch(batch, wallet_client, repo, new_events=[])
+
+    mock_log.error.assert_called()
+    error_call_args = " ".join(str(a) for a in mock_log.error.call_args_list[0][0])
+    assert "ev-reversal-fail" in error_call_args
+
+
+def test_submit_batch_reversal_missing_result_is_logged_and_notified(tmp_path):
+    """When a reversal POST result is missing (no entry for the record index),
+    the failure must be logged at ERROR level and surfaced via notifier.missing_api_result."""
+    runner, notifier, event = _make_cancellation_runner(tmp_path)
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.mark_processed(event, wallet_record_id="old-wid")
+        repo.commit()
+        wallet_client = MagicMock()
+        # Return an empty list — no result for the reversal record
+        wallet_client.post_records.return_value = []
+        batch = runner.build_batch([], repo, cancellation_events=[event])
+
+        with patch("app.sync_runner.log") as mock_log:
+            counts = runner.submit_batch(batch, wallet_client, repo, new_events=[])
+
+    mock_log.error.assert_called()
+    notifier.missing_api_result.assert_called_once()
+    assert counts.failed == 1

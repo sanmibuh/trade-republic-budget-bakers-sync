@@ -619,17 +619,11 @@ class SyncRunner:
         for indices, c_event in zip(
             batch.cancellation_record_indices, batch.cancellation_events, strict=True
         ):
-            all_present = all(i in results_by_index for i in indices)
-            any_failed = any(i in failed_indices for i in indices)
-            if all_present and not any_failed:
-                repo.mark_processed_force(c_event, wallet_record_id=None)
-                log.info(
-                    "Cleared wallet_record_id for canceled event %s",
-                    dedup_event_id(c_event),
-                )
-                c_synced += 1
-            else:
-                c_failed += 1
+            s, f = self._process_cancellation_result(
+                c_event, indices, results_by_index, failed_indices, repo
+            )
+            c_synced += s
+            c_failed += f
 
         counts = self.process_results(
             results,
@@ -649,6 +643,54 @@ class SyncRunner:
 
     # resync_day helpers
     # ------------------------------------------------------------------
+
+    def _process_cancellation_result(
+        self,
+        c_event: dict[str, Any],
+        indices: list[int],
+        results_by_index: dict[int, dict[str, Any]],
+        failed_indices: set[int],
+        repo: EventRepository,
+    ) -> tuple[int, int]:
+        """Process the API result for one cancellation reversal.
+
+        Clears ``wallet_record_id`` on success (so a subsequent sync does not
+        post a second reversal) and logs/notifies on failure.
+
+        Returns:
+            ``(synced_delta, failed_delta)`` — exactly one of the two is 1.
+        """
+        all_present = all(i in results_by_index for i in indices)
+        any_failed = any(i in failed_indices for i in indices)
+        if all_present and not any_failed:
+            repo.mark_processed_force(c_event, wallet_record_id=None)
+            log.info(
+                "Cleared wallet_record_id for canceled event %s",
+                dedup_event_id(c_event),
+            )
+            return 1, 0
+
+        eid = dedup_event_id(c_event)
+        missing = [i for i in indices if i not in results_by_index]
+        if missing:
+            log.error(
+                "Cancellation reversal for event %s has no API result"
+                " for record index(es): %s",
+                eid,
+                missing,
+            )
+            self._notifier.missing_api_result(eid, missing)
+        else:
+            for i in indices:
+                r = results_by_index[i]
+                if r.get("error"):
+                    log.error(
+                        "Cancellation reversal for event %s record %d failed: %s",
+                        eid,
+                        r.get("inputIndex"),
+                        r.get("error"),
+                    )
+        return 0, 1
 
     def _warn_unknown_event_type(self, event: dict[str, Any]) -> None:
         """Log a warning and notify if *event* carries an unrecognised type."""
