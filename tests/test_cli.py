@@ -960,9 +960,13 @@ def test_check_day_with_instance_flag_calls_run_check_day(tmp_path):
     from app.config import Config, InstancesConfig
     from app.main import CheckDayResult
 
+    db_path = tmp_path / "sync.db"
+    db_path.touch()  # DB must exist — check-day does not create it
+
     mock_cfg = MagicMock(spec=Config)
     mock_cfg.allow_insecure_ssl = False
     mock_cfg.owner_name = "User1"
+    mock_cfg.shared_db_path = db_path
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
     mock_instances.data_dir = tmp_path
@@ -974,7 +978,6 @@ def test_check_day_with_instance_flag_calls_run_check_day(tmp_path):
         patch("app.main.run_check_day", return_value=check_result) as mock_run,
         patch("app.__main__.setup_logging"),
         patch("app.http_client.configure"),
-        patch("app.persistence.init_db"),
     ):
         result = _runner().invoke(
             cli, ["check-day", "--instance", "user1", "2026-08-20"]
@@ -982,6 +985,30 @@ def test_check_day_with_instance_flag_calls_run_check_day(tmp_path):
 
     assert result.exit_code == 0
     mock_run.assert_called_once_with("2026-08-20", cfg=mock_cfg)
+
+
+def test_check_day_missing_db_exits_with_error(tmp_path):
+    """check-day must exit with an error when the database file does not exist."""
+    from app.config import Config, InstancesConfig
+
+    mock_cfg = MagicMock(spec=Config)
+    mock_cfg.allow_insecure_ssl = False
+    mock_cfg.owner_name = "User1"
+    mock_cfg.shared_db_path = tmp_path / "sync.db"  # does not exist
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.to_config.return_value = mock_cfg
+    mock_instances.data_dir = tmp_path
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.__main__.setup_logging"),
+        patch("app.http_client.configure"),
+    ):
+        result = _runner().invoke(
+            cli, ["check-day", "--instance", "user1", "2026-08-20"]
+        )
+
+    assert result.exit_code != 0
 
 
 def test_check_day_without_instance_flag_exits_with_error():
@@ -994,9 +1021,13 @@ def test_check_day_invalid_date_exits_one(tmp_path):
     """check-day exits 1 when run_check_day returns None (invalid date)."""
     from app.config import Config, InstancesConfig
 
+    db_path = tmp_path / "sync.db"
+    db_path.touch()
+
     mock_cfg = MagicMock(spec=Config)
     mock_cfg.allow_insecure_ssl = False
     mock_cfg.owner_name = "User1"
+    mock_cfg.shared_db_path = db_path
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
     mock_instances.data_dir = tmp_path
@@ -1006,7 +1037,6 @@ def test_check_day_invalid_date_exits_one(tmp_path):
         patch("app.main.run_check_day", return_value=None),
         patch("app.__main__.setup_logging"),
         patch("app.http_client.configure"),
-        patch("app.persistence.init_db"),
     ):
         result = _runner().invoke(
             cli, ["check-day", "--instance", "user1", "not-a-date"]
@@ -1020,9 +1050,13 @@ def test_check_day_prints_report(tmp_path):
     from app.config import Config, InstancesConfig
     from app.main import CheckDayResult, EventSummary
 
+    db_path = tmp_path / "sync.db"
+    db_path.touch()
+
     mock_cfg = MagicMock(spec=Config)
     mock_cfg.allow_insecure_ssl = False
     mock_cfg.owner_name = "MyAccount"
+    mock_cfg.shared_db_path = db_path
     mock_instances = MagicMock(spec=InstancesConfig)
     mock_instances.to_config.return_value = mock_cfg
     mock_instances.data_dir = tmp_path
@@ -1054,7 +1088,6 @@ def test_check_day_prints_report(tmp_path):
         patch("app.main.run_check_day", return_value=check_result),
         patch("app.__main__.setup_logging"),
         patch("app.http_client.configure"),
-        patch("app.persistence.init_db"),
     ):
         result = _runner().invoke(
             cli, ["check-day", "--instance", "user1", "2026-08-20"]

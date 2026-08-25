@@ -203,9 +203,12 @@ def run_check_day(date_str: str, cfg: Config) -> CheckDayResult | None:
 
     Fetches TR timeline events for *date_str*, classifies each as processed or
     not-yet-processed by querying the shared SQLite database, and returns a
-    :class:`CheckDayResult` with those two lists.  Nothing is written: no
-    ``processed_events`` inserts, no ``WalletClient`` calls, no Telegram
-    notification.
+    :class:`CheckDayResult` with those two lists.
+
+    No side effects on success: no ``processed_events`` inserts, no
+    ``WalletClient`` calls, no ``sync_complete`` notification.  Auth and error
+    notifications (e.g. login required) may still be sent by
+    :class:`~app.sync_runner.SyncRunner` during the TR connection phase.
 
     Args:
         date_str: ISO date string ``YYYY-MM-DD`` for the day to check.
@@ -237,9 +240,8 @@ def run_check_day(date_str: str, cfg: Config) -> CheckDayResult | None:
 
     with EventRepository(cfg.shared_db_path, instance=cfg.instance) as repo:
         for event in day_events:
-            eid = dedup_event_id(event)
             summary = _event_to_summary(event)
-            if repo.is_processed(eid):
+            if repo.is_processed(summary.event_id):
                 result.processed.append(summary)
             else:
                 result.not_processed.append(summary)

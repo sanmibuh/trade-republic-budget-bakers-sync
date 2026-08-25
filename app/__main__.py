@@ -277,12 +277,16 @@ def check_day(instance: str, date: str) -> None:
     """
     from app.http_client import configure
     from app.main import run_check_day
-    from app.persistence import init_db
 
     cfg, log_dir = _resolve_instance_cfg(instance)
     setup_logging(log_dir)
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
-    init_db(cfg.shared_db_path)
+
+    if not cfg.shared_db_path.exists():
+        raise click.UsageError(
+            f"Database not found at {cfg.shared_db_path}. "
+            "Run at least one sync first to initialise the database."
+        )
 
     result = run_check_day(date, cfg=cfg)
     if result is None:
