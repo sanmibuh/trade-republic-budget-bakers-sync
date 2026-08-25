@@ -1,0 +1,16 @@
+app/sync_runner.py
+  h_97a91c9e567f87 632-651
+tests/test_sync_runner.py
+  h_97a91c9e567f87 1893-1964
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "29364d1bf7f21e04b29eb363d2ca7f643d803103",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
