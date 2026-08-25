@@ -39,7 +39,7 @@ Notifier.sync_complete()           # Telegram summary (optional)
 ## Data flow — Force Resync (single day)
 
 ```
-python -m app resync YYYY-MM-DD
+python -m app resync --instance <name> YYYY-MM-DD
         ↓
 SyncRunner.resync_day(date_str, repo, wallet_client)
         ↓
@@ -115,7 +115,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
   `data_dir/.tr_2fa_pending` marker; that marker is removed on success or timeout. On expiry, it calls `on_timeout`
   (if set) — wired by `select_code_provider` to `notifier.login_code_timeout(instance)`, which sends a cancellation
   message in Telegram — then raises `TimeoutError`.
-- `submit-code` (`python -m app submit-code <code>`) checks for `.tr_2fa_pending` before writing the code file; if
+- `submit-code` (`python -m app submit-code --instance <name> <code>`) checks for `.tr_2fa_pending` before writing the code file; if
   the marker is absent (no login in progress), it exits 1 with "No active login request for this instance" so stale
   `/code` submissions are rejected cleanly.
 - Code delivery: the `/code` bot command calls `python -m app submit-code --instance <name> <code>` in-process
@@ -208,13 +208,13 @@ execution paths before any `EventRepository` is opened.
 
 ### CLI entry point (`app/__main__.py`)
 - Single entry point via `python -m app` using **click** with subcommands:
-  - `python -m app sync` — runs `main.run()`
   - `python -m app sync --instance <name>` — resolves config from `instances.yml` and runs sync for that instance
   - `python -m app backup <mode> [param]` — dispatches to `backup.run_auto/run_monthly/run_yearly`
   - `python -m app bot` — starts the Telegram bot
-  - `python -m app submit-code <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting
+  - `python -m app submit-code --instance <name> <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting
     sync process to pick up
-  - `python -m app resync YYYY-MM-DD` — runs `main.run_resync(date_str)`, force re-syncing a specific day
+  - `python -m app resync --instance <name> YYYY-MM-DD` — runs `main.run_resync(date_str)`, force re-syncing a specific day
+  - `python -m app check-pending --instance <name>` — exits 0 if a 2FA code is pending for the given instance, 1 otherwise
   - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG_PATH`, one per line.
   - `python -m app list-schedules` — prints `name<TAB>schedule` for every instance that has a schedule,
     one per line. Used by `entrypoint.sh` to register one cron job per instance with its own schedule.
