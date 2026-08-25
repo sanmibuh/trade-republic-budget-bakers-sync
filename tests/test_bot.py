@@ -2917,19 +2917,16 @@ def test_submit_code_to_sends_error_when_write_fails(tmp_path):
     """_submit_code_to must catch write errors and send an error message."""
     bot = _bot(tmp_path=tmp_path)
     inst = bot._cfg.instances["user1"]
-    # pending_file and twofa_code_file share the same parent (tmp_path).
-    pending_file = inst.config.twofa_pending_file
-    pending_file.write_text("pending")
-    # Make the directory read-only so writing the code file will fail.
-    tmp_path.chmod(0o555)
-    try:
-        with patch.object(bot, "_send_message") as mock_send:
-            result = bot._submit_code_to(inst, "123456")
-    finally:
-        tmp_path.chmod(0o755)
+    # Create the pending file before entering the patch so the real write_text works.
+    inst.config.twofa_pending_file.write_text("pending")
+    with (
+        patch("pathlib.Path.write_text", side_effect=OSError("disk full")),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        result = bot._submit_code_to(inst, "123456")
     assert result is False
     mock_send.assert_called_once()
-    assert "Could not" in mock_send.call_args.args[0]
+    assert "disk full" in mock_send.call_args.args[0]
 
 
 # ---------------------------------------------------------------------------
