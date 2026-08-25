@@ -94,10 +94,8 @@ __all__ = [
     "InstanceConfig",
     "TelegramBot",
     "_auth_icon",
-    "_check_session_direct",
     "_clamp_single_line",
     "_format_sync_timestamp",
-    "_last_sync_summary_direct",
     "_log_line_level",
     "_read_todays_logs",
     "_trim_excess_lines",
@@ -319,9 +317,7 @@ def _instance_status_direct(
 
     Opens ``EventRepository`` at most once, fetching both ``auth_state`` and
     ``sync_runs`` in a single connection.  This is the preferred call site for
-    :meth:`TelegramBot._instance_status_line`; it halves the number of SQLite
-    opens compared with calling ``_check_session_direct`` and
-    ``_last_sync_summary_direct`` separately.
+    :meth:`TelegramBot._instance_status_line`.
 
     The last sync info is always read from the DB regardless of the current
     session/cookie state, so ``/status`` keeps showing the last sync summary
@@ -383,51 +379,6 @@ def _build_sync_summary(run_info: dict[str, Any] | None) -> str | None:
     if excluded is not None:
         parts.append(f"excluded {excluded}")
     return " · ".join(parts)
-
-
-def _check_session_direct(
-    data_dir: Path, shared_db_path: Path, instance: str
-) -> bool | None:
-    """Return True/False/None for the session state of *instance*.
-
-    Reads cookie file expiry and ``auth_state`` from the shared ``sync.db``
-    directly without any network calls.
-
-    Returns:
-        True  — session valid and ``auth_state`` is ``ok`` (or no state yet).
-        False — session missing/expired or ``auth_state`` is ``failed``/``expired``.
-        None  — DB could not be read (corrupted/locked).
-    """
-    from app.persistence import EventRepository
-
-    if not has_valid_session(data_dir):
-        return False
-
-    if shared_db_path.exists():
-        try:
-            with EventRepository(shared_db_path, instance=instance) as repo:
-                auth_status = repo.get_auth_state(instance)
-        except Exception:
-            return None
-        if auth_status in ("failed", "expired"):
-            return False
-    return True
-
-
-def _last_sync_summary_direct(shared_db_path: Path, instance: str) -> str | None:
-    """Return a human-readable summary of the most recent sync run from the DB."""
-    from app.persistence import EventRepository
-
-    if not shared_db_path.exists():
-        return None
-
-    try:
-        with EventRepository(shared_db_path, instance=instance) as repo:
-            run_info = repo.get_sync_run(instance)
-    except Exception:
-        return None
-
-    return _build_sync_summary(run_info)
 
 
 # ---------------------------------------------------------------------------

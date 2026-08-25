@@ -7,7 +7,6 @@ from app.config import Config
 from app.notifier import Notifier
 from app.persistence import EventRepository
 from app.sync_runner import (  # noqa: F401 — re-exported for backward compatibility
-    _SYNC_DB,
     AuthenticationError,
     SyncRunner,
     _Batch,
