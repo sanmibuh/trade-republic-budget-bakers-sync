@@ -47,46 +47,11 @@ jobs:
 
       - name: Update CHANGELOG
         run: |
-          NEW="${{ steps.version.outputs.new }}"
-          CURRENT="${{ steps.version.outputs.current }}"
-          TODAY=$(date -u +%Y-%m-%d)
-          REPO="${{ github.repository }}"
-          BASE_URL="https://github.com/${REPO}"
-
-          # Build "* title — [#N](url)" lines from merge commits between current tag and HEAD.
-          # GitHub merge commits end with "(#N)" — extract that to build markdown links.
-          ITEMS=""
-          while IFS= read -r subject; do
-            [ -z "$subject" ] && continue
-            if echo "$subject" | grep -qE '\(#[0-9]+\)$'; then
-              PR_NUM=$(echo "$subject" | grep -oE '#[0-9]+' | tail -1 | tr -d '#')
-              TITLE=$(echo "$subject" | sed -E 's/ \(#[0-9]+\)$//')
-              ITEMS="${ITEMS}* ${TITLE} — [#${PR_NUM}](${BASE_URL}/pull/${PR_NUM})\n"
-            else
-              ITEMS="${ITEMS}* ${subject}\n"
-            fi
-          done < <(git log "v${CURRENT}..HEAD" --pretty=format:"%s" 2>/dev/null)
-
-          if [ -z "$ITEMS" ]; then
-            ITEMS="<!-- add release notes here -->\n"
-          fi
-
-          FULL_CHANGELOG="**Full Changelog**: ${BASE_URL}/compare/v${CURRENT}...v${NEW}"
-
-          printf -v NEW_SECTION "## [%s] - %s\n\n### What's Changed\n%s\n%s\n\n" \
-            "$NEW" "$TODAY" "$(printf '%b' "$ITEMS")" "$FULL_CHANGELOG"
-
-          # Prepend the new section after the header (after the second blank line following "The format is based on...")
-          awk -v section="$NEW_SECTION" '
-            /^The format is based on/ && !inserted {
-              print
-              print ""
-              printf "%s", section
-              inserted=1
-              next
-            }
-            { print }
-          ' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+          bash scripts/generate-changelog.sh \
+            "${{ steps.version.outputs.new }}" \
+            "${{ steps.version.outputs.current }}" \
+            "${{ github.repository }}" \
+            CHANGELOG.md
 
       - name: Update ARG BASE_TAG in app Dockerfile (major only)
         if: inputs.bump == 'major'

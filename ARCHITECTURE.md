@@ -471,22 +471,30 @@ workflow creates the tag and GitHub release, which in turn triggers the publish 
 
 ### Release workflow
 
-`prepare-release.yml` — disponible desde GitHub Actions UI o `gh workflow run`. Muestra un desplegable para elegir
-el tipo de bump. No requiere introducir la versión manualmente — se calcula sola desde `VERSION`:
+Two paths produce a release PR, both sharing `scripts/generate-changelog.sh` to generate the new CHANGELOG section:
 
-| Bump | Ejemplo (`6.1.0` → ) |
+**Manual** — `prepare-release.yml` (GitHub Actions UI or `gh workflow run`):
+
+| Bump | Example (`6.1.0` → ) |
 |---|---|
 | `patch` — bug fixes, tweaks | `6.1.1` |
-| `minor` — nuevas features, backwards-compatible | `6.2.0` |
-| `major` — breaking changes, rebuild de imagen base | `7.0.0` |
+| `minor` — new features, backwards-compatible | `6.2.0` |
+| `major` — breaking changes, rebuild base image | `7.0.0` |
 
-El workflow:
-1. Calcula la siguiente versión.
-2. Actualiza `VERSION`.
-3. Abre un PR `release-{version}` → `main` listo para revisar y mergear.
+**Automated** — `bump-version.yml` (fires when Dependabot merges a `requirements.txt` update):
+always produces a major bump.
 
-Merging the PR triggers `release.yml`, which creates the tag and GitHub Release, which in turn triggers the Docker
-image publish workflows.
+Both workflows open a PR that includes, in a single commit:
+1. `VERSION` bumped to the new version.
+2. `CHANGELOG.md` pre-filled with commits since the last tag (via `scripts/generate-changelog.sh`).
+3. `docker/app/Dockerfile` — `ARG BASE_TAG` updated to `vX.0.0` (**major releases only**).
+
+Merging the PR triggers `release.yml`, which creates the tag and GitHub Release.
+The tag in turn triggers the Docker image publish workflows:
+- `publish-base.yml` (major tags only) — builds `python-trade-republic`, then builds `tr-wallet-sync`.
+  `publish-base.yml` **does not write back to `main`**; the Dockerfile `ARG BASE_TAG` is already
+  correct because it was updated in the release PR before the tag was created.
+- `publish-app.yml` (minor/patch tags) — builds only `tr-wallet-sync`.
 
 ---
 
