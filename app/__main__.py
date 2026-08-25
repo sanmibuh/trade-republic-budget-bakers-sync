@@ -299,8 +299,9 @@ def check_day(instance: str, date: str) -> None:
         click.echo(f"✅ Already processed ({len(result.processed)}):")
         for ev in result.processed:
             amount_str = f"{ev.amount} {ev.currency}".strip()
+            status_str = f" [{ev.status}]" if ev.status else ""
             click.echo(
-                f"  • [{ev.timestamp[:16]}] {ev.description} — {amount_str}  (id: {ev.event_id})"
+                f"  • [{ev.timestamp[:16]}] {ev.description} — {amount_str}{status_str}  (id: {ev.event_id})"
             )
     else:
         click.echo("✅ Already processed (0)")
@@ -311,8 +312,9 @@ def check_day(instance: str, date: str) -> None:
         click.echo(f"🆕 Not yet processed ({len(result.not_processed)}):")
         for ev in result.not_processed:
             amount_str = f"{ev.amount} {ev.currency}".strip()
+            status_str = f" [{ev.status}]" if ev.status else ""
             click.echo(
-                f"  • [{ev.timestamp[:16]}] {ev.description} — {amount_str}  (id: {ev.event_id})"
+                f"  • [{ev.timestamp[:16]}] {ev.description} — {amount_str}{status_str}  (id: {ev.event_id})"
             )
     else:
         click.echo("🆕 Not yet processed (0)")

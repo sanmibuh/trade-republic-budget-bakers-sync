@@ -686,9 +686,10 @@ class SyncRunner:
             )
             if failed:
                 return 0, 0, 1
-            repo.mark_processed_force(event, wallet_record_id=wallet_record_id)
+            # Store None so a second resync sees no existing ID and skips (idempotent).
+            repo.mark_processed_force(event, wallet_record_id=None)
             log.info(
-                "Resync: posted reversal for CANCELED event %s → wallet_record_id=%s",
+                "Resync: posted reversal for CANCELED event %s → reversal_id=%s",
                 dedup_event_id(event),
                 wallet_record_id,
             )

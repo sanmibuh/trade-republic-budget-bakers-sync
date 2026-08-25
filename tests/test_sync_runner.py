@@ -1659,3 +1659,48 @@ def test_resync_day_canceled_reversal_post_failure_increments_failed(tmp_path):
 
     assert counts.failed == 1
     assert counts.synced == 0
+
+
+def test_resync_day_canceled_reversal_is_idempotent(tmp_path):
+    """Running resync twice on a CANCELED event that already had a reversal posted
+    must not post a second reversal — only the first run should POST."""
+    runner, _cfg, _notifier = _make_runner_with_mocks()
+
+    event = {
+        "id": "ev-canceled-idem",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(tmp_path / "db") as repo:
+        repo.mark_processed(event, wallet_record_id="old-wid")
+        repo.commit()
+
+        wallet_client = MagicMock()
+        wallet_client.post_records.return_value = [
+            {"inputIndex": 0, "id": "reversal-wid", "success": True}
+        ]
+
+        # First resync — should post the reversal
+        with (
+            patch.object(runner, "fetch_events", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
+        ):
+            counts_first = runner.resync_day("2026-08-24", repo, wallet_client)
+
+        assert counts_first.synced == 1
+        assert wallet_client.post_records.call_count == 1
+
+        # Second resync — must not post again
+        wallet_client.reset_mock()
+        with (
+            patch.object(runner, "fetch_events", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
+        ):
+            counts_second = runner.resync_day("2026-08-24", repo, wallet_client)
+
+        wallet_client.post_records.assert_not_called()
+        wallet_client.put_record.assert_not_called()
+        assert counts_second.excluded == 1
