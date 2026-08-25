@@ -1,0 +1,29 @@
+.github/workflows/bump-version.yml
+  s_d18d1850c2b805::t_22d4196ce12380 60-64
+scripts/generate-changelog.sh
+  s_cefa18e201561b::t_3471a1b14af449 1-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "98495484e50b47e526100e085dc2bb32bef7e8ae",
+  "prompts": {},
+  "sessions": {
+    "s_cefa18e201561b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fc7308cacffeJWbFzSlDNmhLkf",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    },
+    "s_d18d1850c2b805": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fc73b3722ffe7z5HKVr8Vd7Eru",
+        "model": "claude-opus-4.8"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
