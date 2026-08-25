@@ -1026,31 +1026,31 @@ class TelegramBot:
         self._send_message(prompt, keyboard=self._instance_buttons(cmd))
 
     @staticmethod
-    def _log_level_buttons() -> list[list[dict]]:
+    def _log_level_buttons() -> list[list[dict[str, Any]]]:
         return _log_level_buttons_fn()
 
-    def _instance_buttons(self, cmd: str) -> list[list[dict]]:
+    def _instance_buttons(self, cmd: str) -> list[list[dict[str, Any]]]:
         names = [inst.name for inst in self._cfg.instances.values()]
         return _instance_buttons_fn(cmd, names)
 
-    def _instance_buttons_for_resync(self, date_str: str) -> list[list[dict]]:
+    def _instance_buttons_for_resync(self, date_str: str) -> list[list[dict[str, Any]]]:
         names = [inst.name for inst in self._cfg.instances.values()]
         return _instance_buttons_for_resync_fn(date_str, names)
 
     @staticmethod
-    def _resync_date_buttons(instance_key: str) -> list[list[dict]]:
+    def _resync_date_buttons(instance_key: str) -> list[list[dict[str, Any]]]:
         return _resync_date_buttons_fn(instance_key)
 
     @staticmethod
-    def _backup_type_buttons() -> list[list[dict]]:
+    def _backup_type_buttons() -> list[list[dict[str, Any]]]:
         return _backup_type_buttons_fn()
 
     @staticmethod
-    def _year_buttons() -> list[list[dict]]:
+    def _year_buttons() -> list[list[dict[str, Any]]]:
         return _year_buttons_fn()
 
     @staticmethod
-    def _month_buttons() -> list[list[dict]]:
+    def _month_buttons() -> list[list[dict[str, Any]]]:
         return _month_buttons_fn()
 
     # ------------------------------------------------------------------
@@ -1060,7 +1060,7 @@ class TelegramBot:
     def _send_message(
         self,
         text: str,
-        keyboard: list[list[dict]] | None = None,
+        keyboard: list[list[dict[str, Any]]] | None = None,
         parse_mode: str | None = "MarkdownV2",
     ) -> None:
         payload: dict[str, Any] = {

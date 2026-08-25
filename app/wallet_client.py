@@ -81,7 +81,7 @@ class WalletClient:
         self, resource: str, params: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
         """Fetch all pages for a given resource, following nextOffset pagination."""
-        results: list[dict] = []
+        results: list[dict[str, Any]] = []
         offset: int | None = None
         base_params = dict(params or {})
 
