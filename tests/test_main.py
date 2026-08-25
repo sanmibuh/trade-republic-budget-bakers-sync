@@ -453,3 +453,178 @@ def test_run_resync_rejects_datetime_string():
     result = run_resync("2026-07-15T12:00:00", cfg=cfg)
 
     assert result == 1
+
+
+# ---------------------------------------------------------------------------
+# run_check_day — dry-run check for a specific day
+# ---------------------------------------------------------------------------
+
+
+def _make_event(event_id: str, timestamp: str, amount: str) -> dict:
+    return {
+        "id": event_id,
+        "timestamp": timestamp,
+        "eventType": "PAYMENT_INBOUND",
+        "amount": amount,
+        "title": "Test",
+    }
+
+
+def test_run_check_day_invalid_date_returns_none():
+    """run_check_day returns None on an invalid date string."""
+    from app.main import run_check_day
+
+    cfg = MagicMock()
+    result = run_check_day("not-a-date", cfg=cfg)
+    assert result is None
+
+
+def test_run_check_day_rejects_datetime_string():
+    """run_check_day returns None for a full datetime string."""
+    from app.main import run_check_day
+
+    cfg = MagicMock()
+    result = run_check_day("2026-08-20T12:00:00", cfg=cfg)
+    assert result is None
+
+
+def test_run_check_day_classifies_processed_and_not_processed(tmp_path):
+    """run_check_day must classify events as processed / not_processed via DB lookup."""
+    from unittest.mock import patch
+
+    from app.main import run_check_day
+    from app.persistence import EventRepository, init_db
+
+    db_path = tmp_path / "sync.db"
+    init_db(db_path)
+
+    # Pre-mark one event as processed
+    event_processed = _make_event("ev-proc", "2026-08-20T08:00:00+00:00", "2.34")
+    event_new = _make_event("ev-new", "2026-08-20T21:00:00+00:00", "-100.00")
+
+    with EventRepository(db_path, instance="test") as repo:
+        repo.mark_processed(event_processed, wallet_record_id="wid-1")
+        repo.commit()
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.shared_db_path = db_path
+    cfg.instance = "test"
+
+    with (
+        patch("app.main.Notifier"),
+        patch("app.main.SyncRunner") as mock_runner_cls,
+    ):
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = [event_processed, event_new]
+
+        result = run_check_day("2026-08-20", cfg=cfg)
+
+    assert result is not None
+    assert result.date == "2026-08-20"
+    assert len(result.processed) == 1
+    assert result.processed[0].event_id == "ev-proc"
+    assert len(result.not_processed) == 1
+    assert result.not_processed[0].event_id == "ev-new"
+
+
+def test_run_check_day_no_writes_to_db(tmp_path):
+    """run_check_day must not insert anything into the processed_events table."""
+    from unittest.mock import patch
+
+    from app.main import run_check_day
+    from app.persistence import EventRepository, init_db
+
+    db_path = tmp_path / "sync.db"
+    init_db(db_path)
+
+    event = _make_event("ev-only", "2026-08-20T09:00:00+00:00", "5.00")
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.shared_db_path = db_path
+    cfg.instance = "test"
+
+    with (
+        patch("app.main.Notifier"),
+        patch("app.main.SyncRunner") as mock_runner_cls,
+    ):
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = [event]
+
+        run_check_day("2026-08-20", cfg=cfg)
+
+    # The event should NOT be in the DB after a check-day
+    with EventRepository(db_path, instance="test") as repo:
+        assert not repo.is_processed("ev-only")
+
+
+def test_run_check_day_event_summary_fields(tmp_path):
+    """EventSummary must expose event_id, timestamp, amount, currency, description."""
+    from unittest.mock import patch
+
+    from app.main import run_check_day
+    from app.persistence import init_db
+
+    db_path = tmp_path / "sync.db"
+    init_db(db_path)
+
+    event = {
+        "id": "ev-fields",
+        "timestamp": "2026-08-20T14:05:00+00:00",
+        "eventType": "PAYMENT_INBOUND",
+        "amount": {"value": 12.0, "currency": "EUR"},
+        "title": "Card payment",
+    }
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.shared_db_path = db_path
+    cfg.instance = "test"
+
+    with (
+        patch("app.main.Notifier"),
+        patch("app.main.SyncRunner") as mock_runner_cls,
+    ):
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = [event]
+
+        result = run_check_day("2026-08-20", cfg=cfg)
+
+    assert result is not None
+    assert len(result.not_processed) == 1
+    summary = result.not_processed[0]
+    assert summary.event_id == "ev-fields"
+    assert "2026-08-20" in summary.timestamp
+    assert summary.description  # non-empty
+    # amount and currency come from the raw event amount field
+    assert summary.amount is not None
+
+
+def test_run_check_day_empty_day_returns_empty_lists(tmp_path):
+    """run_check_day returns empty lists when there are no events for the day."""
+    from unittest.mock import patch
+
+    from app.main import run_check_day
+    from app.persistence import init_db
+
+    db_path = tmp_path / "sync.db"
+    init_db(db_path)
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.shared_db_path = db_path
+    cfg.instance = "test"
+
+    with (
+        patch("app.main.Notifier"),
+        patch("app.main.SyncRunner") as mock_runner_cls,
+    ):
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = []
+
+        result = run_check_day("2026-08-20", cfg=cfg)
+
+    assert result is not None
+    assert result.processed == []
+    assert result.not_processed == []

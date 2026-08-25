@@ -948,3 +948,155 @@ def test_backup_resolve_cfg_does_not_fall_back_to_env(tmp_path, monkeypatch):
         pytest.raises(click.UsageError),
     ):
         _resolve_backup_cfg()
+
+
+# ---------------------------------------------------------------------------
+# check-day command
+# ---------------------------------------------------------------------------
+
+
+def test_check_day_with_instance_flag_calls_run_check_day(tmp_path):
+    """check-day --instance <name> resolves config and calls run_check_day."""
+    from app.config import Config, InstancesConfig
+    from app.main import CheckDayResult
+
+    db_path = tmp_path / "sync.db"
+    db_path.touch()  # DB must exist — check-day does not create it
+
+    mock_cfg = MagicMock(spec=Config)
+    mock_cfg.allow_insecure_ssl = False
+    mock_cfg.owner_name = "User1"
+    mock_cfg.shared_db_path = db_path
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.to_config.return_value = mock_cfg
+    mock_instances.data_dir = tmp_path
+
+    check_result = CheckDayResult(date="2026-08-20")
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.main.run_check_day", return_value=check_result) as mock_run,
+        patch("app.__main__.setup_logging"),
+        patch("app.http_client.configure"),
+    ):
+        result = _runner().invoke(
+            cli, ["check-day", "--instance", "user1", "2026-08-20"]
+        )
+
+    assert result.exit_code == 0
+    mock_run.assert_called_once_with("2026-08-20", cfg=mock_cfg)
+
+
+def test_check_day_missing_db_exits_with_error(tmp_path):
+    """check-day must exit with an error when the database file does not exist."""
+    from app.config import Config, InstancesConfig
+
+    mock_cfg = MagicMock(spec=Config)
+    mock_cfg.allow_insecure_ssl = False
+    mock_cfg.owner_name = "User1"
+    mock_cfg.shared_db_path = tmp_path / "sync.db"  # does not exist
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.to_config.return_value = mock_cfg
+    mock_instances.data_dir = tmp_path
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.__main__.setup_logging"),
+        patch("app.http_client.configure"),
+    ):
+        result = _runner().invoke(
+            cli, ["check-day", "--instance", "user1", "2026-08-20"]
+        )
+
+    assert result.exit_code != 0
+
+
+def test_check_day_without_instance_flag_exits_with_error():
+    """check-day without --instance must exit with an error."""
+    result = _runner().invoke(cli, ["check-day", "2026-08-20"])
+    assert result.exit_code != 0
+
+
+def test_check_day_invalid_date_exits_one(tmp_path):
+    """check-day exits 1 when run_check_day returns None (invalid date)."""
+    from app.config import Config, InstancesConfig
+
+    db_path = tmp_path / "sync.db"
+    db_path.touch()
+
+    mock_cfg = MagicMock(spec=Config)
+    mock_cfg.allow_insecure_ssl = False
+    mock_cfg.owner_name = "User1"
+    mock_cfg.shared_db_path = db_path
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.to_config.return_value = mock_cfg
+    mock_instances.data_dir = tmp_path
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.main.run_check_day", return_value=None),
+        patch("app.__main__.setup_logging"),
+        patch("app.http_client.configure"),
+    ):
+        result = _runner().invoke(
+            cli, ["check-day", "--instance", "user1", "not-a-date"]
+        )
+
+    assert result.exit_code == 1
+
+
+def test_check_day_prints_report(tmp_path):
+    """check-day prints a formatted report to stdout."""
+    from app.config import Config, InstancesConfig
+    from app.main import CheckDayResult, EventSummary
+
+    db_path = tmp_path / "sync.db"
+    db_path.touch()
+
+    mock_cfg = MagicMock(spec=Config)
+    mock_cfg.allow_insecure_ssl = False
+    mock_cfg.owner_name = "MyAccount"
+    mock_cfg.shared_db_path = db_path
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.to_config.return_value = mock_cfg
+    mock_instances.data_dir = tmp_path
+
+    check_result = CheckDayResult(
+        date="2026-08-20",
+        processed=[
+            EventSummary(
+                event_id="abc123",
+                timestamp="2026-08-20T08:12:00+00:00",
+                amount="2.34",
+                currency="EUR",
+                description="Interest",
+            )
+        ],
+        not_processed=[
+            EventSummary(
+                event_id="jkl012",
+                timestamp="2026-08-20T21:00:00+00:00",
+                amount="-100.00",
+                currency="EUR",
+                description="Trade",
+            )
+        ],
+    )
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.main.run_check_day", return_value=check_result),
+        patch("app.__main__.setup_logging"),
+        patch("app.http_client.configure"),
+    ):
+        result = _runner().invoke(
+            cli, ["check-day", "--instance", "user1", "2026-08-20"]
+        )
+
+    assert result.exit_code == 0
+    assert "2026-08-20" in result.output
+    assert "Already processed (1)" in result.output
+    assert "Not yet processed (1)" in result.output
+    assert "abc123" in result.output
+    assert "jkl012" in result.output
+    assert "Total: 2 events found" in result.output

@@ -11,6 +11,7 @@ from app.bot_keyboards import (
     _RESYNC_DAY_COUNT,
     _YEAR_BUTTON_COUNT,
     backup_type_buttons,
+    check_day_date_buttons,
     instance_buttons,
     instance_buttons_for_resync,
     log_level_buttons,
@@ -237,4 +238,41 @@ def test_log_level_buttons_callback_data_contains_all_levels():
     cb_data = {b["callback_data"] for row in rows for b in row}
     for level in ("debug", "info", "warning", "error"):
         assert any(level in d for d in cb_data), f"no button found for level {level!r}"
-        assert any(d.startswith(f"logs_level{_CB_SEP}") for d in cb_data if level in d)
+        assert any(
+            d.startswith(f"logs_level{_CB_SEP}") for d in cb_data if level in d
+        ), f"callback_data for {level!r} does not start with expected prefix"
+
+
+# ---------------------------------------------------------------------------
+# check_day_date_buttons
+# ---------------------------------------------------------------------------
+
+
+def test_check_day_date_buttons_default_count():
+    fixed = datetime.datetime(2026, 8, 25, 12, 0, tzinfo=datetime.UTC)
+    with patch("app.bot_keyboards.datetime.datetime") as mock_dt:
+        mock_dt.now.return_value = fixed
+        rows = check_day_date_buttons("david")
+    all_buttons = [b for row in rows for b in row]
+    assert len(all_buttons) == _RESYNC_DAY_COUNT
+
+
+def test_check_day_date_buttons_starts_from_yesterday():
+    fixed = datetime.datetime(2026, 8, 25, 12, 0, tzinfo=datetime.UTC)
+    with patch("app.bot_keyboards.datetime.datetime") as mock_dt:
+        mock_dt.now.return_value = fixed
+        rows = check_day_date_buttons("david")
+    texts = [b["text"] for row in rows for b in row]
+    assert "2026-08-24" in texts
+    assert "2026-08-25" not in texts
+
+
+def test_check_day_date_buttons_encode_instance_and_prefix():
+    fixed = datetime.datetime(2026, 8, 25, 12, 0, tzinfo=datetime.UTC)
+    with patch("app.bot_keyboards.datetime.datetime") as mock_dt:
+        mock_dt.now.return_value = fixed
+        rows = check_day_date_buttons("david")
+    for row in rows:
+        for btn in row:
+            assert "david" in btn["callback_data"]
+            assert btn["callback_data"].startswith(f"checkday{_CB_SEP}")

@@ -2769,17 +2769,17 @@ def test_register_commands_order_without_backup(tmp_path):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock())
         bot._register_commands()
     commands = [c["command"] for c in mock_post.call_args.kwargs["json"]["commands"]]
-    assert commands == ["sync", "status", "logs", "resync"]
+    assert commands == ["sync", "status", "logs", "checkday", "resync"]
 
 
 def test_register_commands_order_with_backup(tmp_path):
-    """Commands must be registered in order: sync, status, logs, backup, resync."""
+    """Commands must be registered in order: sync, status, logs, backup, checkday, resync."""
     bot = _bot(backup_cfg=_make_backup_config(tmp_path), tmp_path=tmp_path)
     with patch.object(bot._session, "post") as mock_post:
         mock_post.return_value = MagicMock(raise_for_status=MagicMock())
         bot._register_commands()
     commands = [c["command"] for c in mock_post.call_args.kwargs["json"]["commands"]]
-    assert commands == ["sync", "status", "logs", "backup", "resync"]
+    assert commands == ["sync", "status", "logs", "backup", "checkday", "resync"]
 
 
 # ---------------------------------------------------------------------------
@@ -2950,3 +2950,176 @@ def test_resync_date_buttons_delegates_to_bot_keyboards(tmp_path):
         result = bot._resync_date_buttons("user1")
     mock_fn.assert_called_once_with("user1")
     assert result == [[]]
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._cmd_check_day — /checkday command
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_check_day_no_args_sends_instance_picker(tmp_path):
+    """/checkday with no args must show an instance picker."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_check_day([])
+    mock_send.assert_called_once()
+    keyboard = mock_send.call_args.kwargs.get("keyboard")
+    assert keyboard is not None
+    all_buttons = [btn for row in keyboard for btn in row]
+    cb_data = [b["callback_data"] for b in all_buttons]
+    assert any(d.startswith("checkday_pick_date:") for d in cb_data)
+
+
+def test_cmd_check_day_with_date_sends_instance_picker_for_date(tmp_path):
+    """/checkday 2026-08-20 must show an instance picker with the date encoded."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_check_day(["2026-08-20"])
+    mock_send.assert_called_once()
+    keyboard = mock_send.call_args.kwargs.get("keyboard")
+    assert keyboard is not None
+    all_buttons = [btn for row in keyboard for btn in row]
+    cb_data = [b["callback_data"] for b in all_buttons]
+    assert any("2026-08-20" in d for d in cb_data)
+
+
+def test_cmd_check_day_invalid_date_sends_error(tmp_path):
+    """/checkday with a non-date arg must send an error message."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_check_day(["not-a-date"])
+    mock_send.assert_called_once()
+    msg = mock_send.call_args.args[0]
+    assert "invalid" in msg.lower() or "YYYY" in msg
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._handle_callback_query — check_day callbacks
+# ---------------------------------------------------------------------------
+
+
+def test_callback_check_day_pick_date_sends_date_keyboard(tmp_path):
+    """check_day_pick_date:<instance> callback must show a date-picker keyboard."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_check_day_date_buttons", return_value=[[]]) as mock_dates,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "checkday_pick_date:user1",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_dates.assert_called_once_with("user1")
+    mock_send.assert_called_once()
+
+
+def test_callback_check_day_dispatches_launch_check_day(tmp_path):
+    """checkday:<date>:<instance> callback must call _launch_check_day."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_launch_check_day") as mock_launch,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "checkday:2026-08-20:user1",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_launch.assert_called_once()
+    inst, date_str = mock_launch.call_args.args
+    assert date_str == "2026-08-20"
+    assert inst.name == "User1"
+
+
+def test_callback_check_day_unknown_instance_replies(tmp_path):
+    """checkday:<date>:<unknown> callback must reply with error."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "checkday:2026-08-20:nobody",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_send.assert_called_once()
+    assert "unknown" in mock_send.call_args.args[0].lower()
+
+
+def test_callback_check_day_pick_date_unknown_instance_replies(tmp_path):
+    """checkday_pick_date:<unknown> callback must reply with error."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "checkday_pick_date:nobody",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_send.assert_called_once()
+    assert "unknown" in mock_send.call_args.args[0].lower()
+
+
+def test_check_day_date_buttons_delegates_to_bot_keyboards(tmp_path):
+    """TelegramBot._check_day_date_buttons must delegate to the standalone function."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch("app.bot._check_day_date_buttons_fn", return_value=[[]]) as mock_fn:
+        result = bot._check_day_date_buttons("user1")
+    mock_fn.assert_called_once_with("user1")
+    assert result == [[]]
+
+
+def test_run_check_day_in_thread_sends_report(tmp_path):
+    """_run_check_day_for_instance must send the report text to Telegram."""
+    from app.main import CheckDayResult, EventSummary
+
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    check_result = CheckDayResult(
+        date="2026-08-20",
+        processed=[
+            EventSummary(
+                event_id="abc",
+                timestamp="2026-08-20T08:00:00+00:00",
+                amount="2.34",
+                currency="EUR",
+                description="Interest",
+            )
+        ],
+        not_processed=[],
+    )
+    with (
+        patch("app.bot._main_run_check_day", return_value=check_result),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._run_check_day_for_instance(inst, "2026-08-20")
+    mock_send.assert_called_once()
+    msg = mock_send.call_args.args[0]
+    assert "2026" in msg
+    assert "abc" in msg or "Interest" in msg
+
+
+def test_run_check_day_in_thread_handles_none_result(tmp_path):
+    """_run_check_day_for_instance must send an error when run_check_day returns None."""
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    with (
+        patch("app.bot._main_run_check_day", return_value=None),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._run_check_day_for_instance(inst, "2026-08-20")
+    mock_send.assert_called_once()
+    assert "error" in mock_send.call_args.args[0].lower()
