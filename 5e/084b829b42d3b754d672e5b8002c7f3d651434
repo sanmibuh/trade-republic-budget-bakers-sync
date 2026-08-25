@@ -1,0 +1,18 @@
+app/bot_keyboards.py
+  h_97a91c9e567f87 171
+tests/test_bot.py
+  h_97a91c9e567f87 2776,2956,2961,2974,2987
+tests/test_bot_keyboards.py
+  h_97a91c9e567f87 241-243
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "5e084b829b42d3b754d672e5b8002c7f3d651434",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
