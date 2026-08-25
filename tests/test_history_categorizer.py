@@ -198,3 +198,17 @@ def test_records_without_note_are_ignored():
         mock_date.today.return_value = _TODAY
         result = cat.get_category_id("")
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# invalidate_cache
+# ---------------------------------------------------------------------------
+
+
+def test_invalidate_cache_delegates_to_inner_cache():
+    """invalidate_cache() must call _cache.invalidate() so the next lookup is fresh."""
+    wallet = _make_wallet_client()
+    cat = HistoryCategorizer(wallet)
+    with patch.object(cat._cache, "invalidate") as mock_invalidate:
+        cat.invalidate_cache()
+    mock_invalidate.assert_called_once()

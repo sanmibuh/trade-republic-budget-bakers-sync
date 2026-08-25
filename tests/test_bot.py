@@ -13,6 +13,7 @@ from app.bot import (
     InstanceStatus,
     TelegramBot,
     _auth_icon,
+    _build_sync_summary,
     _format_sync_timestamp,
     _instance_status_direct,
 )
@@ -2843,3 +2844,112 @@ def test_run_backup_sends_error_on_exception(tmp_path):
         bot._run_backup("monthly", "2026-07")
     mock_send.assert_called_once()
     assert "boom" in mock_send.call_args.args[0]
+
+
+def test_run_backup_no_op_when_backup_cfg_is_none(tmp_path):
+    """_run_backup must return immediately when backup_cfg is None."""
+    bot = _bot(backup_cfg=None, tmp_path=tmp_path)
+    with patch("app.bot.backup_module.run_auto") as mock_run_auto:
+        bot._run_backup("auto", "")
+    mock_run_auto.assert_not_called()
+
+
+def test_run_backup_auto_calls_backup_module(tmp_path):
+    """_run_backup('auto', '') must call backup.run_auto directly."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch("app.bot.backup_module.run_auto") as mock_run_auto,
+        patch("app.bot.WalletClient"),
+        patch("app.bot.Notifier"),
+    ):
+        bot._run_backup("auto", "")
+    mock_run_auto.assert_called_once()
+
+
+def test_run_backup_unknown_mode_sends_warning(tmp_path):
+    """_run_backup with an unrecognised mode must send a warning message."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch("app.bot.WalletClient"),
+        patch("app.bot.Notifier"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._run_backup("unknown_mode", "")
+    mock_send.assert_called_once()
+    assert "Unknown backup mode" in mock_send.call_args.args[0]
+
+
+# ---------------------------------------------------------------------------
+# _build_sync_summary — unknown status returns None
+# ---------------------------------------------------------------------------
+
+
+def test_build_sync_summary_returns_none_for_unknown_status():
+    """_build_sync_summary must return None when status is not a recognised value."""
+    result = _build_sync_summary({"status": "running"})
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _run_resync_for_instance — exception handling
+# ---------------------------------------------------------------------------
+
+
+def test_run_resync_for_instance_sends_error_on_exception(tmp_path):
+    """_run_resync_for_instance must catch exceptions and send an error message."""
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    with (
+        patch("app.bot._main_run_resync", side_effect=RuntimeError("resync failed")),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._run_resync_for_instance(inst, "2026-07-15")
+    mock_send.assert_called_once()
+    assert "resync failed" in mock_send.call_args.args[0]
+
+
+# ---------------------------------------------------------------------------
+# _submit_code_to — exception when writing code file
+# ---------------------------------------------------------------------------
+
+
+def test_submit_code_to_sends_error_when_write_fails(tmp_path):
+    """_submit_code_to must catch write errors and send an error message."""
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    # pending_file and twofa_code_file share the same parent (tmp_path).
+    pending_file = inst.config.twofa_pending_file
+    pending_file.write_text("pending")
+    # Make the directory read-only so writing the code file will fail.
+    tmp_path.chmod(0o555)
+    try:
+        with patch.object(bot, "_send_message") as mock_send:
+            result = bot._submit_code_to(inst, "123456")
+    finally:
+        tmp_path.chmod(0o755)
+    assert result is False
+    mock_send.assert_called_once()
+    assert "Could not" in mock_send.call_args.args[0]
+
+
+# ---------------------------------------------------------------------------
+# _backup_type_buttons — delegates to bot_keyboards helper
+# ---------------------------------------------------------------------------
+
+
+def test_backup_type_buttons_delegates_to_bot_keyboards(tmp_path):
+    """TelegramBot._backup_type_buttons must delegate to the standalone function."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch("app.bot._backup_type_buttons_fn", return_value=[[]]) as mock_fn:
+        result = bot._backup_type_buttons()
+    mock_fn.assert_called_once_with()
+    assert result == [[]]
+
+
+def test_resync_date_buttons_delegates_to_bot_keyboards(tmp_path):
+    """TelegramBot._resync_date_buttons must delegate to the standalone function."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch("app.bot._resync_date_buttons_fn", return_value=[[]]) as mock_fn:
+        result = bot._resync_date_buttons("user1")
+    mock_fn.assert_called_once_with("user1")
+    assert result == [[]]
