@@ -1,0 +1,28 @@
+app/bot.py
+  h_97a91c9e567f87 972,975,987,990
+app/main.py
+  h_97a91c9e567f87 17,37,73
+app/sync_runner.py
+  h_97a91c9e567f87 18,22,661-696
+app/tr_mapper.py
+  h_97a91c9e567f87 102-114,508-511,542-594
+tests/test_bot.py
+  h_97a91c9e567f87 3126-3178
+tests/test_main.py
+  h_97a91c9e567f87 631-704
+tests/test_sync_runner.py
+  h_97a91c9e567f87 1432-1661
+tests/test_tr_mapper.py
+  h_97a91c9e567f87 14,17,1233-1432
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "95825dad8d0120891566a8bab589e981c87f9b69",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
