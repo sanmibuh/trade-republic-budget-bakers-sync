@@ -1,0 +1,24 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 285,287
+README.md
+  h_97a91c9e567f87 197
+app/bot.py
+  h_97a91c9e567f87 452-453,456-457,539,589-590,664,666,749,752,1130
+app/bot_keyboards.py
+  h_97a91c9e567f87 185
+tests/test_bot.py
+  h_97a91c9e567f87 2772,2776,2782,2970,3012,3021,3030,3041,3050,3059,3068
+tests/test_bot_keyboards.py
+  h_97a91c9e567f87 275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "3a5d278ea11f59d9cce589e1d797c1963857cb67",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
