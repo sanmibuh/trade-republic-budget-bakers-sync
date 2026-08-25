@@ -358,7 +358,7 @@ def _instance_status_direct(
     return InstanceStatus(auth=auth, last_sync=last_sync)
 
 
-def _build_sync_summary(run_info: dict | None) -> str | None:
+def _build_sync_summary(run_info: dict[str, Any] | None) -> str | None:
     """Convert a raw sync-run dict to a human-readable summary string."""
     if run_info is None:
         return None
@@ -545,13 +545,13 @@ class TelegramBot:
     # Update routing
     # ------------------------------------------------------------------
 
-    def _handle_update(self, update: dict) -> None:
+    def _handle_update(self, update: dict[str, Any]) -> None:
         if "message" in update:
             self._handle_message(update["message"])
         elif "callback_query" in update:
             self._handle_callback_query(update["callback_query"])
 
-    def _handle_message(self, message: dict) -> None:
+    def _handle_message(self, message: dict[str, Any]) -> None:
         chat_id = str(message.get("chat", {}).get("id", ""))
         if chat_id != self._cfg.chat_id:
             log.debug("Ignoring message from unauthorized chat %s", chat_id)
@@ -574,7 +574,7 @@ class TelegramBot:
         raw_cmd = parts[0].lstrip("/").split("@")[0].lower()
         args = parts[1:]
 
-        dispatch = {
+        dispatch: dict[str, Any] = {
             "status": self._cmd_status,
             "sync": self._cmd_sync,
             "resync": self._cmd_resync,
@@ -593,7 +593,7 @@ class TelegramBot:
         if raw_cmd == "code":
             self._delete_message(message.get("message_id"))
 
-    def _handle_callback_query(self, cq: dict) -> None:
+    def _handle_callback_query(self, cq: dict[str, Any]) -> None:
         """Handle inline keyboard button taps."""
         cq_id = cq.get("id", "")
         chat_id = str(cq.get("message", {}).get("chat", {}).get("id", ""))
@@ -721,7 +721,8 @@ class TelegramBot:
 
         self._send_message("\n".join(lines))
 
-    def _instance_status_line(self, inst: InstanceConfig) -> str:
+    @staticmethod
+    def _instance_status_line(inst: InstanceConfig) -> str:
         """Build a Telegram-formatted status line for a single sync instance."""
         status = _instance_status_direct(
             inst.config.data_dir,
@@ -969,8 +970,9 @@ class TelegramBot:
         )
         return False
 
+    @staticmethod
     def _probe_pending(
-        self, instances: dict[str, InstanceConfig]
+        instances: dict[str, InstanceConfig],
     ) -> dict[str, InstanceConfig]:
         """Check each instance's 2FA pending marker file.
 
@@ -1023,27 +1025,32 @@ class TelegramBot:
         """Send *prompt* with an instance-picker inline keyboard for *cmd*."""
         self._send_message(prompt, keyboard=self._instance_buttons(cmd))
 
-    def _log_level_buttons(self) -> list[list[dict]]:
+    @staticmethod
+    def _log_level_buttons() -> list[list[dict[str, Any]]]:
         return _log_level_buttons_fn()
 
-    def _instance_buttons(self, cmd: str) -> list[list[dict]]:
+    def _instance_buttons(self, cmd: str) -> list[list[dict[str, Any]]]:
         names = [inst.name for inst in self._cfg.instances.values()]
         return _instance_buttons_fn(cmd, names)
 
-    def _instance_buttons_for_resync(self, date_str: str) -> list[list[dict]]:
+    def _instance_buttons_for_resync(self, date_str: str) -> list[list[dict[str, Any]]]:
         names = [inst.name for inst in self._cfg.instances.values()]
         return _instance_buttons_for_resync_fn(date_str, names)
 
-    def _resync_date_buttons(self, instance_key: str) -> list[list[dict]]:
+    @staticmethod
+    def _resync_date_buttons(instance_key: str) -> list[list[dict[str, Any]]]:
         return _resync_date_buttons_fn(instance_key)
 
-    def _backup_type_buttons(self) -> list[list[dict]]:
+    @staticmethod
+    def _backup_type_buttons() -> list[list[dict[str, Any]]]:
         return _backup_type_buttons_fn()
 
-    def _year_buttons(self) -> list[list[dict]]:
+    @staticmethod
+    def _year_buttons() -> list[list[dict[str, Any]]]:
         return _year_buttons_fn()
 
-    def _month_buttons(self) -> list[list[dict]]:
+    @staticmethod
+    def _month_buttons() -> list[list[dict[str, Any]]]:
         return _month_buttons_fn()
 
     # ------------------------------------------------------------------
@@ -1053,10 +1060,10 @@ class TelegramBot:
     def _send_message(
         self,
         text: str,
-        keyboard: list[list[dict]] | None = None,
+        keyboard: list[list[dict[str, Any]]] | None = None,
         parse_mode: str | None = "MarkdownV2",
     ) -> None:
-        payload: dict = {
+        payload: dict[str, Any] = {
             "chat_id": self._cfg.chat_id,
             "text": text,
             "disable_web_page_preview": True,

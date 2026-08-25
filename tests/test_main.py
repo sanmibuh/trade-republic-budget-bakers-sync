@@ -80,7 +80,7 @@ def test_run_excluded_events_not_reprocessed_on_next_run(tmp_path):
                 repo.commit()
             return _SyncCounts(excluded=batch.excluded_count)
 
-        runner._submit_batch.side_effect = fake_submit_batch
+        runner.submit_batch.side_effect = fake_submit_batch
 
         run(cfg=cfg)
 
@@ -313,7 +313,7 @@ def test_sync_complete_receives_excluded_count_even_when_post_fails(tmp_path):
         runner.build_batch.return_value = batch
 
         # _submit_batch raises after excluded_count has been stamped onto counts
-        runner._submit_batch.side_effect = RuntimeError("wallet down")
+        runner.submit_batch.side_effect = RuntimeError("wallet down")
 
         notifier_instance = mock_notifier_cls.return_value
 

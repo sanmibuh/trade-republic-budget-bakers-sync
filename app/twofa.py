@@ -41,6 +41,10 @@ _DEFAULT_POLL_INTERVAL = 3.0
 class TerminalCodeProvider:
     """Reads the authenticator code from stdin (interactive bootstrap)."""
 
+    def __init__(self) -> None:
+        # No state to initialise — this provider reads directly from stdin.
+        pass
+
     def get_code(self) -> str:
         return input().strip()
 

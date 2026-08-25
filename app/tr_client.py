@@ -12,6 +12,9 @@ log = logging.getLogger(__name__)
 class LoginFailedError(Exception):
     """Raised when the interactive Trade Republic 2FA login fails."""
 
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+
 
 class SessionExpiredError(Exception):
     """Raised when a non-interactive run needs a 2FA authenticator code.
@@ -22,6 +25,9 @@ class SessionExpiredError(Exception):
     login endpoint on every run and risks a rate-limit ban — we bail out cleanly
     so the caller can notify the user to run the interactive bootstrap.
     """
+
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
 
 
 class TRClient:
@@ -105,7 +111,8 @@ class TRClient:
             log.exception("Login failed with exception")
             raise LoginFailedError(f"2FA login failed: {exc}") from exc
 
-    def _do_authenticator_login(self, client: Any, code_provider: Any) -> None:
+    @staticmethod
+    def _do_authenticator_login(client: Any, code_provider: Any) -> None:
         """Complete login using a TOTP authenticator code."""
         if code_provider is None:
             log.warning(
@@ -125,7 +132,8 @@ class TRClient:
         client._await_weblogin_confirmation()
         client.save_websession()
 
-    def _do_push_notification_login(self, client: Any) -> None:
+    @staticmethod
+    def _do_push_notification_login(client: Any) -> None:
         """Complete login by waiting for in-app push notification approval."""
         log.info("Waiting for push notification approval in Trade Republic app...")
         client.complete_weblogin()

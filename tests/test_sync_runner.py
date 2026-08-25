@@ -1316,7 +1316,7 @@ def test_notify_fetch_summary_returns_skipped_count():
     recent = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
     new = [{"id": "a"}]
 
-    skipped = runner._notify_fetch_summary(since, recent, new)
+    skipped = runner.notify_fetch_summary(since, recent, new)
 
     assert skipped == 2
 
@@ -1329,7 +1329,7 @@ def test_notify_fetch_summary_calls_notifier_with_correct_counts():
     recent = [{"id": "x"}, {"id": "y"}]
     new = [{"id": "x"}]
 
-    runner._notify_fetch_summary(since, recent, new)
+    runner.notify_fetch_summary(since, recent, new)
 
     notifier.fetch_summary.assert_called_once()
     call_kwargs = notifier.fetch_summary.call_args.kwargs
@@ -1346,7 +1346,7 @@ def test_notify_fetch_summary_all_new_skipped_zero():
     since = datetime(2024, 1, 1, tzinfo=UTC)
     events = [{"id": "a"}, {"id": "b"}]
 
-    skipped = runner._notify_fetch_summary(since, events, events)
+    skipped = runner.notify_fetch_summary(since, events, events)
 
     assert skipped == 0
     call_kwargs = notifier.fetch_summary.call_args.kwargs
@@ -1366,7 +1366,7 @@ def test_submit_batch_empty_records_commits_repo(tmp_path):
     wallet_client = MagicMock()
     batch = _Batch(records=[], event_record_indices=[], excluded_count=3)
 
-    counts = runner._submit_batch(batch, wallet_client, repo, new_events=[])
+    counts = runner.submit_batch(batch, wallet_client, repo, new_events=[])
 
     repo.commit.assert_called_once()
     wallet_client.post_records.assert_not_called()
@@ -1397,7 +1397,7 @@ def test_submit_batch_posts_records_and_returns_counts(tmp_path):
     wallet_client.post_records.return_value = api_results
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = runner._submit_batch(batch, wallet_client, repo, new_events=[event])
+        counts = runner.submit_batch(batch, wallet_client, repo, new_events=[event])
 
     wallet_client.post_records.assert_called_once_with([record])
     assert counts.synced == 1
@@ -1426,6 +1426,6 @@ def test_submit_batch_excluded_count_carried_through_when_records_present(tmp_pa
     wallet_client.post_records.return_value = [{"inputIndex": 0, "id": "wid2"}]
 
     with EventRepository(tmp_path / "test.db") as repo:
-        counts = runner._submit_batch(batch, wallet_client, repo, new_events=[event])
+        counts = runner.submit_batch(batch, wallet_client, repo, new_events=[event])
 
     assert counts.excluded == 7

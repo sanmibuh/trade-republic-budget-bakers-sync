@@ -127,7 +127,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `run()` (sync) shares `_prepare(cfg)` (data dir + SSL circuit-breaker + logging + `Notifier`)
   as a module-level bootstrap helper.
 - Sync orchestration logic lives in the `SyncRunner` class (`sync_runner.py`). Its public methods — `connect`,
-  `fetch_events`, `build_batch`, `process_results` — accept `cfg` and `notifier` injected via the constructor,
+  `fetch_events`, `build_batch`, `process_results`, `notify_fetch_summary`, `submit_batch` — accept `cfg` and `notifier` injected via the constructor,
   making dependencies explicit and easy to mock. `run()` is a thin wrapper that calls `_prepare`,
   constructs a `SyncRunner`, and delegates to it. `main.py` re-exports `SyncRunner`, `_SyncCounts`, `_Batch`, and
   `AuthenticationError` for backward compatibility.
