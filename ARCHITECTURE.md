@@ -59,6 +59,27 @@ EventRepository.mark_processed_force()   # INSERT OR REPLACE (upsert)
 Notifier.sync_complete()                 # Telegram summary (optional)
 ```
 
+## Data flow — Check-day (dry run)
+
+```
+python -m app check-day --instance <name> YYYY-MM-DD
+        ↓
+run_check_day(date_str, cfg) → CheckDayResult
+        ↓
+SyncRunner.fetch_events(since=date 00:00)
+        ↓
+filter_by_lookback(events, since, until=date+1 00:00)  # narrow to exact day
+        ↓
+For each event:
+  EventRepository.is_processed(event_id)
+    YES → CheckDayResult.processed.append(EventSummary)
+    NO  → CheckDayResult.not_processed.append(EventSummary)
+```
+
+No writes: no `WalletClient` calls, no `mark_processed`, no Telegram notification.
+
+---
+
 ## Data flow — Backup
 
 ```
@@ -214,6 +235,7 @@ execution paths before any `EventRepository` is opened.
   - `python -m app submit-code --instance <name> <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting
     sync process to pick up
   - `python -m app resync --instance <name> YYYY-MM-DD` — runs `main.run_resync(date_str)`, force re-syncing a specific day
+  - `python -m app check-day --instance <name> YYYY-MM-DD` — runs `main.run_check_day(date_str)`, dry-run check for a specific day (no writes)
   - `python -m app check-pending --instance <name>` — exits 0 if a 2FA code is pending for the given instance, 1 otherwise
   - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG_PATH`, one per line.
   - `python -m app list-schedules` — prints `name<TAB>schedule` for every instance that has a schedule,
@@ -260,6 +282,9 @@ execution paths before any `EventRepository` is opened.
 - `/resync [YYYY-MM-DD]` force re-syncs a specific day: instance picker → date picker (last 7 days) → executes
   `main.run_resync()` in a background thread. With a date arg, jumps straight to the instance picker.
   Callback data format: `resync_pick_date:<instance>` (date picker step) and `resync:<date>:<instance>` (execute step).
+- `/check_day [YYYY-MM-DD]` dry-runs a check for a specific day: instance picker → date picker (last 7 days) → executes
+  `main.run_check_day()` in a background thread and sends a formatted report. No writes to BudgetBakers or the DB.
+  Callback data format: `check_day_pick_date:<instance>` (date picker step) and `check_day:<date>:<instance>` (execute step).
 
 ### Config
 - All configuration is read exclusively from `instances.yml` (mounted at `INSTANCES_CONFIG_PATH`).

@@ -45,6 +45,7 @@ from app.bot_keyboards import (
     _CB_SEP,
     BACKUP_ICONS as _BACKUP_ICONS,
     backup_type_buttons as _backup_type_buttons_fn,
+    check_day_date_buttons as _check_day_date_buttons_fn,
     instance_buttons as _instance_buttons_fn,
     instance_buttons_for_resync as _instance_buttons_for_resync_fn,
     log_level_buttons as _log_level_buttons_fn,
@@ -62,6 +63,7 @@ from app.config import (
 from app.http_client import build_session as _build_session
 from app.main import (
     run as _main_run,
+    run_check_day as _main_run_check_day,
     run_resync as _main_run_resync,
 )
 from app.notifier import Notifier, escape_code as _esc_code, escape_markdown as _esc
@@ -97,6 +99,7 @@ __all__ = [
     "_clamp_single_line",
     "_format_sync_timestamp",
     "_log_line_level",
+    "_main_run_check_day",
     "_read_todays_logs",
     "_trim_excess_lines",
     "run",
@@ -449,6 +452,10 @@ class TelegramBot:
                 "command": "resync",
                 "description": "Force re-sync of a specific day, bypassing dedup",
             },
+            {
+                "command": "check_day",
+                "description": "Dry-run check of TR events for a specific day",
+            },
         ]
         if self._cfg.backup_cfg:
             commands[3:3] = [
@@ -529,6 +536,7 @@ class TelegramBot:
             "status": self._cmd_status,
             "sync": self._cmd_sync,
             "resync": self._cmd_resync,
+            "check_day": self._cmd_check_day,
             "logs": self._cmd_logs,
             "code": self._cmd_code,
             "backup": self._cmd_backup,
@@ -578,6 +586,8 @@ class TelegramBot:
             "logs_level": self._on_cb_logs_level,
             "resync_pick_date": self._on_cb_resync_pick_date,
             "resync": self._on_cb_resync,
+            "check_day_pick_date": self._on_cb_check_day_pick_date,
+            "check_day": self._on_cb_check_day,
         }
         handler = named.get(cmd)
         if handler is not None:
@@ -638,6 +648,30 @@ class TelegramBot:
             self._send_message(f"❓ Unknown instance: `{_esc_code(instance_key)}`")
             return
         self._launch_resync(inst, date_str)
+
+    def _on_cb_check_day_pick_date(self, parts: list[str], _data: str) -> None:
+        instance_key = parts[1].lower()
+        inst = self._cfg.instances.get(instance_key)
+        if inst is None:
+            self._send_message(f"❓ Unknown instance: `{_esc_code(instance_key)}`")
+            return
+        self._send_message(
+            f"📋 *Check\\-day* — Choose date for *{_esc(inst.name)}*:",
+            keyboard=self._check_day_date_buttons(instance_key),
+        )
+
+    def _on_cb_check_day(self, parts: list[str], data: str) -> None:
+        # Format: check_day:<date>:<instance>
+        if len(parts) < 3:
+            log.warning("Malformed check_day callback_data: %r", data)
+            return
+        date_str = parts[1]
+        instance_key = parts[2].lower()
+        inst = self._cfg.instances.get(instance_key)
+        if inst is None:
+            self._send_message(f"❓ Unknown instance: `{_esc_code(instance_key)}`")
+            return
+        self._launch_check_day(inst, date_str)
 
     def _on_cb_instance_cmd(self, cmd: str, parts: list[str]) -> None:
         """Handle instance-routed callbacks: sync."""
@@ -709,6 +743,29 @@ class TelegramBot:
         self._send_message(
             f"🔁 *Resync {_esc(date_str)}* — Choose instance:",
             keyboard=self._instance_buttons_for_resync(date_str),
+        )
+
+    def _cmd_check_day(self, args: list[str]) -> None:
+        """Handle /check_day [YYYY-MM-DD]."""
+        if not args:
+            self._pick_instance(
+                "check_day_pick_date", "📋 *Check\\-day* — Choose instance:"
+            )
+            return
+
+        date_str = args[0]
+        try:
+            datetime.date.fromisoformat(date_str)
+        except ValueError:
+            self._send_message(
+                f"⚠️ Invalid date: `{_esc_code(date_str)}`\\. "
+                "Expected format: `YYYY\\-MM\\-DD`\\."
+            )
+            return
+
+        self._send_message(
+            f"📋 *Check\\-day {_esc(date_str)}* — Choose instance:",
+            keyboard=self._instance_buttons_for_check_day(date_str),
         )
 
     def _cmd_logs(self, args: list[str]) -> None:
@@ -869,6 +926,75 @@ class TelegramBot:
                 f"❌ Resync error for *{_esc(inst.name)}* `{_esc_code(date_str)}`: {_esc(str(exc))}"
             )
 
+    def _launch_check_day(self, inst: InstanceConfig, date_str: str) -> None:
+        self._send_message(
+            f"📋 Checking *{_esc(date_str)}* for *{_esc(inst.name)}*\\.\\.\\."
+        )
+        threading.Thread(
+            target=self._run_check_day_for_instance,
+            args=(inst, date_str),
+            daemon=True,
+        ).start()
+
+    def _run_check_day_for_instance(self, inst: InstanceConfig, date_str: str) -> None:
+        """Run check-day for *inst* in-process. Called from a daemon thread."""
+
+        try:
+            result = _main_run_check_day(date_str, cfg=inst.config)
+        except Exception as exc:
+            log.exception(
+                "Check-day failed for instance %s date %s", inst.name, date_str
+            )
+            self._send_message(
+                f"❌ Check\\-day error for *{_esc(inst.name)}* `{_esc_code(date_str)}`: {_esc(str(exc))}"
+            )
+            return
+
+        if result is None:
+            self._send_message(
+                f"❌ Check\\-day error: invalid date `{_esc_code(date_str)}`"
+            )
+            return
+
+        self._send_check_day_report(result, inst.name)
+
+    def _send_check_day_report(self, result: Any, instance_name: str) -> None:
+        """Format and send the check-day report to Telegram."""
+        lines = [
+            f"📋 *Check\\-day report* — {_esc(result.date)} \\({_esc(instance_name)}\\)\n"
+        ]
+
+        if result.processed:
+            lines.append(f"✅ *Already processed* \\({len(result.processed)}\\):")
+            for ev in result.processed:
+                amount_str = f"{ev.amount} {ev.currency}".strip()
+                ts = ev.timestamp[:16]
+                lines.append(
+                    f"  • \\[{_esc(ts)}\\] {_esc(ev.description)} — {_esc(amount_str)}"
+                    f"  \\(id: `{_esc_code(ev.event_id)}`\\)"
+                )
+        else:
+            lines.append("✅ *Already processed* \\(0\\)")
+
+        lines.append("")
+
+        if result.not_processed:
+            lines.append(f"🆕 *Not yet processed* \\({len(result.not_processed)}\\):")
+            for ev in result.not_processed:
+                amount_str = f"{ev.amount} {ev.currency}".strip()
+                ts = ev.timestamp[:16]
+                lines.append(
+                    f"  • \\[{_esc(ts)}\\] {_esc(ev.description)} — {_esc(amount_str)}"
+                    f"  \\(id: `{_esc_code(ev.event_id)}`\\)"
+                )
+        else:
+            lines.append("🆕 *Not yet processed* \\(0\\)")
+
+        total = len(result.processed) + len(result.not_processed)
+        lines.append(f"\n*Total:* {total} events found")
+
+        self._send_message("\n".join(lines))
+
     def _maybe_submit_pending_code(self, code: str) -> bool:
         """Submit *code* to the instance awaiting 2FA during a sync.
 
@@ -991,6 +1117,27 @@ class TelegramBot:
     @staticmethod
     def _resync_date_buttons(instance_key: str) -> list[list[dict[str, Any]]]:
         return _resync_date_buttons_fn(instance_key)
+
+    def _instance_buttons_for_check_day(
+        self, date_str: str
+    ) -> list[list[dict[str, Any]]]:
+        """Build an instance-picker keyboard that encodes *date_str* for check-day."""
+
+        names = [inst.name for inst in self._cfg.instances.values()]
+        buttons = [
+            {
+                "text": name,
+                "callback_data": f"check_day{_CB_SEP}{date_str}{_CB_SEP}{name.lower()}",
+            }
+            for name in names
+        ]
+        if not buttons:
+            return []
+        return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+
+    @staticmethod
+    def _check_day_date_buttons(instance_key: str) -> list[list[dict[str, Any]]]:
+        return _check_day_date_buttons_fn(instance_key)
 
     @staticmethod
     def _backup_type_buttons() -> list[list[dict[str, Any]]]:

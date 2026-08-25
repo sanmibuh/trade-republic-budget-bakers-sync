@@ -163,3 +163,27 @@ def resync_date_buttons(
         for d in days
     ]
     return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+
+
+def check_day_date_buttons(
+    instance_key: str, count: int = _RESYNC_DAY_COUNT
+) -> list[list[dict[str, Any]]]:
+    """Build a date-picker keyboard for /check-day with the most recent days.
+
+    Args:
+        instance_key: Lower-case instance name encoded in the callback data.
+        count:        Number of days to offer (default: ``_RESYNC_DAY_COUNT``).
+
+    Returns:
+        Rows of at most 3 buttons each.
+    """
+    today = datetime.datetime.now(tz=datetime.UTC).date()
+    days = [str(today - datetime.timedelta(days=i)) for i in range(1, count + 1)]
+    buttons = [
+        {
+            "text": d,
+            "callback_data": f"check_day{_CB_SEP}{d}{_CB_SEP}{instance_key}",
+        }
+        for d in days
+    ]
+    return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
