@@ -115,7 +115,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
   `data_dir/.tr_2fa_pending` marker; that marker is removed on success or timeout. On expiry, it calls `on_timeout`
   (if set) — wired by `select_code_provider` to `notifier.login_code_timeout(instance)`, which sends a cancellation
   message in Telegram — then raises `TimeoutError`.
-- `submit-code` (`python -m app submit-code <code>`) checks for `.tr_2fa_pending` before writing the code file; if
+- `submit-code` (`python -m app submit-code --instance <name> <code>`) checks for `.tr_2fa_pending` before writing the code file; if
   the marker is absent (no login in progress), it exits 1 with "No active login request for this instance" so stale
   `/code` submissions are rejected cleanly.
 - Code delivery: the `/code` bot command calls `python -m app submit-code --instance <name> <code>` in-process
