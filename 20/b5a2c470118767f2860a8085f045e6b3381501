@@ -1,0 +1,23 @@
+app/sync_runner.py
+  s_900b8b27a97936::t_486c3f1da221dd 282-283,427-428,432-436,472-475,512-513,515-520,527-531,579,591-593,639,669-676,678-679,698-707
+tests/test_main.py
+  s_900b8b27a97936::t_dfc58f448e5de1 707-778
+tests/test_sync_runner.py
+  s_900b8b27a97936::t_ff7d3d318058e9 657-661,673-675,690-692,1866-1892
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "20b5a2c470118767f2860a8085f045e6b3381501",
+  "prompts": {},
+  "sessions": {
+    "s_900b8b27a97936": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fc6e0e788ffepcuKgZe06qh2QZ",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
