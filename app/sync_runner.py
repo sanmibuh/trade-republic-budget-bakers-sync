@@ -244,6 +244,9 @@ class SyncRunner:
         c_events, c_record_indices, c_excluded = self._append_cancellation_records(
             cancellation_events or [], all_records, repo
         )
+        if categorizer is not None:
+            for indices in c_record_indices:
+                self._apply_category([all_records[i] for i in indices], categorizer)
 
         return _Batch(
             all_records,

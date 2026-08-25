@@ -1962,3 +1962,94 @@ def test_submit_batch_reversal_missing_result_is_logged_and_notified(tmp_path):
     mock_log.error.assert_called()
     notifier.missing_api_result.assert_called_once()
     assert counts.failed == 1
+
+
+# ---------------------------------------------------------------------------
+# build_batch — cancellation records are categorized when strategy==history
+# ---------------------------------------------------------------------------
+
+
+def test_build_batch_applies_category_to_cancellation_records(tmp_path):
+    """When category_strategy=='history', _apply_category must be called for
+    cancellation reversal records, not just for normal event records."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "history"
+
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    canceled_event = {
+        "id": "ev-cat-cancel",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+
+    wallet_client = MagicMock()
+    # Simulate categorizer returning a category for the note
+    with (
+        patch("app.sync_runner.HistoryCategorizer") as MockCategorizer,
+        EventRepository(tmp_path / "test.db") as repo,
+    ):
+        mock_cat = MockCategorizer.return_value
+        mock_cat.get_category_id.return_value = "cat-shopping"
+        repo.mark_processed(canceled_event, wallet_record_id="old-wid")
+        repo.commit()
+
+        batch = runner.build_batch(
+            [],
+            repo,
+            wallet_client=wallet_client,
+            cancellation_events=[canceled_event],
+        )
+
+    # The reversal record must carry the categoryId
+    assert len(batch.records) == 1
+    assert batch.records[0].get("categoryId") == "cat-shopping"
+
+
+def test_build_batch_no_category_applied_to_cancellation_when_strategy_is_none(
+    tmp_path,
+):
+    """When category_strategy!='history', cancellation records must not have categoryId."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "none"
+
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    canceled_event = {
+        "id": "ev-no-cat-cancel",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.mark_processed(canceled_event, wallet_record_id="old-wid")
+        repo.commit()
+
+        batch = runner.build_batch(
+            [],
+            repo,
+            cancellation_events=[canceled_event],
+        )
+
+    assert len(batch.records) == 1
+    assert "categoryId" not in batch.records[0]
