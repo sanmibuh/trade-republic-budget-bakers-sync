@@ -41,61 +41,8 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/python-trade-republic:latest
             ghcr.io/${{ github.repository_owner }}/python-trade-republic:${{ steps.meta.outputs.version }}
 
-  update-base-tag:
-    needs: publish-base
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          token: ${{ secrets.PAT_RELEASE }}
-
-      - name: Extract version tag
-        id: meta
-        run: |
-          VERSION="${{ github.event.inputs.version || github.ref_name }}"
-          if echo "$VERSION" | grep -qE '^v[0-9]+\.0\.0$'; then
-            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-            echo "is_major=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_major=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Update ARG BASE_TAG in app Dockerfile
-        if: steps.meta.outputs.is_major == 'true'
-        env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: |
-          if ! grep -qE '^ARG BASE_TAG=' docker/app/Dockerfile; then
-            echo "ERROR: ARG BASE_TAG line not found in docker/app/Dockerfile"
-            exit 1
-          fi
-          sed -i "s|^ARG BASE_TAG=.*|ARG BASE_TAG=${VERSION}|" docker/app/Dockerfile
-          if ! grep -qF "ARG BASE_TAG=${VERSION}" docker/app/Dockerfile; then
-            echo "ERROR: sed did not update ARG BASE_TAG to ${VERSION}"
-            exit 1
-          fi
-
-      - name: Commit updated Dockerfile
-        if: steps.meta.outputs.is_major == 'true'
-        env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet docker/app/Dockerfile; then
-            git add docker/app/Dockerfile
-            git commit -m "chore: update BASE_TAG to ${VERSION} in app Dockerfile"
-            git pull --rebase origin main
-            git push
-          fi
-
   publish-app:
-    needs: update-base-tag
+    needs: publish-base
     runs-on: ubuntu-latest
     permissions:
       packages: write

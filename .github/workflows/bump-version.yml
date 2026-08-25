@@ -44,6 +44,58 @@ jobs:
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "current_version=$CURRENT" >> "$GITHUB_OUTPUT"
 
+      - name: Update ARG BASE_TAG in app Dockerfile
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          NEW_VERSION="${{ steps.bump.outputs.new_version }}"
+          sed -i "s|^ARG BASE_TAG=.*|ARG BASE_TAG=v${NEW_VERSION}|" docker/app/Dockerfile
+          if ! grep -qF "ARG BASE_TAG=v${NEW_VERSION}" docker/app/Dockerfile; then
+            echo "ERROR: failed to update ARG BASE_TAG in docker/app/Dockerfile"
+            exit 1
+          fi
+
+      - name: Update CHANGELOG
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          NEW="${{ steps.bump.outputs.new_version }}"
+          CURRENT="${{ steps.bump.outputs.current_version }}"
+          TODAY=$(date -u +%Y-%m-%d)
+          REPO="${{ github.repository }}"
+          BASE_URL="https://github.com/${REPO}"
+
+          # Build "* title — [#N](url)" lines from merge commits since last tag.
+          ITEMS=""
+          while IFS= read -r subject; do
+            [ -z "$subject" ] && continue
+            if echo "$subject" | grep -qE '\(#[0-9]+\)$'; then
+              PR_NUM=$(echo "$subject" | grep -oE '#[0-9]+' | tail -1 | tr -d '#')
+              TITLE=$(echo "$subject" | sed -E 's/ \(#[0-9]+\)$//')
+              ITEMS="${ITEMS}* ${TITLE} — [#${PR_NUM}](${BASE_URL}/pull/${PR_NUM})\n"
+            else
+              ITEMS="${ITEMS}* ${subject}\n"
+            fi
+          done < <(git log "v${CURRENT}..HEAD" --pretty=format:"%s" 2>/dev/null)
+
+          if [ -z "$ITEMS" ]; then
+            ITEMS="<!-- add release notes here -->\n"
+          fi
+
+          FULL_CHANGELOG="**Full Changelog**: ${BASE_URL}/compare/v${CURRENT}...v${NEW}"
+
+          printf -v NEW_SECTION "## [%s] - %s\n\n### What's Changed\n%s\n%s\n\n" \
+            "$NEW" "$TODAY" "$(printf '%b' "$ITEMS")" "$FULL_CHANGELOG"
+
+          awk -v section="$NEW_SECTION" '
+            /^The format is based on/ && !inserted {
+              print
+              print ""
+              printf "%s", section
+              inserted=1
+              next
+            }
+            { print }
+          ' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+
       - name: Open PR with version bump
         if: steps.check.outputs.changed == 'true'
         env:
@@ -53,14 +105,21 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add VERSION
-          git commit -m "chore: bump major version to ${{ steps.bump.outputs.new_version }}"
+          git add VERSION docker/app/Dockerfile CHANGELOG.md
+          git commit -m "chore: bump version ${{ steps.bump.outputs.current_version }} → ${{ steps.bump.outputs.new_version }}"
           git push origin "$BRANCH"
           gh pr create \
             --title "chore: bump version ${{ steps.bump.outputs.current_version }} → ${{ steps.bump.outputs.new_version }}" \
             --body "Automated major version bump following Dependabot update to \`requirements.txt\`.
 
-          Merging this PR will trigger a rebuild of both the base image (\`python-trade-republic\`) and the app image (\`tr-wallet-sync\`)." \
+          **Changes included:**
+          - \`VERSION\`: \`${{ steps.bump.outputs.current_version }}\` → \`${{ steps.bump.outputs.new_version }}\`
+          - \`docker/app/Dockerfile\`: \`ARG BASE_TAG\` updated to \`v${{ steps.bump.outputs.new_version }}\`
+          - \`CHANGELOG.md\`: new section pre-filled — please review and refine before merging
+
+          **Merging this PR will:**
+          - Trigger \`release.yml\` → create tag \`v${{ steps.bump.outputs.new_version }}\` + GitHub Release
+          - Trigger \`publish-base.yml\` → rebuild both the base image (\`python-trade-republic\`) and the app image (\`tr-wallet-sync\`)" \
             --base main \
             --head "$BRANCH" \
             --label "dependencies"
