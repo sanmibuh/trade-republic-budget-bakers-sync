@@ -18,20 +18,26 @@ TRClient.fetch_timeline_events()
         ↓
 filter_by_lookback()         # drops events older than lookback_days (from instances.yml)
         ↓
+EventRepository.filter_unprocessed()     # dedup: keep only events not yet in SQLite
+EventRepository.filter_cancellation_pending()  # CANCELED events that already have a wallet record
+        ↓
 build_records_for_event()    # TR event dict → list[BudgetBakers record dict]
    └── _build_note()          # single source of truth for the note/description
    └── _HANDLERS[event_type]  # per-type handler builds record structure (accounts, payment type, counter-party)
    └── label applied generically post-handler if label is configured in instances.yml
    └── category_id applied generically post-handler when category_strategy=history (instances.yml)
+   └── returns [] for CANCELED events (skipped) and zero-amount events (excluded)
          ↓
 HistoryCategorizer.get_category_id(note)   # majority-vote lookup from recent Wallet records
    └── CategoryCache.category_ids()         # 24h TTL wrapper around WalletClient.get_categories()
         ↓
-EventRepository.dedup_event_id()   # filters already-synced events (SQLite)
+build_cancellation_records()  # for filter_cancellation_pending events: negated amount, [Cancelada] note
         ↓
 WalletClient.post_records()        # POST /v1/api/records (max 20 per request)
+                                   # batch includes both new records and cancellation reversals
         ↓
-EventRepository.mark_processed()   # INSERT OR IGNORE into processed_events
+EventRepository.mark_processed()        # INSERT OR IGNORE for new events
+EventRepository.mark_processed_force()  # wallet_record_id=None for reversed CANCELED events
         ↓
 Notifier.sync_complete()           # Telegram summary (optional)
 ```

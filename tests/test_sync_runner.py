@@ -654,7 +654,11 @@ def test_resync_day_fetches_events_for_exact_date():
 
 
 def test_resync_day_skips_dedup_filter(tmp_path):
-    """resync_day must NOT call filter_unprocessed — all events are re-processed."""
+    """resync_day must NOT call filter_unprocessed — all events are re-processed.
+
+    The pipeline uses POST (never PUT) and force-upserts the wallet_record_id so
+    that even an already-processed event ends up with the new ID from the API.
+    """
     from unittest.mock import patch
 
     runner, _cfg, _notifier = _make_runner_with_mocks()
@@ -666,7 +670,9 @@ def test_resync_day_skips_dedup_filter(tmp_path):
         repo.commit()
 
         wallet_client = MagicMock()
-        wallet_client.put_record.return_value = {"id": "new-wid", "success": True}
+        wallet_client.post_records.return_value = [
+            {"inputIndex": 0, "id": "new-wid", "success": True}
+        ]
 
         with (
             patch.object(runner, "fetch_events", return_value=[event]),
@@ -681,40 +687,10 @@ def test_resync_day_skips_dedup_filter(tmp_path):
         ):
             runner.resync_day("2026-07-15", repo, wallet_client)
 
-        # Event must have been re-processed (wallet_record_id updated)
+        # PUT must never be called — resync always uses POST
+        wallet_client.put_record.assert_not_called()
+        # Event must have been re-processed (wallet_record_id updated via upsert)
         assert repo.get_wallet_record_id(event) == "new-wid"
-
-
-def test_resync_day_updates_existing_records_via_put(tmp_path):
-    """Events with an existing wallet_record_id should be updated via PUT, not POST."""
-    from unittest.mock import patch
-
-    runner, _cfg, _notifier = _make_runner_with_mocks()
-
-    event = {"id": "ev-update", "timestamp": "2026-07-15T09:00:00Z"}
-    with EventRepository(tmp_path / "db") as repo:
-        repo.mark_processed(event, wallet_record_id="old-wallet-id")
-        repo.commit()
-
-        wallet_client = MagicMock()
-        wallet_client.put_record.return_value = {"id": "old-wallet-id", "success": True}
-
-        with (
-            patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
-            patch(
-                "app.sync_runner.build_records_for_event",
-                return_value=[{"accountId": "cash-id"}],
-            ),
-        ):
-            runner.resync_day("2026-07-15", repo, wallet_client)
-
-        # PUT must have been called with the existing wallet record ID
-        wallet_client.put_record.assert_called_once_with(
-            "old-wallet-id", {"accountId": "cash-id"}
-        )
-        # POST must NOT have been called for this event
-        wallet_client.post_records.assert_not_called()
 
 
 def test_resync_day_inserts_new_events_via_post(tmp_path):
@@ -742,39 +718,6 @@ def test_resync_day_inserts_new_events_via_post(tmp_path):
 
         wallet_client.post_records.assert_called_once()
         assert repo.get_wallet_record_id(event) == "fresh-wid"
-
-
-def test_resync_day_multi_record_event_put_called_for_each_id(tmp_path):
-    """For events with multiple comma-separated wallet IDs, PUT is called for each."""
-    from unittest.mock import patch
-
-    runner, _cfg, _notifier = _make_runner_with_mocks()
-
-    event = {"id": "ev-multi", "timestamp": "2026-07-15T08:00:00Z"}
-    with EventRepository(tmp_path / "db") as repo:
-        repo.mark_processed(event, wallet_record_id="wid-a,wid-b")
-        repo.commit()
-
-        wallet_client = MagicMock()
-        wallet_client.put_record.return_value = {"id": "wid-a", "success": True}
-
-        with (
-            patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
-            patch(
-                "app.sync_runner.build_records_for_event",
-                return_value=[
-                    {"accountId": "cash-id"},
-                    {"accountId": "portfolio-id"},
-                ],
-            ),
-        ):
-            runner.resync_day("2026-07-15", repo, wallet_client)
-
-        # PUT called for each sub-record
-        assert wallet_client.put_record.call_count == 2
-        ids_called = {c.args[0] for c in wallet_client.put_record.call_args_list}
-        assert ids_called == {"wid-a", "wid-b"}
 
 
 def test_resync_day_excluded_zero_amount_events_marked_force(tmp_path):
@@ -857,61 +800,6 @@ def test_resync_day_unknown_event_type_notifies(tmp_path):
             runner.resync_day("2026-07-15", repo, wallet_client)
 
     notifier.unknown_event_type.assert_called_once_with("SUPER_UNKNOWN_TYPE")
-
-
-def test_resync_day_put_failure_increments_failed(tmp_path):
-    """A PUT error should count the event as failed and not call mark_processed_force."""
-    from unittest.mock import patch
-
-    runner, _cfg, _notifier = _make_runner_with_mocks()
-
-    event = {"id": "ev-put-fail", "timestamp": "2026-07-15T10:00:00Z"}
-    with EventRepository(tmp_path / "db") as repo:
-        repo.mark_processed(event, wallet_record_id="old-wid")
-        repo.commit()
-
-        wallet_client = MagicMock()
-        wallet_client.put_record.side_effect = RuntimeError("API down")
-
-        with (
-            patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
-            patch(
-                "app.sync_runner.build_records_for_event",
-                return_value=[{"accountId": "cash-id"}],
-            ),
-        ):
-            counts = runner.resync_day("2026-07-15", repo, wallet_client)
-
-        assert counts.failed == 1
-        assert counts.synced == 0
-        # wallet_record_id must remain unchanged (not force-updated on failure)
-        assert repo.get_wallet_record_id(event) == "old-wid"
-
-
-def test_resync_day_post_failure_for_new_event_increments_failed(tmp_path):
-    """A POST error for a new event should count as failed."""
-    from unittest.mock import patch
-
-    runner, _cfg, _notifier = _make_runner_with_mocks()
-
-    event = {"id": "ev-post-fail", "timestamp": "2026-07-15T10:00:00Z"}
-    with EventRepository(tmp_path / "db") as repo:
-        wallet_client = MagicMock()
-        wallet_client.post_records.side_effect = RuntimeError("API down")
-
-        with (
-            patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
-            patch(
-                "app.sync_runner.build_records_for_event",
-                return_value=[{"accountId": "cash-id"}],
-            ),
-        ):
-            counts = runner.resync_day("2026-07-15", repo, wallet_client)
-
-        assert counts.failed == 1
-        assert counts.synced == 0
 
 
 def test_resync_day_post_item_error_field_increments_failed(tmp_path):
@@ -1070,79 +958,6 @@ def test_resync_day_post_preserves_inputindex_order(tmp_path):
 
         # Wallet IDs must be stored in record order (inputIndex 0 first).
         assert repo.get_wallet_record_id(event) == "wid-a,wid-b"
-
-
-def test_resync_day_extra_subrecord_falls_back_to_post(tmp_path):
-    """When there are more sub-records than stored wallet IDs, extras are POSTed."""
-    from unittest.mock import patch
-
-    runner, _cfg, _notifier = _make_runner_with_mocks()
-
-    event = {"id": "ev-extra", "timestamp": "2026-07-15T10:00:00Z"}
-    with EventRepository(tmp_path / "db") as repo:
-        # Only one wallet ID stored, but event now produces 2 sub-records
-        repo.mark_processed(event, wallet_record_id="wid-1")
-        repo.commit()
-
-        wallet_client = MagicMock()
-        wallet_client.put_record.return_value = {"id": "wid-1", "success": True}
-        wallet_client.post_records.return_value = [
-            {"inputIndex": 0, "id": "wid-2", "success": True}
-        ]
-
-        with (
-            patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
-            patch(
-                "app.sync_runner.build_records_for_event",
-                return_value=[
-                    {"accountId": "cash-id"},
-                    {"accountId": "portfolio-id"},
-                ],
-            ),
-        ):
-            counts = runner.resync_day("2026-07-15", repo, wallet_client)
-
-        assert counts.synced == 1
-        wallet_client.put_record.assert_called_once_with(
-            "wid-1", {"accountId": "cash-id"}
-        )
-        wallet_client.post_records.assert_called_once()
-        new_id = repo.get_wallet_record_id(event)
-        assert "wid-1" in new_id
-        assert "wid-2" in new_id
-
-
-def test_resync_day_extra_subrecord_post_failure_increments_failed(tmp_path):
-    """POST failure for an extra sub-record (beyond stored IDs) counts as failed."""
-    from unittest.mock import patch
-
-    runner, _cfg, _notifier = _make_runner_with_mocks()
-
-    event = {"id": "ev-extra-fail", "timestamp": "2026-07-15T10:00:00Z"}
-    with EventRepository(tmp_path / "db") as repo:
-        repo.mark_processed(event, wallet_record_id="wid-1")
-        repo.commit()
-
-        wallet_client = MagicMock()
-        wallet_client.put_record.return_value = {"id": "wid-1", "success": True}
-        wallet_client.post_records.side_effect = RuntimeError("extra POST failed")
-
-        with (
-            patch.object(runner, "fetch_events", return_value=[event]),
-            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
-            patch(
-                "app.sync_runner.build_records_for_event",
-                return_value=[
-                    {"accountId": "cash-id"},
-                    {"accountId": "portfolio-id"},
-                ],
-            ),
-        ):
-            counts = runner.resync_day("2026-07-15", repo, wallet_client)
-
-        assert counts.failed == 1
-        assert counts.synced == 0
 
 
 # ---------------------------------------------------------------------------
@@ -2048,3 +1863,30 @@ def test_build_batch_cancellation_skipped_when_wallet_id_already_cleared(tmp_pat
 
     assert len(batch.records) == 0
     assert batch.excluded_count == 1
+
+
+# ---------------------------------------------------------------------------
+# process_results force=True — uses mark_processed_force (upsert)
+# ---------------------------------------------------------------------------
+
+
+def test_process_results_force_updates_existing_wallet_record_id(tmp_path):
+    """With force=True, process_results must overwrite an existing wallet_record_id
+    (INSERT OR REPLACE), not silently skip it (INSERT OR IGNORE)."""
+    cfg = MagicMock()
+    cfg.instance = "tst"
+    runner = SyncRunner(cfg, MagicMock())
+
+    event = {
+        "id": "ev-force",
+        "timestamp": "2026-08-24T08:00:00Z",
+        "amount": {"currency": "EUR", "value": 10.0},
+        "eventType": "PAYMENT_INBOUND",
+    }
+    results = [{"inputIndex": 0, "id": "new-wid"}]
+
+    with EventRepository(tmp_path / "test.db", instance="tst") as repo:
+        repo.mark_processed(event, wallet_record_id="old-wid")
+        repo.commit()
+        runner.process_results(results, [event], [[0]], repo, force=True)
+        assert repo.get_wallet_record_id(event) == "new-wid"

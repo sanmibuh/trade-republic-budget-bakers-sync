@@ -704,3 +704,75 @@ def test_run_check_day_event_summary_status_empty_when_absent(tmp_path):
 
     assert result is not None
     assert result.not_processed[0].status == ""
+
+
+# ---------------------------------------------------------------------------
+# run() — cancellation events detected during regular sync
+# ---------------------------------------------------------------------------
+
+
+def test_run_passes_cancellation_events_to_build_batch(tmp_path):
+    """run() must call filter_cancellation_pending on recent events and pass
+    the result to build_batch as cancellation_events so that reversals for
+    previously-synced CANCELED transactions are posted during regular sync."""
+    from unittest.mock import patch
+
+    from app.main import run
+
+    normal_event = {
+        "id": "ev-normal",
+        "timestamp": "2026-08-24T08:00:00Z",
+        "amount": {"currency": "EUR", "value": 10.0},
+        "eventType": "PAYMENT_INBOUND",
+    }
+    canceled_event = {
+        "id": "ev-canceled",
+        "timestamp": "2026-08-24T05:00:00Z",
+        "amount": {"currency": "EUR", "value": -7.62},
+        "eventType": "CARD_TRANSACTION",
+        "status": "CANCELED",
+    }
+
+    with (
+        patch("app.main.Notifier"),
+        patch("app.main.SyncRunner") as mock_runner_cls,
+    ):
+        cfg = MagicMock()
+        cfg.data_dir = tmp_path
+        cfg.shared_db_path = tmp_path / "sync.db"
+        cfg.instance = "tst"
+        cfg.lookback_days = 7
+        cfg.dedup_ttl_days = 60
+
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = [normal_event, canceled_event]
+
+        batch = MagicMock()
+        batch.records = []
+        batch.excluded_count = 1
+        runner.build_batch.return_value = batch
+
+        mock_counts = MagicMock()
+        mock_counts.synced = 0
+        mock_counts.failed = 0
+        mock_counts.excluded = 1
+        runner.submit_batch.return_value = mock_counts
+
+        with (
+            patch(
+                "app.main.filter_by_lookback",
+                return_value=[normal_event, canceled_event],
+            ),
+            patch("app.main.WalletClient"),
+        ):
+            from app.persistence import EventRepository
+
+            with EventRepository(tmp_path / "sync.db", instance="tst") as repo:
+                repo.mark_processed(canceled_event, wallet_record_id="old-wid")
+                repo.commit()
+
+            run(cfg=cfg)
+
+    call_kwargs = runner.build_batch.call_args.kwargs
+    assert "cancellation_events" in call_kwargs
+    assert any(e["id"] == "ev-canceled" for e in call_kwargs["cancellation_events"])
