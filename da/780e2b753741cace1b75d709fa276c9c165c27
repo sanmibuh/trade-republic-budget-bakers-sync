@@ -1,0 +1,19 @@
+tests/test_sync_runner.py
+  s_900b8b27a97936::t_58df24deecda7c 1965-2055
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "da780e2b753741cace1b75d709fa276c9c165c27",
+  "prompts": {},
+  "sessions": {
+    "s_900b8b27a97936": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fc6e0e788ffepcuKgZe06qh2QZ",
+        "model": "claude-sonnet-4.6"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
