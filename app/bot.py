@@ -545,13 +545,13 @@ class TelegramBot:
     # Update routing
     # ------------------------------------------------------------------
 
-    def _handle_update(self, update: dict) -> None:
+    def _handle_update(self, update: dict[str, Any]) -> None:
         if "message" in update:
             self._handle_message(update["message"])
         elif "callback_query" in update:
             self._handle_callback_query(update["callback_query"])
 
-    def _handle_message(self, message: dict) -> None:
+    def _handle_message(self, message: dict[str, Any]) -> None:
         chat_id = str(message.get("chat", {}).get("id", ""))
         if chat_id != self._cfg.chat_id:
             log.debug("Ignoring message from unauthorized chat %s", chat_id)
@@ -593,7 +593,7 @@ class TelegramBot:
         if raw_cmd == "code":
             self._delete_message(message.get("message_id"))
 
-    def _handle_callback_query(self, cq: dict) -> None:
+    def _handle_callback_query(self, cq: dict[str, Any]) -> None:
         """Handle inline keyboard button taps."""
         cq_id = cq.get("id", "")
         chat_id = str(cq.get("message", {}).get("chat", {}).get("id", ""))
@@ -953,7 +953,7 @@ class TelegramBot:
         instances = self._cfg.instances
         if len(instances) == 1:
             return self._submit_code_to(next(iter(instances.values())), code)
-        file_pending = TelegramBot._probe_pending(instances)
+        file_pending = self._probe_pending(instances)
         if len(file_pending) == 1:
             return self._submit_code_to(next(iter(file_pending.values())), code)
         if len(file_pending) > 1:

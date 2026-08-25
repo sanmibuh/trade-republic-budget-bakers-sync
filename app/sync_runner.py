@@ -40,6 +40,13 @@ except Exception:  # pragma: no cover
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Backward-compatibility alias — kept so that ``from app.sync_runner import
+# _SYNC_DB`` and ``from app.main import _SYNC_DB`` continue to work for any
+# existing consumers.  The value is no longer used internally.
+# ---------------------------------------------------------------------------
+_SYNC_DB = "sync.db"
+
+# ---------------------------------------------------------------------------
 # Result value objects
 # ---------------------------------------------------------------------------
 
@@ -279,7 +286,7 @@ class SyncRunner:
 
     def _retry_category_failures(
         self,
-        records: list[dict],
+        records: list[dict[str, Any]],
         results: list[dict[str, Any]],
         wallet_client: WalletClient,
         *,

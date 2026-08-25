@@ -66,7 +66,7 @@ def _yearly_path(data_dir: Path, year: int) -> Path:
     return data_dir / "backups" / "yearly" / f"wallet-yearly-{year:04d}.json"
 
 
-def _write_json(path: Path, payload: dict) -> None:
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path: Path | None = None
     try:
