@@ -1,0 +1,14 @@
+CHANGELOG.md
+  h_97a91c9e567f87 6-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "8ea170e74f89e3725e7af9054892de17686d6c80",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
