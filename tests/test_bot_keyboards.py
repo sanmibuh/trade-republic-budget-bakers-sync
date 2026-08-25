@@ -238,6 +238,9 @@ def test_log_level_buttons_callback_data_contains_all_levels():
     cb_data = {b["callback_data"] for row in rows for b in row}
     for level in ("debug", "info", "warning", "error"):
         assert any(level in d for d in cb_data), f"no button found for level {level!r}"
+        assert any(
+            d.startswith(f"logs_level{_CB_SEP}") for d in cb_data if level in d
+        ), f"callback_data for {level!r} does not start with expected prefix"
 
 
 # ---------------------------------------------------------------------------

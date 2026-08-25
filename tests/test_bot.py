@@ -2773,7 +2773,7 @@ def test_register_commands_order_without_backup(tmp_path):
 
 
 def test_register_commands_order_with_backup(tmp_path):
-    """Commands must be registered in order: sync, status, logs, checkday, backup, resync."""
+    """Commands must be registered in order: sync, status, logs, backup, checkday, resync."""
     bot = _bot(backup_cfg=_make_backup_config(tmp_path), tmp_path=tmp_path)
     with patch.object(bot._session, "post") as mock_post:
         mock_post.return_value = MagicMock(raise_for_status=MagicMock())
@@ -2953,12 +2953,12 @@ def test_resync_date_buttons_delegates_to_bot_keyboards(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# TelegramBot._cmd_check_day — /check-day command
+# TelegramBot._cmd_check_day — /checkday command
 # ---------------------------------------------------------------------------
 
 
 def test_cmd_check_day_no_args_sends_instance_picker(tmp_path):
-    """/check-day with no args must show an instance picker."""
+    """/checkday with no args must show an instance picker."""
     bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_check_day([])
@@ -2971,7 +2971,7 @@ def test_cmd_check_day_no_args_sends_instance_picker(tmp_path):
 
 
 def test_cmd_check_day_with_date_sends_instance_picker_for_date(tmp_path):
-    """/check-day 2026-08-20 must show an instance picker with the date encoded."""
+    """/checkday 2026-08-20 must show an instance picker with the date encoded."""
     bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_check_day(["2026-08-20"])
@@ -2984,7 +2984,7 @@ def test_cmd_check_day_with_date_sends_instance_picker_for_date(tmp_path):
 
 
 def test_cmd_check_day_invalid_date_sends_error(tmp_path):
-    """/check-day with a non-date arg must send an error message."""
+    """/checkday with a non-date arg must send an error message."""
     bot = _bot(tmp_path=tmp_path)
     with patch.object(bot, "_send_message") as mock_send:
         bot._cmd_check_day(["not-a-date"])

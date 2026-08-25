@@ -168,7 +168,7 @@ def resync_date_buttons(
 def check_day_date_buttons(
     instance_key: str, count: int = _RESYNC_DAY_COUNT
 ) -> list[list[dict[str, Any]]]:
-    """Build a date-picker keyboard for /check-day with the most recent days.
+    """Build a date-picker keyboard for /checkday with the most recent days.
 
     Args:
         instance_key: Lower-case instance name encoded in the callback data.
