@@ -1,0 +1,14 @@
+app/twofa.py
+  h_97a91c9e567f87 45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "34cb13d75ce902afcc1c26bf5aa44f743b8ec794",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
