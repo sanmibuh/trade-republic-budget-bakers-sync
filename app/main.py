@@ -14,7 +14,7 @@ from app.sync_runner import (  # noqa: F401 — re-exported for backward compati
     _Batch,
     _SyncCounts,
 )
-from app.tr_mapper import filter_by_lookback, normalize_event_time
+from app.tr_mapper import extract_event_status, filter_by_lookback, normalize_event_time
 from app.wallet_client import WalletClient
 
 log = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ class EventSummary:
     amount: str
     currency: str
     description: str
+    status: str = ""
 
 
 @dataclass
@@ -69,6 +70,7 @@ def _event_to_summary(event: dict[str, Any]) -> EventSummary:
         amount=amount_val,
         currency=currency,
         description=description,
+        status=extract_event_status(event),
     )
 
 

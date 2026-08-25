@@ -11,8 +11,10 @@ from app.tr_mapper import (
     _extract_detail_row,
     _extract_iban_from_details,
     _to_decimal,
+    build_cancellation_records,
     build_records_for_event,
     extract_amount,
+    extract_event_status,
     extract_event_type,
     normalize_event_time,
 )
@@ -1228,3 +1230,203 @@ def test_savings_plan_pending_appends_transaktion_to_note():
 
 def test_savings_plan_pending_is_known_event_type():
     assert "TRADING_SAVINGSPLAN_EXECUTION_PENDING" in KNOWN_EVENT_TYPES
+
+
+# ---------------------------------------------------------------------------
+# extract_event_status
+# ---------------------------------------------------------------------------
+
+
+def test_extract_event_status_returns_uppercase():
+    assert extract_event_status({"status": "CANCELED"}) == "CANCELED"
+
+
+def test_extract_event_status_normalises_lowercase():
+    assert extract_event_status({"status": "canceled"}) == "CANCELED"
+
+
+def test_extract_event_status_missing_returns_empty():
+    assert extract_event_status({}) == ""
+
+
+def test_extract_event_status_none_returns_empty():
+    assert extract_event_status({"status": None}) == ""
+
+
+# ---------------------------------------------------------------------------
+# build_records_for_event — CANCELED events are skipped
+# ---------------------------------------------------------------------------
+
+
+def test_build_records_skips_canceled_card_transaction():
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62, "fractionDigits": 2},
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert records == []
+
+
+def test_build_records_skips_canceled_regardless_of_event_type():
+    event = {
+        "eventType": "PAYMENT_INBOUND",
+        "timestamp": "2026-08-24T10:00:00Z",
+        "title": "Refund",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": 50.0},
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert records == []
+
+
+def test_build_records_processes_non_canceled_card_transaction():
+    """Ensure the CANCELED guard does not affect normal events."""
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "amount": {"currency": "EUR", "value": -7.62, "fractionDigits": 2},
+    }
+    records = build_records_for_event(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert len(records) == 1
+    assert records[0]["amount"]["value"] == pytest.approx(-7.62)
+
+
+# ---------------------------------------------------------------------------
+# build_cancellation_records
+# ---------------------------------------------------------------------------
+
+
+def test_build_cancellation_records_card_transaction_negates_amount():
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62, "fractionDigits": 2},
+    }
+    records = build_cancellation_records(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert len(records) == 1
+    r = records[0]
+    assert r["amount"]["value"] == pytest.approx(7.62)
+
+
+def test_build_cancellation_records_card_transaction_uses_correct_account_and_payment_type():
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62, "fractionDigits": 2},
+    }
+    records = build_cancellation_records(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    r = records[0]
+    assert r["accountId"] == "cash"
+    assert r["paymentType"] == "debit_card"
+
+
+def test_build_cancellation_records_note_contains_canceled_prefix():
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62, "fractionDigits": 2},
+    }
+    records = build_cancellation_records(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert records[0]["note"].startswith("[Cancelada]")
+
+
+def test_build_cancellation_records_note_contains_original_note():
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62, "fractionDigits": 2},
+    }
+    records = build_cancellation_records(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert "Amazon" in records[0]["note"]
+
+
+def test_build_cancellation_records_note_contains_original_amount_and_currency():
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62, "fractionDigits": 2},
+    }
+    records = build_cancellation_records(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    note = records[0]["note"]
+    assert "-7.62" in note
+    assert "EUR" in note
+
+
+def test_build_cancellation_records_zero_amount_returns_empty():
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Ghost",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": 0},
+    }
+    records = build_cancellation_records(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert records == []
+
+
+def test_build_cancellation_records_applies_label_id():
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62, "fractionDigits": 2},
+    }
+    records = build_cancellation_records(
+        event,
+        cash_account_id="cash",
+        portfolio_account_id="port",
+        label_ids={"CARD_TRANSACTION": "lbl-1"},
+    )
+    assert records[0].get("labelIds") == ["lbl-1"]
+
+
+def test_build_cancellation_records_buy_order_uses_portfolio_account():
+    """Cancellation of an investment event still maps to the correct accounts."""
+    event = {
+        "eventType": "BUY_ORDER",
+        "timestamp": "2026-08-24T10:00:00Z",
+        "title": "ACME ETF",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -100.0},
+    }
+    records = build_cancellation_records(
+        event, cash_account_id="cash", portfolio_account_id="port"
+    )
+    assert len(records) == 1
+    r = records[0]
+    assert r["amount"]["value"] == pytest.approx(100.0)
+    assert r["accountId"] == "cash"
+    assert r["transfer"]["accountId"] == "port"

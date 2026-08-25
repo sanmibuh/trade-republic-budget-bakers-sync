@@ -1429,3 +1429,233 @@ def test_submit_batch_excluded_count_carried_through_when_records_present(tmp_pa
         counts = runner.submit_batch(batch, wallet_client, repo, new_events=[event])
 
     assert counts.excluded == 7
+
+
+# ---------------------------------------------------------------------------
+# SyncRunner.build_batch — CANCELED events are excluded without a wallet call
+# ---------------------------------------------------------------------------
+
+
+def test_build_batch_excludes_canceled_event(tmp_path):
+    """CANCELED events must be marked excluded (same as zero-amount) without any
+    wallet API call."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "none"
+
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "id": "ev-canceled",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(tmp_path / "test.db") as repo:
+        batch = runner.build_batch([event], repo)
+
+    assert batch.excluded_count == 1
+    assert batch.records == []
+
+
+def test_build_batch_canceled_event_marked_processed(tmp_path):
+    """CANCELED events excluded during build_batch must be persisted so subsequent
+    syncs do not revisit them."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "none"
+
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    event = {
+        "eventType": "CARD_TRANSACTION",
+        "id": "ev-canceled-mark",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(tmp_path / "test.db") as repo:
+        runner.build_batch([event], repo)
+        repo.commit()
+        assert repo.is_processed("ev-canceled-mark")
+
+
+# ---------------------------------------------------------------------------
+# SyncRunner._resync_single_event — CANCELED with no wallet_record_id → excluded
+# ---------------------------------------------------------------------------
+
+
+def test_resync_day_canceled_event_without_wallet_id_is_excluded(tmp_path):
+    """A CANCELED event that was never synced must be marked excluded (not posted)."""
+    runner, _cfg, _notifier = _make_runner_with_mocks()
+
+    event = {
+        "id": "ev-canceled-new",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(tmp_path / "db") as repo:
+        wallet_client = MagicMock()
+
+        with (
+            patch.object(runner, "fetch_events", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
+        ):
+            counts = runner.resync_day("2026-08-24", repo, wallet_client)
+
+        wallet_client.post_records.assert_not_called()
+        wallet_client.put_record.assert_not_called()
+        assert counts.excluded == 1
+        assert counts.synced == 0
+        assert repo.is_processed("ev-canceled-new")
+
+
+# ---------------------------------------------------------------------------
+# SyncRunner._resync_single_event — CANCELED with existing wallet_record_id → reversal
+# ---------------------------------------------------------------------------
+
+
+def test_resync_day_canceled_event_with_wallet_id_posts_reversal(tmp_path):
+    """A CANCELED event that was previously synced must trigger a POST of a
+    reversal record (not a PUT of the original)."""
+    runner, _cfg, _notifier = _make_runner_with_mocks()
+
+    event = {
+        "id": "ev-canceled-existing",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(tmp_path / "db") as repo:
+        repo.mark_processed(event, wallet_record_id="old-wid")
+        repo.commit()
+
+        wallet_client = MagicMock()
+        wallet_client.post_records.return_value = [
+            {"inputIndex": 0, "id": "reversal-wid", "success": True}
+        ]
+
+        with (
+            patch.object(runner, "fetch_events", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
+        ):
+            counts = runner.resync_day("2026-08-24", repo, wallet_client)
+
+        wallet_client.put_record.assert_not_called()
+        wallet_client.post_records.assert_called_once()
+        assert counts.synced == 1
+        assert counts.failed == 0
+
+
+def test_resync_day_canceled_reversal_amount_is_positive(tmp_path):
+    """The reversal record posted for a CANCELED debit must have a positive amount."""
+    runner, _cfg, _notifier = _make_runner_with_mocks()
+
+    event = {
+        "id": "ev-canceled-amount",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(tmp_path / "db") as repo:
+        repo.mark_processed(event, wallet_record_id="old-wid")
+        repo.commit()
+
+        wallet_client = MagicMock()
+        wallet_client.post_records.return_value = [
+            {"inputIndex": 0, "id": "reversal-wid", "success": True}
+        ]
+
+        with (
+            patch.object(runner, "fetch_events", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
+        ):
+            runner.resync_day("2026-08-24", repo, wallet_client)
+
+        posted = wallet_client.post_records.call_args[0][0]
+        assert len(posted) == 1
+        assert posted[0]["amount"]["value"] == pytest.approx(7.62)
+
+
+def test_resync_day_canceled_reversal_note_contains_canceled_prefix(tmp_path):
+    """The reversal note must start with [Cancelada] so it is identifiable."""
+    runner, _cfg, _notifier = _make_runner_with_mocks()
+
+    event = {
+        "id": "ev-canceled-note",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(tmp_path / "db") as repo:
+        repo.mark_processed(event, wallet_record_id="old-wid")
+        repo.commit()
+
+        wallet_client = MagicMock()
+        wallet_client.post_records.return_value = [
+            {"inputIndex": 0, "id": "reversal-wid", "success": True}
+        ]
+
+        with (
+            patch.object(runner, "fetch_events", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
+        ):
+            runner.resync_day("2026-08-24", repo, wallet_client)
+
+        posted = wallet_client.post_records.call_args[0][0]
+        assert posted[0]["note"].startswith("[Cancelada]")
+
+
+def test_resync_day_canceled_reversal_post_failure_increments_failed(tmp_path):
+    """If the reversal POST fails, the event must count as failed."""
+    runner, _cfg, _notifier = _make_runner_with_mocks()
+
+    event = {
+        "id": "ev-canceled-fail",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(tmp_path / "db") as repo:
+        repo.mark_processed(event, wallet_record_id="old-wid")
+        repo.commit()
+
+        wallet_client = MagicMock()
+        wallet_client.post_records.return_value = [
+            {"inputIndex": 0, "error": "server error"}
+        ]
+
+        with (
+            patch.object(runner, "fetch_events", return_value=[event]),
+            patch("app.sync_runner.filter_by_lookback", return_value=[event]),
+        ):
+            counts = runner.resync_day("2026-08-24", repo, wallet_client)
+
+    assert counts.failed == 1
+    assert counts.synced == 0

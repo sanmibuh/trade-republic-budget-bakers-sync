@@ -99,6 +99,19 @@ def _get_first_match(payload: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def extract_event_status(event: dict[str, Any]) -> str:
+    """Return the event status string, always uppercased.
+
+    Returns an empty string when the ``status`` key is absent or falsy.
+    """
+    return str(event.get("status") or "").upper()
+
+
+def is_canceled_event(event: dict[str, Any]) -> bool:
+    """Return True when the event carries ``status == "CANCELED"``."""
+    return extract_event_status(event) == "CANCELED"
+
+
 def extract_event_type(event: dict[str, Any]) -> str:
     """Return the event type string from an event dict, always uppercased.
 
@@ -492,6 +505,10 @@ def build_records_for_event(
         log.debug("Skipping zero-amount event (type=%s)", event_type)
         return []
 
+    if is_canceled_event(event):
+        log.debug("Skipping CANCELED event (type=%s)", event_type)
+        return []
+
     record_date = normalize_event_time(event)
     note = _build_note(event, event_type)
     handler = _HANDLERS.get(event_type)
@@ -520,5 +537,58 @@ def build_records_for_event(
     if category_id:
         for record in records:
             record["categoryId"] = category_id
+
+    return records
+
+
+def build_cancellation_records(
+    event: dict[str, Any],
+    *,
+    cash_account_id: str,
+    portfolio_account_id: str,
+    label_ids: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Build a reversal record for a previously-synced CANCELED TR event.
+
+    The reversal mirrors the original event's account/payment-type mapping but
+    negates the amount and prefixes the note with ``[Cancelada]``.  Intended for
+    the resync path when a CANCELED event already has a ``wallet_record_id``.
+
+    Returns an empty list when the event amount is zero.
+    """
+    event_type = extract_event_type(event)
+    amount = extract_amount(event, "amount", "value", "grossAmount", "gross", "total")
+
+    if amount == 0:
+        log.debug("Skipping zero-amount cancellation event (type=%s)", event_type)
+        return []
+
+    record_date = normalize_event_time(event)
+    original_note = _build_note(event, event_type)
+
+    raw_amount_dict = event.get("amount")
+    currency = (
+        raw_amount_dict.get("currency", "EUR")
+        if isinstance(raw_amount_dict, dict)
+        else "EUR"
+    )
+    cancellation_note = f"[Cancelada] {original_note} · {amount} {currency}"
+
+    handler = _HANDLERS.get(event_type, _handle_cash)
+    records = handler(
+        _EventContext(
+            event=event,
+            amount=-amount,
+            note=cancellation_note,
+            record_date=record_date,
+            cash_account_id=cash_account_id,
+            portfolio_account_id=portfolio_account_id,
+        )
+    )
+
+    label_id = (label_ids or {}).get(event_type)
+    if label_id:
+        for record in records:
+            record["labelIds"] = [label_id]
 
     return records

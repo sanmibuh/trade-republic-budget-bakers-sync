@@ -628,3 +628,77 @@ def test_run_check_day_empty_day_returns_empty_lists(tmp_path):
     assert result is not None
     assert result.processed == []
     assert result.not_processed == []
+
+
+def test_run_check_day_event_summary_includes_status(tmp_path):
+    """EventSummary must expose the TR status of the event."""
+    from unittest.mock import patch
+
+    from app.main import run_check_day
+    from app.persistence import init_db
+
+    db_path = tmp_path / "sync.db"
+    init_db(db_path)
+
+    event = {
+        "id": "ev-status",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "eventType": "CARD_TRANSACTION",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"value": -7.62, "currency": "EUR"},
+    }
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.shared_db_path = db_path
+    cfg.instance = "test"
+
+    with (
+        patch("app.main.Notifier"),
+        patch("app.main.SyncRunner") as mock_runner_cls,
+    ):
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = [event]
+
+        result = run_check_day("2026-08-24", cfg=cfg)
+
+    assert result is not None
+    assert len(result.not_processed) == 1
+    assert result.not_processed[0].status == "CANCELED"
+
+
+def test_run_check_day_event_summary_status_empty_when_absent(tmp_path):
+    """EventSummary.status must be empty string when the event has no status field."""
+    from unittest.mock import patch
+
+    from app.main import run_check_day
+    from app.persistence import init_db
+
+    db_path = tmp_path / "sync.db"
+    init_db(db_path)
+
+    event = {
+        "id": "ev-no-status",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "eventType": "PAYMENT_INBOUND",
+        "title": "Transfer",
+        "amount": {"value": 100.0, "currency": "EUR"},
+    }
+
+    cfg = MagicMock()
+    cfg.data_dir = tmp_path
+    cfg.shared_db_path = db_path
+    cfg.instance = "test"
+
+    with (
+        patch("app.main.Notifier"),
+        patch("app.main.SyncRunner") as mock_runner_cls,
+    ):
+        runner = mock_runner_cls.return_value
+        runner.fetch_events.return_value = [event]
+
+        result = run_check_day("2026-08-24", cfg=cfg)
+
+    assert result is not None
+    assert result.not_processed[0].status == ""

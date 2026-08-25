@@ -15,9 +15,11 @@ from app.persistence import EventRepository, dedup_event_id
 from app.tr_client import LoginFailedError, SessionExpiredError, TRClient
 from app.tr_mapper import (
     KNOWN_EVENT_TYPES,
+    build_cancellation_records,
     build_records_for_event,
     extract_event_type,
     filter_by_lookback,
+    is_canceled_event,
 )
 from app.twofa import (
     TelegramCodeProvider,
@@ -655,6 +657,42 @@ class SyncRunner:
             ``(synced, excluded, failed)`` increment tuple.
         """
         self._warn_unknown_event_type(event)
+
+        if is_canceled_event(event):
+            existing_ids = self._parse_existing_ids(repo.get_wallet_record_id(event))
+            if not existing_ids:
+                repo.mark_processed_force(event, wallet_record_id=None)
+                log.info(
+                    "Resync: excluded CANCELED event %s (never synced)",
+                    dedup_event_id(event),
+                )
+                return 0, 1, 0
+            # Event was previously synced — post a reversal to offset the original debit.
+            recs = build_cancellation_records(
+                event,
+                cash_account_id=self._cfg.wallet_cash_account_id,
+                portfolio_account_id=self._cfg.wallet_portfolio_account_id,
+                label_ids=self._cfg.label_ids,
+            )
+            if not recs:
+                repo.mark_processed_force(event, wallet_record_id=None)
+                log.info(
+                    "Resync: excluded CANCELED zero-amount event %s",
+                    dedup_event_id(event),
+                )
+                return 0, 1, 0
+            failed, wallet_record_id = self._resync_post_records(
+                event, recs, wallet_client
+            )
+            if failed:
+                return 0, 0, 1
+            repo.mark_processed_force(event, wallet_record_id=wallet_record_id)
+            log.info(
+                "Resync: posted reversal for CANCELED event %s → wallet_record_id=%s",
+                dedup_event_id(event),
+                wallet_record_id,
+            )
+            return 1, 0, 0
 
         recs = build_records_for_event(
             event,
