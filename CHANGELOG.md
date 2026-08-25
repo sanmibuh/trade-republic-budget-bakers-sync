@@ -9,6 +9,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 <!-- add release notes here -->
 **Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v8.0.0...v8.0.1
 
+## [8.0.0] - 2026-08-25
+
+### What's Changed
+* Correctness: cron schedule validation only checks syntax, not field ranges — [#199](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/199)
+* Cleanup: remove legacy callback handlers now that v7.4.0 is fully deployed — [#200](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/200)
+* Improve /logs command: filter by level and add meaningful INFO messages — [#201](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/201)
+* deps: bump the pip-dependencies group with 2 updates — [#202](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/202)
+* [Clean Code] Private helpers in app/backup.py accessed across module boundaries — [#207](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/207)
+* Add qodana CI checks — [#195](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/195)
+* Fix Qodana code quality hits — [#210](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/210)
+* [Clean Code] Dead code in app/bot.py and app/sync_runner.py — [#213](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/213)
+* [Docs] Outdated reference to _check_session_direct in ARCHITECTURE.md — [#214](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/214)
+* [Clean Code] Use precise type hints under TYPE_CHECKING in app/__main__.py — [#215](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/215)
+* [Docs] Outdated CLI command signatures and missing check-pending in ARCHITECTURE.md — [#216](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/216)
+* [Clean Code] Redundant local import of re in app/config.py and unused CODE_FILENAME in app/twofa.py — [#217](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/217)
+* 🧪 Nightly: improve test coverage (2026-08-18) — [#218](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/218)
+* Add /check-day Telegram command: dry-run sync for a specific day — [#220](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/220)
+
+**Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v7.4.0...v8.0.0
 
 ## [7.4.0] - 2026-08-23
 
