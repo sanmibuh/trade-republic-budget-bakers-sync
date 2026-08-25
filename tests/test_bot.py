@@ -13,10 +13,9 @@ from app.bot import (
     InstanceStatus,
     TelegramBot,
     _auth_icon,
-    _check_session_direct,
+    _build_sync_summary,
     _format_sync_timestamp,
     _instance_status_direct,
-    _last_sync_summary_direct,
 )
 from app.config import BackupConfig, Config
 
@@ -2174,100 +2173,6 @@ def test_format_sync_timestamp_invalid_returns_raw():
 
 
 # ---------------------------------------------------------------------------
-# _check_session_direct
-# ---------------------------------------------------------------------------
-
-
-def test_check_session_direct_no_cookies_returns_false(tmp_path):
-    result = _check_session_direct(tmp_path, tmp_path / "sync.db", "user1")
-    assert result is False
-
-
-def test_check_session_direct_no_db_returns_true_when_cookie_valid(tmp_path):
-    with patch("app.bot.has_valid_session", return_value=True):
-        result = _check_session_direct(tmp_path, tmp_path / "sync.db", "user1")
-    assert result is True
-
-
-def test_check_session_direct_auth_state_failed_returns_false(tmp_path):
-    from app.persistence import EventRepository, init_db
-
-    db_path = tmp_path / "sync.db"
-    init_db(db_path)
-    with EventRepository(db_path) as repo:
-        repo.set_auth_state("user1", "failed")
-
-    with patch("app.bot.has_valid_session", return_value=True):
-        result = _check_session_direct(tmp_path, db_path, "user1")
-    assert result is False
-
-
-def test_check_session_direct_auth_state_ok_returns_true(tmp_path):
-    from app.persistence import EventRepository, init_db
-
-    db_path = tmp_path / "sync.db"
-    init_db(db_path)
-    with EventRepository(db_path) as repo:
-        repo.set_auth_state("user1", "ok")
-
-    with patch("app.bot.has_valid_session", return_value=True):
-        result = _check_session_direct(tmp_path, db_path, "user1")
-    assert result is True
-
-
-# ---------------------------------------------------------------------------
-# _last_sync_summary_direct
-# ---------------------------------------------------------------------------
-
-
-def test_last_sync_summary_direct_no_db_returns_none(tmp_path):
-    result = _last_sync_summary_direct(tmp_path / "sync.db", "user1")
-    assert result is None
-
-
-def test_last_sync_summary_direct_success_run(tmp_path):
-    from app.persistence import EventRepository, init_db
-
-    db_path = tmp_path / "sync.db"
-    init_db(db_path)
-    with EventRepository(db_path) as repo:
-        repo.set_sync_run("user1", status="success", saved=5, failed=0, excluded=1)
-
-    result = _last_sync_summary_direct(db_path, "user1")
-    assert result is not None
-    assert "✅" in result
-    assert "success" in result
-    assert "saved 5" in result
-    assert "excluded 1" in result
-
-
-def test_last_sync_summary_direct_failed_run(tmp_path):
-    from app.persistence import EventRepository, init_db
-
-    db_path = tmp_path / "sync.db"
-    init_db(db_path)
-    with EventRepository(db_path) as repo:
-        repo.set_sync_run("user1", status="failed", saved=0, failed=2, excluded=0)
-
-    result = _last_sync_summary_direct(db_path, "user1")
-    assert result is not None
-    assert "❌" in result
-    assert "failed" in result
-
-
-def test_last_sync_summary_direct_no_run_for_instance_returns_none(tmp_path):
-    from app.persistence import EventRepository, init_db
-
-    db_path = tmp_path / "sync.db"
-    init_db(db_path)
-    with EventRepository(db_path) as repo:
-        repo.set_sync_run("other", status="success", saved=1, failed=0, excluded=0)
-
-    result = _last_sync_summary_direct(db_path, "user1")
-    assert result is None
-
-
-# ---------------------------------------------------------------------------
 # _instance_status_direct
 # ---------------------------------------------------------------------------
 
@@ -2864,17 +2769,17 @@ def test_register_commands_order_without_backup(tmp_path):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock())
         bot._register_commands()
     commands = [c["command"] for c in mock_post.call_args.kwargs["json"]["commands"]]
-    assert commands == ["sync", "status", "logs", "resync"]
+    assert commands == ["sync", "status", "logs", "checkday", "resync"]
 
 
 def test_register_commands_order_with_backup(tmp_path):
-    """Commands must be registered in order: sync, status, logs, backup, resync."""
+    """Commands must be registered in order: sync, status, logs, backup, checkday, resync."""
     bot = _bot(backup_cfg=_make_backup_config(tmp_path), tmp_path=tmp_path)
     with patch.object(bot._session, "post") as mock_post:
         mock_post.return_value = MagicMock(raise_for_status=MagicMock())
         bot._register_commands()
     commands = [c["command"] for c in mock_post.call_args.kwargs["json"]["commands"]]
-    assert commands == ["sync", "status", "logs", "backup", "resync"]
+    assert commands == ["sync", "status", "logs", "backup", "checkday", "resync"]
 
 
 # ---------------------------------------------------------------------------
@@ -2939,3 +2844,282 @@ def test_run_backup_sends_error_on_exception(tmp_path):
         bot._run_backup("monthly", "2026-07")
     mock_send.assert_called_once()
     assert "boom" in mock_send.call_args.args[0]
+
+
+def test_run_backup_no_op_when_backup_cfg_is_none(tmp_path):
+    """_run_backup must return immediately when backup_cfg is None."""
+    bot = _bot(backup_cfg=None, tmp_path=tmp_path)
+    with patch("app.bot.backup_module.run_auto") as mock_run_auto:
+        bot._run_backup("auto", "")
+    mock_run_auto.assert_not_called()
+
+
+def test_run_backup_auto_calls_backup_module(tmp_path):
+    """_run_backup('auto', '') must call backup.run_auto directly."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch("app.bot.backup_module.run_auto") as mock_run_auto,
+        patch("app.bot.WalletClient"),
+        patch("app.bot.Notifier"),
+    ):
+        bot._run_backup("auto", "")
+    mock_run_auto.assert_called_once()
+
+
+def test_run_backup_unknown_mode_sends_warning(tmp_path):
+    """_run_backup with an unrecognised mode must send a warning message."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch("app.bot.WalletClient"),
+        patch("app.bot.Notifier"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._run_backup("unknown_mode", "")
+    mock_send.assert_called_once()
+    assert "Unknown backup mode" in mock_send.call_args.args[0]
+
+
+# ---------------------------------------------------------------------------
+# _build_sync_summary — unknown status returns None
+# ---------------------------------------------------------------------------
+
+
+def test_build_sync_summary_returns_none_for_unknown_status():
+    """_build_sync_summary must return None when status is not a recognised value."""
+    result = _build_sync_summary({"status": "running"})
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _run_resync_for_instance — exception handling
+# ---------------------------------------------------------------------------
+
+
+def test_run_resync_for_instance_sends_error_on_exception(tmp_path):
+    """_run_resync_for_instance must catch exceptions and send an error message."""
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    with (
+        patch("app.bot._main_run_resync", side_effect=RuntimeError("resync failed")),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._run_resync_for_instance(inst, "2026-07-15")
+    mock_send.assert_called_once()
+    assert "resync failed" in mock_send.call_args.args[0]
+
+
+# ---------------------------------------------------------------------------
+# _submit_code_to — exception when writing code file
+# ---------------------------------------------------------------------------
+
+
+def test_submit_code_to_sends_error_when_write_fails(tmp_path):
+    """_submit_code_to must catch write errors and send an error message."""
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    # Create the pending file before entering the patch so the real write_text works.
+    inst.config.twofa_pending_file.write_text("pending")
+    with (
+        patch("pathlib.Path.write_text", side_effect=OSError("disk full")),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        result = bot._submit_code_to(inst, "123456")
+    assert result is False
+    mock_send.assert_called_once()
+    assert "disk full" in mock_send.call_args.args[0]
+
+
+# ---------------------------------------------------------------------------
+# _backup_type_buttons — delegates to bot_keyboards helper
+# ---------------------------------------------------------------------------
+
+
+def test_backup_type_buttons_delegates_to_bot_keyboards(tmp_path):
+    """TelegramBot._backup_type_buttons must delegate to the standalone function."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch("app.bot._backup_type_buttons_fn", return_value=[[]]) as mock_fn:
+        result = bot._backup_type_buttons()
+    mock_fn.assert_called_once_with()
+    assert result == [[]]
+
+
+def test_resync_date_buttons_delegates_to_bot_keyboards(tmp_path):
+    """TelegramBot._resync_date_buttons must delegate to the standalone function."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch("app.bot._resync_date_buttons_fn", return_value=[[]]) as mock_fn:
+        result = bot._resync_date_buttons("user1")
+    mock_fn.assert_called_once_with("user1")
+    assert result == [[]]
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._cmd_check_day — /checkday command
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_check_day_no_args_sends_instance_picker(tmp_path):
+    """/checkday with no args must show an instance picker."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_check_day([])
+    mock_send.assert_called_once()
+    keyboard = mock_send.call_args.kwargs.get("keyboard")
+    assert keyboard is not None
+    all_buttons = [btn for row in keyboard for btn in row]
+    cb_data = [b["callback_data"] for b in all_buttons]
+    assert any(d.startswith("checkday_pick_date:") for d in cb_data)
+
+
+def test_cmd_check_day_with_date_sends_instance_picker_for_date(tmp_path):
+    """/checkday 2026-08-20 must show an instance picker with the date encoded."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_check_day(["2026-08-20"])
+    mock_send.assert_called_once()
+    keyboard = mock_send.call_args.kwargs.get("keyboard")
+    assert keyboard is not None
+    all_buttons = [btn for row in keyboard for btn in row]
+    cb_data = [b["callback_data"] for b in all_buttons]
+    assert any("2026-08-20" in d for d in cb_data)
+
+
+def test_cmd_check_day_invalid_date_sends_error(tmp_path):
+    """/checkday with a non-date arg must send an error message."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._cmd_check_day(["not-a-date"])
+    mock_send.assert_called_once()
+    msg = mock_send.call_args.args[0]
+    assert "invalid" in msg.lower() or "YYYY" in msg
+
+
+# ---------------------------------------------------------------------------
+# TelegramBot._handle_callback_query — check_day callbacks
+# ---------------------------------------------------------------------------
+
+
+def test_callback_check_day_pick_date_sends_date_keyboard(tmp_path):
+    """check_day_pick_date:<instance> callback must show a date-picker keyboard."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+        patch.object(bot, "_check_day_date_buttons", return_value=[[]]) as mock_dates,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "checkday_pick_date:user1",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_dates.assert_called_once_with("user1")
+    mock_send.assert_called_once()
+
+
+def test_callback_check_day_dispatches_launch_check_day(tmp_path):
+    """checkday:<date>:<instance> callback must call _launch_check_day."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_launch_check_day") as mock_launch,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "checkday:2026-08-20:user1",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_launch.assert_called_once()
+    inst, date_str = mock_launch.call_args.args
+    assert date_str == "2026-08-20"
+    assert inst.name == "User1"
+
+
+def test_callback_check_day_unknown_instance_replies(tmp_path):
+    """checkday:<date>:<unknown> callback must reply with error."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "checkday:2026-08-20:nobody",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_send.assert_called_once()
+    assert "unknown" in mock_send.call_args.args[0].lower()
+
+
+def test_callback_check_day_pick_date_unknown_instance_replies(tmp_path):
+    """checkday_pick_date:<unknown> callback must reply with error."""
+    bot = _bot(tmp_path=tmp_path)
+    with (
+        patch.object(bot, "_answer_callback_query"),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._handle_callback_query(
+            {
+                "id": "cq1",
+                "data": "checkday_pick_date:nobody",
+                "message": {"chat": {"id": 42}},
+            }
+        )
+    mock_send.assert_called_once()
+    assert "unknown" in mock_send.call_args.args[0].lower()
+
+
+def test_check_day_date_buttons_delegates_to_bot_keyboards(tmp_path):
+    """TelegramBot._check_day_date_buttons must delegate to the standalone function."""
+    bot = _bot(tmp_path=tmp_path)
+    with patch("app.bot._check_day_date_buttons_fn", return_value=[[]]) as mock_fn:
+        result = bot._check_day_date_buttons("user1")
+    mock_fn.assert_called_once_with("user1")
+    assert result == [[]]
+
+
+def test_run_check_day_in_thread_sends_report(tmp_path):
+    """_run_check_day_for_instance must send the report text to Telegram."""
+    from app.main import CheckDayResult, EventSummary
+
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    check_result = CheckDayResult(
+        date="2026-08-20",
+        processed=[
+            EventSummary(
+                event_id="abc",
+                timestamp="2026-08-20T08:00:00+00:00",
+                amount="2.34",
+                currency="EUR",
+                description="Interest",
+            )
+        ],
+        not_processed=[],
+    )
+    with (
+        patch("app.bot._main_run_check_day", return_value=check_result),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._run_check_day_for_instance(inst, "2026-08-20")
+    mock_send.assert_called_once()
+    msg = mock_send.call_args.args[0]
+    assert "2026" in msg
+    assert "abc" in msg or "Interest" in msg
+
+
+def test_run_check_day_in_thread_handles_none_result(tmp_path):
+    """_run_check_day_for_instance must send an error when run_check_day returns None."""
+    bot = _bot(tmp_path=tmp_path)
+    inst = bot._cfg.instances["user1"]
+    with (
+        patch("app.bot._main_run_check_day", return_value=None),
+        patch.object(bot, "_send_message") as mock_send,
+    ):
+        bot._run_check_day_for_instance(inst, "2026-08-20")
+    mock_send.assert_called_once()
+    assert "error" in mock_send.call_args.args[0].lower()

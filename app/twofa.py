@@ -25,10 +25,6 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# File (inside the container's data dir) where the Telegram bot writes the
-# authenticator code so the waiting login process can pick it up.
-CODE_FILENAME = ".tr_2fa_code"
-
 # Marker file created while TelegramCodeProvider is actively waiting for a code.
 # Its presence signals that a login is in progress; submit-code checks for it
 # before writing the code file, so stale /code submissions are rejected cleanly.
@@ -40,6 +36,10 @@ _DEFAULT_POLL_INTERVAL = 3.0
 
 class TerminalCodeProvider:
     """Reads the authenticator code from stdin (interactive bootstrap)."""
+
+    def __init__(self) -> None:
+        # No state to initialise — this provider reads directly from stdin.
+        pass
 
     def get_code(self) -> str:
         return input().strip()

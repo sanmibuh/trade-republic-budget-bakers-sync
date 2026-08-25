@@ -39,7 +39,7 @@ Notifier.sync_complete()           # Telegram summary (optional)
 ## Data flow — Force Resync (single day)
 
 ```
-python -m app resync YYYY-MM-DD
+python -m app resync --instance <name> YYYY-MM-DD
         ↓
 SyncRunner.resync_day(date_str, repo, wallet_client)
         ↓
@@ -58,6 +58,27 @@ EventRepository.mark_processed_force()   # INSERT OR REPLACE (upsert)
         ↓
 Notifier.sync_complete()                 # Telegram summary (optional)
 ```
+
+## Data flow — Check-day (dry run)
+
+```
+python -m app check-day --instance <name> YYYY-MM-DD
+        ↓
+run_check_day(date_str, cfg) → CheckDayResult
+        ↓
+SyncRunner.fetch_events(since=date 00:00)
+        ↓
+filter_by_lookback(events, since, until=date+1 00:00)  # narrow to exact day
+        ↓
+For each event:
+  EventRepository.is_processed(event_id)
+    YES → CheckDayResult.processed.append(EventSummary)
+    NO  → CheckDayResult.not_processed.append(EventSummary)
+```
+
+No writes: no `WalletClient` calls, no `mark_processed`, no Telegram notification.
+
+---
 
 ## Data flow — Backup
 
@@ -115,7 +136,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
   `data_dir/.tr_2fa_pending` marker; that marker is removed on success or timeout. On expiry, it calls `on_timeout`
   (if set) — wired by `select_code_provider` to `notifier.login_code_timeout(instance)`, which sends a cancellation
   message in Telegram — then raises `TimeoutError`.
-- `submit-code` (`python -m app submit-code <code>`) checks for `.tr_2fa_pending` before writing the code file; if
+- `submit-code` (`python -m app submit-code --instance <name> <code>`) checks for `.tr_2fa_pending` before writing the code file; if
   the marker is absent (no login in progress), it exits 1 with "No active login request for this instance" so stale
   `/code` submissions are rejected cleanly.
 - Code delivery: the `/code` bot command calls `python -m app submit-code --instance <name> <code>` in-process
@@ -127,7 +148,7 @@ Notifier.backup_complete()  # Telegram summary with filename (optional)
 - `run()` (sync) shares `_prepare(cfg)` (data dir + SSL circuit-breaker + logging + `Notifier`)
   as a module-level bootstrap helper.
 - Sync orchestration logic lives in the `SyncRunner` class (`sync_runner.py`). Its public methods — `connect`,
-  `fetch_events`, `build_batch`, `process_results` — accept `cfg` and `notifier` injected via the constructor,
+  `fetch_events`, `build_batch`, `process_results`, `notify_fetch_summary`, `submit_batch` — accept `cfg` and `notifier` injected via the constructor,
   making dependencies explicit and easy to mock. `run()` is a thin wrapper that calls `_prepare`,
   constructs a `SyncRunner`, and delegates to it. `main.py` re-exports `SyncRunner`, `_SyncCounts`, `_Batch`, and
   `AuthenticationError` for backward compatibility.
@@ -208,13 +229,14 @@ execution paths before any `EventRepository` is opened.
 
 ### CLI entry point (`app/__main__.py`)
 - Single entry point via `python -m app` using **click** with subcommands:
-  - `python -m app sync` — runs `main.run()`
   - `python -m app sync --instance <name>` — resolves config from `instances.yml` and runs sync for that instance
   - `python -m app backup <mode> [param]` — dispatches to `backup.run_auto/run_monthly/run_yearly`
   - `python -m app bot` — starts the Telegram bot
-  - `python -m app submit-code <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting
+  - `python -m app submit-code --instance <name> <code>` — writes the authenticator code to `data_dir/.tr_2fa_code` for a waiting
     sync process to pick up
-  - `python -m app resync YYYY-MM-DD` — runs `main.run_resync(date_str)`, force re-syncing a specific day
+  - `python -m app resync --instance <name> YYYY-MM-DD` — runs `main.run_resync(date_str)`, force re-syncing a specific day
+  - `python -m app check-day --instance <name> YYYY-MM-DD` — runs `main.run_check_day(date_str)`, dry-run check for a specific day (no writes)
+  - `python -m app check-pending --instance <name>` — exits 0 if a 2FA code is pending for the given instance, 1 otherwise
   - `python -m app list-instances` — prints all instance names from `INSTANCES_CONFIG_PATH`, one per line.
   - `python -m app list-schedules` — prints `name<TAB>schedule` for every instance that has a schedule,
     one per line. Used by `entrypoint.sh` to register one cron job per instance with its own schedule.
@@ -256,10 +278,13 @@ execution paths before any `EventRepository` is opened.
 - Sync/resync commands (`/sync`, `/resync`) show an inline instance picker. When a sync detects an expired session,
   2FA is triggered automatically in-process (no separate `/login` command needed).
 - `/status` reports auth state per instance — ✅ session valid, ⚠️ needs login, ❓ DB unreadable (corrupted/locked) — by reading `sync.db` directly
-  via `EventRepository` and checking cookie expiry via `has_valid_session` (`_check_session_direct`).
+  via `_instance_status_direct`, which checks cookie validity via `has_valid_session` (reads `data_dir`) and opens a single `EventRepository` connection to load auth state and last-sync summary from the DB.
 - `/resync [YYYY-MM-DD]` force re-syncs a specific day: instance picker → date picker (last 7 days) → executes
   `main.run_resync()` in a background thread. With a date arg, jumps straight to the instance picker.
   Callback data format: `resync_pick_date:<instance>` (date picker step) and `resync:<date>:<instance>` (execute step).
+- `/checkday [YYYY-MM-DD]` dry-runs a check for a specific day: instance picker → date picker (last 7 days) → executes
+  `main.run_check_day()` in a background thread and sends a formatted report. No writes to BudgetBakers or the DB.
+  Callback data format: `checkday_pick_date:<instance>` (date picker step) and `checkday:<date>:<instance>` (execute step).
 
 ### Config
 - All configuration is read exclusively from `instances.yml` (mounted at `INSTANCES_CONFIG_PATH`).

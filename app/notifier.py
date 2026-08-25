@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import requests
 
@@ -61,7 +61,7 @@ def send_telegram_message(
     bot_token: str | None,
     chat_id: str | None,
     message: str,
-    reply_markup: dict | None = None,
+    reply_markup: dict[str, Any] | None = None,
 ) -> bool:
     if not bot_token or not chat_id:
         return False
@@ -114,7 +114,7 @@ class Notifier:
             message=message,
         )
 
-    def _send_with_markup(self, message: str, reply_markup: dict) -> bool:
+    def _send_with_markup(self, message: str, reply_markup: dict[str, Any]) -> bool:
         return send_telegram_message(
             bot_token=self._bot_token,
             chat_id=self._chat_id,

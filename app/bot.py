@@ -45,6 +45,7 @@ from app.bot_keyboards import (
     _CB_SEP,
     BACKUP_ICONS as _BACKUP_ICONS,
     backup_type_buttons as _backup_type_buttons_fn,
+    check_day_date_buttons as _check_day_date_buttons_fn,
     instance_buttons as _instance_buttons_fn,
     instance_buttons_for_resync as _instance_buttons_for_resync_fn,
     log_level_buttons as _log_level_buttons_fn,
@@ -62,6 +63,7 @@ from app.config import (
 from app.http_client import build_session as _build_session
 from app.main import (
     run as _main_run,
+    run_check_day as _main_run_check_day,
     run_resync as _main_run_resync,
 )
 from app.notifier import Notifier, escape_code as _esc_code, escape_markdown as _esc
@@ -94,11 +96,10 @@ __all__ = [
     "InstanceConfig",
     "TelegramBot",
     "_auth_icon",
-    "_check_session_direct",
     "_clamp_single_line",
     "_format_sync_timestamp",
-    "_last_sync_summary_direct",
     "_log_line_level",
+    "_main_run_check_day",
     "_read_todays_logs",
     "_trim_excess_lines",
     "run",
@@ -319,9 +320,7 @@ def _instance_status_direct(
 
     Opens ``EventRepository`` at most once, fetching both ``auth_state`` and
     ``sync_runs`` in a single connection.  This is the preferred call site for
-    :meth:`TelegramBot._instance_status_line`; it halves the number of SQLite
-    opens compared with calling ``_check_session_direct`` and
-    ``_last_sync_summary_direct`` separately.
+    :meth:`TelegramBot._instance_status_line`.
 
     The last sync info is always read from the DB regardless of the current
     session/cookie state, so ``/status`` keeps showing the last sync summary
@@ -358,7 +357,7 @@ def _instance_status_direct(
     return InstanceStatus(auth=auth, last_sync=last_sync)
 
 
-def _build_sync_summary(run_info: dict | None) -> str | None:
+def _build_sync_summary(run_info: dict[str, Any] | None) -> str | None:
     """Convert a raw sync-run dict to a human-readable summary string."""
     if run_info is None:
         return None
@@ -383,51 +382,6 @@ def _build_sync_summary(run_info: dict | None) -> str | None:
     if excluded is not None:
         parts.append(f"excluded {excluded}")
     return " · ".join(parts)
-
-
-def _check_session_direct(
-    data_dir: Path, shared_db_path: Path, instance: str
-) -> bool | None:
-    """Return True/False/None for the session state of *instance*.
-
-    Reads cookie file expiry and ``auth_state`` from the shared ``sync.db``
-    directly without any network calls.
-
-    Returns:
-        True  — session valid and ``auth_state`` is ``ok`` (or no state yet).
-        False — session missing/expired or ``auth_state`` is ``failed``/``expired``.
-        None  — DB could not be read (corrupted/locked).
-    """
-    from app.persistence import EventRepository
-
-    if not has_valid_session(data_dir):
-        return False
-
-    if shared_db_path.exists():
-        try:
-            with EventRepository(shared_db_path, instance=instance) as repo:
-                auth_status = repo.get_auth_state(instance)
-        except Exception:
-            return None
-        if auth_status in ("failed", "expired"):
-            return False
-    return True
-
-
-def _last_sync_summary_direct(shared_db_path: Path, instance: str) -> str | None:
-    """Return a human-readable summary of the most recent sync run from the DB."""
-    from app.persistence import EventRepository
-
-    if not shared_db_path.exists():
-        return None
-
-    try:
-        with EventRepository(shared_db_path, instance=instance) as repo:
-            run_info = repo.get_sync_run(instance)
-    except Exception:
-        return None
-
-    return _build_sync_summary(run_info)
 
 
 # ---------------------------------------------------------------------------
@@ -495,6 +449,10 @@ class TelegramBot:
                 "description": "Show today's logs — pick a level filter",
             },
             {
+                "command": "checkday",
+                "description": "Dry-run check of TR events for a specific day",
+            },
+            {
                 "command": "resync",
                 "description": "Force re-sync of a specific day, bypassing dedup",
             },
@@ -545,13 +503,13 @@ class TelegramBot:
     # Update routing
     # ------------------------------------------------------------------
 
-    def _handle_update(self, update: dict) -> None:
+    def _handle_update(self, update: dict[str, Any]) -> None:
         if "message" in update:
             self._handle_message(update["message"])
         elif "callback_query" in update:
             self._handle_callback_query(update["callback_query"])
 
-    def _handle_message(self, message: dict) -> None:
+    def _handle_message(self, message: dict[str, Any]) -> None:
         chat_id = str(message.get("chat", {}).get("id", ""))
         if chat_id != self._cfg.chat_id:
             log.debug("Ignoring message from unauthorized chat %s", chat_id)
@@ -574,10 +532,11 @@ class TelegramBot:
         raw_cmd = parts[0].lstrip("/").split("@")[0].lower()
         args = parts[1:]
 
-        dispatch = {
+        dispatch: dict[str, Any] = {
             "status": self._cmd_status,
             "sync": self._cmd_sync,
             "resync": self._cmd_resync,
+            "checkday": self._cmd_check_day,
             "logs": self._cmd_logs,
             "code": self._cmd_code,
             "backup": self._cmd_backup,
@@ -593,7 +552,7 @@ class TelegramBot:
         if raw_cmd == "code":
             self._delete_message(message.get("message_id"))
 
-    def _handle_callback_query(self, cq: dict) -> None:
+    def _handle_callback_query(self, cq: dict[str, Any]) -> None:
         """Handle inline keyboard button taps."""
         cq_id = cq.get("id", "")
         chat_id = str(cq.get("message", {}).get("chat", {}).get("id", ""))
@@ -627,6 +586,8 @@ class TelegramBot:
             "logs_level": self._on_cb_logs_level,
             "resync_pick_date": self._on_cb_resync_pick_date,
             "resync": self._on_cb_resync,
+            "checkday_pick_date": self._on_cb_check_day_pick_date,
+            "checkday": self._on_cb_check_day,
         }
         handler = named.get(cmd)
         if handler is not None:
@@ -688,6 +649,30 @@ class TelegramBot:
             return
         self._launch_resync(inst, date_str)
 
+    def _on_cb_check_day_pick_date(self, parts: list[str], _data: str) -> None:
+        instance_key = parts[1].lower()
+        inst = self._cfg.instances.get(instance_key)
+        if inst is None:
+            self._send_message(f"❓ Unknown instance: `{_esc_code(instance_key)}`")
+            return
+        self._send_message(
+            f"📋 *Check\\-day* — Choose date for *{_esc(inst.name)}*:",
+            keyboard=self._check_day_date_buttons(instance_key),
+        )
+
+    def _on_cb_check_day(self, parts: list[str], data: str) -> None:
+        # Format: checkday:<date>:<instance>
+        if len(parts) < 3:
+            log.warning("Malformed checkday callback_data: %r", data)
+            return
+        date_str = parts[1]
+        instance_key = parts[2].lower()
+        inst = self._cfg.instances.get(instance_key)
+        if inst is None:
+            self._send_message(f"❓ Unknown instance: `{_esc_code(instance_key)}`")
+            return
+        self._launch_check_day(inst, date_str)
+
     def _on_cb_instance_cmd(self, cmd: str, parts: list[str]) -> None:
         """Handle instance-routed callbacks: sync."""
         instance_key = parts[-1].lower()
@@ -721,7 +706,8 @@ class TelegramBot:
 
         self._send_message("\n".join(lines))
 
-    def _instance_status_line(self, inst: InstanceConfig) -> str:
+    @staticmethod
+    def _instance_status_line(inst: InstanceConfig) -> str:
         """Build a Telegram-formatted status line for a single sync instance."""
         status = _instance_status_direct(
             inst.config.data_dir,
@@ -757,6 +743,29 @@ class TelegramBot:
         self._send_message(
             f"🔁 *Resync {_esc(date_str)}* — Choose instance:",
             keyboard=self._instance_buttons_for_resync(date_str),
+        )
+
+    def _cmd_check_day(self, args: list[str]) -> None:
+        """Handle /checkday [YYYY-MM-DD]."""
+        if not args:
+            self._pick_instance(
+                "checkday_pick_date", "📋 *Check\\-day* — Choose instance:"
+            )
+            return
+
+        date_str = args[0]
+        try:
+            datetime.date.fromisoformat(date_str)
+        except ValueError:
+            self._send_message(
+                f"⚠️ Invalid date: `{_esc_code(date_str)}`\\. "
+                "Expected format: `YYYY\\-MM\\-DD`\\."
+            )
+            return
+
+        self._send_message(
+            f"📋 *Check\\-day {_esc(date_str)}* — Choose instance:",
+            keyboard=self._instance_buttons_for_check_day(date_str),
         )
 
     def _cmd_logs(self, args: list[str]) -> None:
@@ -917,6 +926,75 @@ class TelegramBot:
                 f"❌ Resync error for *{_esc(inst.name)}* `{_esc_code(date_str)}`: {_esc(str(exc))}"
             )
 
+    def _launch_check_day(self, inst: InstanceConfig, date_str: str) -> None:
+        self._send_message(
+            f"📋 Checking *{_esc(date_str)}* for *{_esc(inst.name)}*\\.\\.\\."
+        )
+        threading.Thread(
+            target=self._run_check_day_for_instance,
+            args=(inst, date_str),
+            daemon=True,
+        ).start()
+
+    def _run_check_day_for_instance(self, inst: InstanceConfig, date_str: str) -> None:
+        """Run check-day for *inst* in-process. Called from a daemon thread."""
+
+        try:
+            result = _main_run_check_day(date_str, cfg=inst.config)
+        except Exception as exc:
+            log.exception(
+                "Check-day failed for instance %s date %s", inst.name, date_str
+            )
+            self._send_message(
+                f"❌ Check\\-day error for *{_esc(inst.name)}* `{_esc_code(date_str)}`: {_esc(str(exc))}"
+            )
+            return
+
+        if result is None:
+            self._send_message(
+                f"❌ Check\\-day error: invalid date `{_esc_code(date_str)}`"
+            )
+            return
+
+        self._send_check_day_report(result, inst.name)
+
+    def _send_check_day_report(self, result: Any, instance_name: str) -> None:
+        """Format and send the check-day report to Telegram."""
+        lines = [
+            f"📋 *Check\\-day report* — {_esc(result.date)} \\({_esc(instance_name)}\\)\n"
+        ]
+
+        if result.processed:
+            lines.append(f"✅ *Already processed* \\({len(result.processed)}\\):")
+            for ev in result.processed:
+                amount_str = f"{ev.amount} {ev.currency}".strip()
+                ts = ev.timestamp[:16]
+                lines.append(
+                    f"  • \\[{_esc(ts)}\\] {_esc(ev.description)} — {_esc(amount_str)}"
+                    f"  \\(id: `{_esc_code(ev.event_id)}`\\)"
+                )
+        else:
+            lines.append("✅ *Already processed* \\(0\\)")
+
+        lines.append("")
+
+        if result.not_processed:
+            lines.append(f"🆕 *Not yet processed* \\({len(result.not_processed)}\\):")
+            for ev in result.not_processed:
+                amount_str = f"{ev.amount} {ev.currency}".strip()
+                ts = ev.timestamp[:16]
+                lines.append(
+                    f"  • \\[{_esc(ts)}\\] {_esc(ev.description)} — {_esc(amount_str)}"
+                    f"  \\(id: `{_esc_code(ev.event_id)}`\\)"
+                )
+        else:
+            lines.append("🆕 *Not yet processed* \\(0\\)")
+
+        total = len(result.processed) + len(result.not_processed)
+        lines.append(f"\n*Total:* {total} events found")
+
+        self._send_message("\n".join(lines))
+
     def _maybe_submit_pending_code(self, code: str) -> bool:
         """Submit *code* to the instance awaiting 2FA during a sync.
 
@@ -969,8 +1047,9 @@ class TelegramBot:
         )
         return False
 
+    @staticmethod
     def _probe_pending(
-        self, instances: dict[str, InstanceConfig]
+        instances: dict[str, InstanceConfig],
     ) -> dict[str, InstanceConfig]:
         """Check each instance's 2FA pending marker file.
 
@@ -1023,27 +1102,53 @@ class TelegramBot:
         """Send *prompt* with an instance-picker inline keyboard for *cmd*."""
         self._send_message(prompt, keyboard=self._instance_buttons(cmd))
 
-    def _log_level_buttons(self) -> list[list[dict]]:
+    @staticmethod
+    def _log_level_buttons() -> list[list[dict[str, Any]]]:
         return _log_level_buttons_fn()
 
-    def _instance_buttons(self, cmd: str) -> list[list[dict]]:
+    def _instance_buttons(self, cmd: str) -> list[list[dict[str, Any]]]:
         names = [inst.name for inst in self._cfg.instances.values()]
         return _instance_buttons_fn(cmd, names)
 
-    def _instance_buttons_for_resync(self, date_str: str) -> list[list[dict]]:
+    def _instance_buttons_for_resync(self, date_str: str) -> list[list[dict[str, Any]]]:
         names = [inst.name for inst in self._cfg.instances.values()]
         return _instance_buttons_for_resync_fn(date_str, names)
 
-    def _resync_date_buttons(self, instance_key: str) -> list[list[dict]]:
+    @staticmethod
+    def _resync_date_buttons(instance_key: str) -> list[list[dict[str, Any]]]:
         return _resync_date_buttons_fn(instance_key)
 
-    def _backup_type_buttons(self) -> list[list[dict]]:
+    def _instance_buttons_for_check_day(
+        self, date_str: str
+    ) -> list[list[dict[str, Any]]]:
+        """Build an instance-picker keyboard that encodes *date_str* for check-day."""
+
+        names = [inst.name for inst in self._cfg.instances.values()]
+        buttons = [
+            {
+                "text": name,
+                "callback_data": f"checkday{_CB_SEP}{date_str}{_CB_SEP}{name.lower()}",
+            }
+            for name in names
+        ]
+        if not buttons:
+            return []
+        return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+
+    @staticmethod
+    def _check_day_date_buttons(instance_key: str) -> list[list[dict[str, Any]]]:
+        return _check_day_date_buttons_fn(instance_key)
+
+    @staticmethod
+    def _backup_type_buttons() -> list[list[dict[str, Any]]]:
         return _backup_type_buttons_fn()
 
-    def _year_buttons(self) -> list[list[dict]]:
+    @staticmethod
+    def _year_buttons() -> list[list[dict[str, Any]]]:
         return _year_buttons_fn()
 
-    def _month_buttons(self) -> list[list[dict]]:
+    @staticmethod
+    def _month_buttons() -> list[list[dict[str, Any]]]:
         return _month_buttons_fn()
 
     # ------------------------------------------------------------------
@@ -1053,10 +1158,10 @@ class TelegramBot:
     def _send_message(
         self,
         text: str,
-        keyboard: list[list[dict]] | None = None,
+        keyboard: list[list[dict[str, Any]]] | None = None,
         parse_mode: str | None = "MarkdownV2",
     ) -> None:
-        payload: dict = {
+        payload: dict[str, Any] = {
             "chat_id": self._cfg.chat_id,
             "text": text,
             "disable_web_page_preview": True,

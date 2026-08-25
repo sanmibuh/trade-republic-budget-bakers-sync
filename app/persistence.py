@@ -311,7 +311,7 @@ class EventRepository:
         )
         self._conn.commit()
 
-    def get_sync_run(self, instance: str) -> dict | None:
+    def get_sync_run(self, instance: str) -> dict[str, Any] | None:
         """Return the last sync run result for *instance*, or ``None`` if absent."""
         row = self._conn.execute(
             "SELECT status, ran_at, saved, failed, excluded "

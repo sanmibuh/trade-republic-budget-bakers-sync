@@ -26,6 +26,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from app.config import BackupConfig, Config
+    from app.notifier import Notifier
+    from app.wallet_client import WalletClient
 
 
 def _resolve_instance_cfg(instance: str) -> tuple[Config, Path]:
@@ -149,9 +151,9 @@ def _resolve_backup_cfg() -> BackupConfig:
 
 
 def _run_backup_mode(
-    client: object,
-    notifier: object,
-    data_dir: object,
+    client: WalletClient,
+    notifier: Notifier,
+    data_dir: Path,
     mode: str,
     param: str | None,
 ) -> None:
@@ -252,6 +254,71 @@ def resync(instance: str, date: str) -> None:
     configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
     init_db(cfg.shared_db_path)
     sys.exit(run_resync(date, cfg=cfg))
+
+
+@cli.command(name="check-day")
+@click.option(
+    "--instance",
+    required=True,
+    metavar="NAME",
+    help="Instance name from the instances YAML config file.",
+)
+@click.argument("date")
+def check_day(instance: str, date: str) -> None:
+    """Dry-run check of TR events for DATE (YYYY-MM-DD) — no writes.
+
+    Downloads all Trade Republic transactions for the given date, checks which
+    ones have already been processed, and prints a human-readable report.
+    Nothing is written to BudgetBakers or the SQLite database.
+
+    \b
+    Example:
+      python -m app check-day --instance user1 2026-08-20
+    """
+    from app.http_client import configure
+    from app.main import run_check_day
+
+    cfg, log_dir = _resolve_instance_cfg(instance)
+    setup_logging(log_dir)
+    configure(allow_insecure_ssl=cfg.allow_insecure_ssl)
+
+    if not cfg.shared_db_path.exists():
+        raise click.UsageError(
+            f"Database not found at {cfg.shared_db_path}. "
+            "Run at least one sync first to initialise the database."
+        )
+
+    result = run_check_day(date, cfg=cfg)
+    if result is None:
+        click.echo(f"Error: invalid date {date!r} — expected YYYY-MM-DD", err=True)
+        sys.exit(1)
+
+    click.echo(f"\n📋 Check-day report — {result.date} ({cfg.owner_name})\n")
+
+    if result.processed:
+        click.echo(f"✅ Already processed ({len(result.processed)}):")
+        for ev in result.processed:
+            amount_str = f"{ev.amount} {ev.currency}".strip()
+            click.echo(
+                f"  • [{ev.timestamp[:16]}] {ev.description} — {amount_str}  (id: {ev.event_id})"
+            )
+    else:
+        click.echo("✅ Already processed (0)")
+
+    click.echo()
+
+    if result.not_processed:
+        click.echo(f"🆕 Not yet processed ({len(result.not_processed)}):")
+        for ev in result.not_processed:
+            amount_str = f"{ev.amount} {ev.currency}".strip()
+            click.echo(
+                f"  • [{ev.timestamp[:16]}] {ev.description} — {amount_str}  (id: {ev.event_id})"
+            )
+    else:
+        click.echo("🆕 Not yet processed (0)")
+
+    total = len(result.processed) + len(result.not_processed)
+    click.echo(f"\nTotal: {total} events found")
 
 
 @cli.command(name="list-instances")

@@ -79,9 +79,9 @@ class WalletClient:
 
     def _get_all(
         self, resource: str, params: dict[str, Any] | None = None
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Fetch all pages for a given resource, following nextOffset pagination."""
-        results: list[dict] = []
+        results: list[dict[str, Any]] = []
         offset: int | None = None
         base_params = dict(params or {})
 
@@ -115,7 +115,9 @@ class WalletClient:
         return results
 
     @staticmethod
-    def _collect_page(resource: str, data: dict, results: list[dict]) -> int | None:
+    def _collect_page(
+        resource: str, data: dict[str, Any], results: list[dict[str, Any]]
+    ) -> int | None:
         """Append items from a paginated dict response into results. Returns next offset or None."""
         page = data.get(resource, [])
         if isinstance(page, list):
@@ -124,16 +126,16 @@ class WalletClient:
             results.append(page)
         return data.get("nextOffset") or None
 
-    def get_accounts(self) -> list[dict]:
+    def get_accounts(self) -> list[dict[str, Any]]:
         return self._get_all("accounts")
 
-    def get_categories(self) -> list[dict]:
+    def get_categories(self) -> list[dict[str, Any]]:
         return self._get_all("categories")
 
-    def get_budgets(self) -> list[dict]:
+    def get_budgets(self) -> list[dict[str, Any]]:
         return self._get_all("budgets")
 
-    def get_labels(self) -> list[dict]:
+    def get_labels(self) -> list[dict[str, Any]]:
         return self._get_all("labels")
 
     def put_record(self, record_id: str, record: dict[str, Any]) -> dict[str, Any]:
@@ -152,7 +154,7 @@ class WalletClient:
         response.raise_for_status()
         return response.json()
 
-    def get_records(self, date_from: str, date_to: str) -> list[dict]:
+    def get_records(self, date_from: str, date_to: str) -> list[dict[str, Any]]:
         """Fetch all records within [date_from, date_to] (inclusive, YYYY-MM-DD).
 
         The API supports repeated `recordDate` params with AND logic:
