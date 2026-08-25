@@ -310,6 +310,15 @@ class SyncRunner:
         c_record_indices: list[list[int]] = []
         excluded_count = 0
         for c_event in cancellation_events:
+            # Skip if the wallet_record_id was already cleared by a previous reversal —
+            # this makes build_batch idempotent when called again with the same event.
+            if repo.get_wallet_record_id(c_event) is None:
+                excluded_count += 1
+                log.info(
+                    "Excluded already-reversed cancellation event %s",
+                    dedup_event_id(c_event),
+                )
+                continue
             recs = build_cancellation_records(
                 c_event,
                 cash_account_id=self._cfg.wallet_cash_account_id,
@@ -455,6 +464,33 @@ class SyncRunner:
         repo.mark_processed(event, wallet_record_id=wallet_record_id)
         return 1, 0
 
+    def _persist_sync_run(self, repo: EventRepository, counts: _SyncCounts) -> None:
+        """Write a ``sync_run`` row reflecting *counts*.
+
+        Best-effort: failures are logged as warnings and never interrupt the caller.
+        """
+        if counts.failed == 0:
+            status = "success"
+        elif counts.synced == 0:
+            status = "failed"
+        else:
+            status = "partial"
+        try:
+            repo.set_sync_run(
+                self._cfg.instance,
+                status=status,
+                saved=counts.synced,
+                failed=counts.failed,
+                excluded=counts.excluded,
+            )
+        except Exception:
+            log.warning(
+                "Failed to persist sync_run=%r for instance %r",
+                status,
+                self._cfg.instance,
+                exc_info=True,
+            )
+
     def process_results(
         self,
         results: list[dict[str, Any]],
@@ -477,27 +513,7 @@ class SyncRunner:
 
         repo.commit()
         counts = _SyncCounts(synced=synced, excluded=excluded_count, failed=failed)
-        if counts.failed == 0:
-            status = "success"
-        elif counts.synced == 0:
-            status = "failed"
-        else:
-            status = "partial"
-        try:
-            repo.set_sync_run(
-                self._cfg.instance,
-                status=status,
-                saved=counts.synced,
-                failed=counts.failed,
-                excluded=counts.excluded,
-            )
-        except Exception:
-            log.warning(
-                "Failed to persist sync_run=%r for instance %r",
-                status,
-                self._cfg.instance,
-                exc_info=True,
-            )
+        self._persist_sync_run(repo, counts)
         return counts
 
     # ------------------------------------------------------------------
@@ -597,6 +613,10 @@ class SyncRunner:
         )
         counts.synced += c_synced
         counts.failed += c_failed
+        # Re-persist sync_run with the final counts that include cancellation reversals.
+        # process_results already wrote a preliminary row; this overwrites it via upsert.
+        if c_synced or c_failed:
+            self._persist_sync_run(repo, counts)
         return counts
 
     # resync_day helpers
