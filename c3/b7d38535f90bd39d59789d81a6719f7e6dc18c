@@ -1,0 +1,19 @@
+.github/workflows/prepare-release.yml
+  s_d18d1850c2b805::t_83cc56ab7c9df5 91-100,113-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "c3b7d38535f90bd39d59789d81a6719f7e6dc18c",
+  "prompts": {},
+  "sessions": {
+    "s_d18d1850c2b805": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fc73b3722ffe7z5HKVr8Vd7Eru",
+        "model": "claude-opus-4.8"
+      },
+      "human_author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
