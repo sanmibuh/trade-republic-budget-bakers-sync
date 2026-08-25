@@ -806,3 +806,117 @@ def test_repo_instance_scopes_mark_processed_force(tmp_path):
         repo_a.commit()
         assert repo_a.get_wallet_record_id(event) == "wid-updated"
         assert repo_a.count_processed() == 1  # no duplicate row
+
+
+# ---------------------------------------------------------------------------
+# EventRepository.filter_cancellation_pending
+# ---------------------------------------------------------------------------
+
+
+def test_filter_cancellation_pending_returns_processed_canceled_events(tmp_path):
+    """Events already in processed_events with a wallet_record_id that now carry
+    status=CANCELED must be returned — they need a reversal in BudgetBakers."""
+    db_path = tmp_path / "shared.db"
+    init_db(db_path)
+
+    event = {
+        "id": "ev-cancel",
+        "timestamp": "2026-08-24T05:43:38+00:00",
+        "eventType": "CARD_TRANSACTION",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(db_path, instance="tst") as repo:
+        repo.mark_processed(event, wallet_record_id="wid-123")
+        repo.commit()
+
+    with EventRepository(db_path, instance="tst") as repo:
+        result = repo.filter_cancellation_pending([event])
+
+    assert len(result) == 1
+    assert result[0]["id"] == "ev-cancel"
+
+
+def test_filter_cancellation_pending_excludes_non_canceled_processed_events(tmp_path):
+    """Processed events without CANCELED status must not be returned."""
+    db_path = tmp_path / "shared.db"
+    init_db(db_path)
+
+    event = {
+        "id": "ev-normal",
+        "timestamp": "2026-08-24T08:00:00+00:00",
+        "eventType": "CARD_TRANSACTION",
+        "amount": {"currency": "EUR", "value": -10.0},
+    }
+    with EventRepository(db_path, instance="tst") as repo:
+        repo.mark_processed(event, wallet_record_id="wid-abc")
+        repo.commit()
+
+    with EventRepository(db_path, instance="tst") as repo:
+        assert repo.filter_cancellation_pending([event]) == []
+
+
+def test_filter_cancellation_pending_excludes_canceled_without_wallet_id(tmp_path):
+    """CANCELED events that were previously excluded (wallet_record_id=NULL) must not
+    be returned — there is no BudgetBakers record to reverse."""
+    db_path = tmp_path / "shared.db"
+    init_db(db_path)
+
+    event = {
+        "id": "ev-canceled-excluded",
+        "timestamp": "2026-08-24T05:43:38+00:00",
+        "eventType": "CARD_TRANSACTION",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(db_path, instance="tst") as repo:
+        repo.mark_processed(event, wallet_record_id=None)
+        repo.commit()
+
+    with EventRepository(db_path, instance="tst") as repo:
+        assert repo.filter_cancellation_pending([event]) == []
+
+
+def test_filter_cancellation_pending_excludes_unprocessed_canceled(tmp_path):
+    """CANCELED events not yet in processed_events must not be returned — they are
+    handled as new events by the normal sync path (excluded)."""
+    db_path = tmp_path / "shared.db"
+    init_db(db_path)
+
+    event = {
+        "id": "ev-new-canceled",
+        "timestamp": "2026-08-24T05:43:38+00:00",
+        "eventType": "CARD_TRANSACTION",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(db_path, instance="tst") as repo:
+        assert repo.filter_cancellation_pending([event]) == []
+
+
+def test_filter_cancellation_pending_scoped_by_instance(tmp_path):
+    """Events processed by a different instance must not be returned."""
+    db_path = tmp_path / "shared.db"
+    init_db(db_path)
+
+    event = {
+        "id": "ev-cancel-scope",
+        "timestamp": "2026-08-24T05:43:38+00:00",
+        "eventType": "CARD_TRANSACTION",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(db_path, instance="alice") as repo_alice:
+        repo_alice.mark_processed(event, wallet_record_id="wid-alice")
+        repo_alice.commit()
+
+    with EventRepository(db_path, instance="bob") as repo_bob:
+        assert repo_bob.filter_cancellation_pending([event]) == []
+
+
+def test_filter_cancellation_pending_empty_input(tmp_path):
+    """Empty input must return empty list without error."""
+    db_path = tmp_path / "shared.db"
+    init_db(db_path)
+    with EventRepository(db_path, instance="tst") as repo:
+        assert repo.filter_cancellation_pending([]) == []

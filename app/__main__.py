@@ -256,6 +256,17 @@ def resync(instance: str, date: str) -> None:
     sys.exit(run_resync(date, cfg=cfg))
 
 
+def _format_event_line(ev: object) -> str:
+    """Return a single-line CLI summary for a check-day EventSummary."""
+    amount_str = f"{ev.amount} {ev.currency}".strip()  # type: ignore[attr-defined]
+    status_str = f" [{ev.status}]" if ev.status else ""  # type: ignore[attr-defined]
+    ts = ev.timestamp[:16]  # type: ignore[attr-defined]
+    return (
+        f"  • [{ts}] {ev.description} — {amount_str}{status_str}"  # type: ignore[attr-defined]
+        f"  (id: {ev.event_id})"  # type: ignore[attr-defined]
+    )
+
+
 @cli.command(name="check-day")
 @click.option(
     "--instance",
@@ -298,11 +309,7 @@ def check_day(instance: str, date: str) -> None:
     if result.processed:
         click.echo(f"✅ Already processed ({len(result.processed)}):")
         for ev in result.processed:
-            amount_str = f"{ev.amount} {ev.currency}".strip()
-            status_str = f" [{ev.status}]" if ev.status else ""
-            click.echo(
-                f"  • [{ev.timestamp[:16]}] {ev.description} — {amount_str}{status_str}  (id: {ev.event_id})"
-            )
+            click.echo(_format_event_line(ev))
     else:
         click.echo("✅ Already processed (0)")
 
@@ -311,11 +318,7 @@ def check_day(instance: str, date: str) -> None:
     if result.not_processed:
         click.echo(f"🆕 Not yet processed ({len(result.not_processed)}):")
         for ev in result.not_processed:
-            amount_str = f"{ev.amount} {ev.currency}".strip()
-            status_str = f" [{ev.status}]" if ev.status else ""
-            click.echo(
-                f"  • [{ev.timestamp[:16]}] {ev.description} — {amount_str}{status_str}  (id: {ev.event_id})"
-            )
+            click.echo(_format_event_line(ev))
     else:
         click.echo("🆕 Not yet processed (0)")
 

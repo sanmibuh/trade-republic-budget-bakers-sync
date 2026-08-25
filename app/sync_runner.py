@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -59,6 +59,8 @@ class _Batch:
     event_record_indices: list[list[int]]
     excluded_count: int
     categorizer: HistoryCategorizer | None = None
+    cancellation_events: list[dict[str, Any]] = field(default_factory=list)
+    cancellation_record_indices: list[list[int]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -219,12 +221,16 @@ class SyncRunner:
         repo: EventRepository,
         *,
         wallet_client: WalletClient | None = None,
+        cancellation_events: list[dict[str, Any]] | None = None,
     ) -> _Batch:
         """Convert new events into API records, marking zero-amount ones as excluded.
 
         When ``cfg.category_strategy == "history"`` and a *wallet_client* is
         provided, a :class:`~app.categorizer.HistoryCategorizer` is used to
         look up a category for each record based on its ``note``.
+
+        When *cancellation_events* is provided, reversal records are appended to
+        the batch for each event that previously had a ``wallet_record_id``.
         """
         all_records: list[dict[str, Any]] = []
         event_record_indices: list[list[int]] = [[] for _ in new_events]
@@ -262,7 +268,32 @@ class SyncRunner:
                 event_record_indices[event_idx].append(len(all_records))
                 all_records.append(r)
 
-        return _Batch(all_records, event_record_indices, excluded_count, categorizer)
+        # Build reversal records for cancellation events
+        c_events: list[dict[str, Any]] = []
+        c_record_indices: list[list[int]] = []
+        for c_event in cancellation_events or []:
+            recs = build_cancellation_records(
+                c_event,
+                cash_account_id=self._cfg.wallet_cash_account_id,
+                portfolio_account_id=self._cfg.wallet_portfolio_account_id,
+                label_ids=self._cfg.label_ids,
+            )
+            if recs:
+                indices: list[int] = []
+                for r in recs:
+                    indices.append(len(all_records))
+                    all_records.append(r)
+                c_record_indices.append(indices)
+                c_events.append(c_event)
+
+        return _Batch(
+            all_records,
+            event_record_indices,
+            excluded_count,
+            categorizer,
+            c_events,
+            c_record_indices,
+        )
 
     @staticmethod
     def _apply_category(
@@ -497,6 +528,19 @@ class SyncRunner:
             categorizer=batch.categorizer,
         )
         log.debug("API results: %s", results)
+
+        # Clear wallet_record_id for cancellation events so they are not reversed again
+        successful_indices = {r["inputIndex"] for r in results if r.get("success")}
+        for indices, c_event in zip(
+            batch.cancellation_record_indices, batch.cancellation_events, strict=True
+        ):
+            if all(i in successful_indices for i in indices):
+                repo.mark_processed_force(c_event, wallet_record_id=None)
+                log.info(
+                    "Cleared wallet_record_id for canceled event %s",
+                    dedup_event_id(c_event),
+                )
+
         return self.process_results(
             results,
             new_events,

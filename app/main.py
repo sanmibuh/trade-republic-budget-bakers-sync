@@ -116,12 +116,18 @@ def run(cfg: Config) -> int:
 
         recent_events = filter_by_lookback(events, since)
         new_events = repo.filter_unprocessed(recent_events)
+        cancellation_events = repo.filter_cancellation_pending(recent_events)
         skipped_count = runner.notify_fetch_summary(since, recent_events, new_events)
 
         counts = _SyncCounts()
         try:
             wallet_client = WalletClient(api_key=cfg.wallet_api_key)
-            batch = runner.build_batch(new_events, repo, wallet_client=wallet_client)
+            batch = runner.build_batch(
+                new_events,
+                repo,
+                wallet_client=wallet_client,
+                cancellation_events=cancellation_events,
+            )
             counts.excluded = batch.excluded_count  # preserved for finally on exception
             counts = runner.submit_batch(
                 batch, wallet_client, repo, new_events=new_events

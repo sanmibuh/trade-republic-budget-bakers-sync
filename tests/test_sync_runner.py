@@ -1704,3 +1704,118 @@ def test_resync_day_canceled_reversal_is_idempotent(tmp_path):
         wallet_client.post_records.assert_not_called()
         wallet_client.put_record.assert_not_called()
         assert counts_second.excluded == 1
+
+
+# ---------------------------------------------------------------------------
+# SyncRunner.build_batch — cancellation_events produce reversal records
+# ---------------------------------------------------------------------------
+
+
+def test_build_batch_cancellation_events_produce_reversal_records(tmp_path):
+    """cancellation_events passed to build_batch must yield reversal records
+    (negated amount, [Cancelada] note) in the batch."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "none"
+
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    canceled_event = {
+        "id": "ev-cancel-batch",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.mark_processed(canceled_event, wallet_record_id="old-wid")
+        repo.commit()
+        batch = runner.build_batch([], repo, cancellation_events=[canceled_event])
+
+    assert len(batch.records) == 1
+    assert batch.records[0]["amount"]["value"] == pytest.approx(7.62)
+    assert batch.records[0]["note"].startswith("[Cancelada]")
+
+
+def test_build_batch_cancellation_plus_new_events_combined(tmp_path):
+    """build_batch must combine new-event records and cancellation reversal records
+    in a single batch."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "none"
+
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    new_event = {
+        "id": "ev-new",
+        "eventType": "PAYMENT_INBOUND",
+        "timestamp": "2026-08-24T08:00:00Z",
+        "title": "Salary",
+        "amount": {"currency": "EUR", "value": 1000.0},
+    }
+    canceled_event = {
+        "id": "ev-cancel-combo",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.mark_processed(canceled_event, wallet_record_id="old-wid")
+        repo.commit()
+        batch = runner.build_batch(
+            [new_event], repo, cancellation_events=[canceled_event]
+        )
+
+    assert len(batch.records) == 2
+
+
+def test_build_batch_cancellation_wallet_id_cleared_after_submit(tmp_path):
+    """After a successful submit_batch for a cancellation event, the stored
+    wallet_record_id must be cleared to prevent re-reversal on the next sync."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "none"
+    cfg.instance = "tst"
+
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    canceled_event = {
+        "id": "ev-cancel-clear",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    wallet_client = MagicMock()
+    wallet_client.post_records.return_value = [
+        {"inputIndex": 0, "id": "reversal-wid", "success": True}
+    ]
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.mark_processed(canceled_event, wallet_record_id="old-wid")
+        repo.commit()
+        batch = runner.build_batch([], repo, cancellation_events=[canceled_event])
+        runner.submit_batch(batch, wallet_client, repo, new_events=[])
+        repo.commit()
+        assert repo.get_wallet_record_id(canceled_event) is None

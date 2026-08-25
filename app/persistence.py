@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
-from app.tr_mapper import extract_event_type, normalize_event_time
+from app.tr_mapper import extract_event_type, is_canceled_event, normalize_event_time
 
 log = logging.getLogger(__name__)
 
@@ -137,6 +137,40 @@ class EventRepository:
         return [
             event for event, dedup_id in events_with_ids if dedup_id not in processed
         ]
+
+    def filter_cancellation_pending(
+        self, events: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Return events that need a reversal record posted in BudgetBakers.
+
+        An event qualifies when **all** of the following are true:
+
+        - It already exists in ``processed_events`` for this instance.
+        - Its stored ``wallet_record_id`` is non-NULL (a real Wallet record exists).
+        - It currently carries ``status == "CANCELED"`` in the TR timeline payload.
+
+        These are events synced while active that TR has since canceled.  The caller
+        must post a reversal and then call ``mark_processed_force(wallet_record_id=None)``
+        so subsequent syncs do not re-post the reversal.
+        """
+        if not events:
+            return []
+
+        canceled = [e for e in events if is_canceled_event(e)]
+        if not canceled:
+            return []
+
+        events_with_ids = [(e, dedup_event_id(e)) for e in canceled]
+        ids = [dedup_id for _, dedup_id in events_with_ids]
+        placeholders = ",".join("?" for _ in ids)
+        rows = self._conn.execute(
+            f"SELECT event_id FROM processed_events "
+            f"WHERE instance = ? AND event_id IN ({placeholders})"
+            f" AND wallet_record_id IS NOT NULL",
+            [self._instance, *ids],
+        ).fetchall()
+        with_wallet_id = {row[0] for row in rows}
+        return [e for e, dedup_id in events_with_ids if dedup_id in with_wallet_id]
 
     def _build_event_row(
         self, event: dict[str, Any], wallet_record_id: str | None
