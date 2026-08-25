@@ -40,13 +40,6 @@ except Exception:  # pragma: no cover
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Backward-compatibility alias — kept so that ``from app.sync_runner import
-# _SYNC_DB`` and ``from app.main import _SYNC_DB`` continue to work for any
-# existing consumers.  The value is no longer used internally.
-# ---------------------------------------------------------------------------
-_SYNC_DB = "sync.db"
-
-# ---------------------------------------------------------------------------
 # Result value objects
 # ---------------------------------------------------------------------------
 
