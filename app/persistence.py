@@ -334,7 +334,7 @@ class EventRepository:
             status:   One of ``"success"``, ``"partial"``, or ``"failed"``.
             saved:    Number of events successfully saved to Wallet.
             failed:   Number of events that failed to save.
-            excluded: Number of zero-amount events excluded from sync.
+            excluded: Number of events excluded from sync (zero-amount, CANCELED without a prior record, or already reversed).
         """
         ran_at = datetime.now(UTC).isoformat()
         self._conn.execute(

@@ -223,7 +223,8 @@ class SyncRunner:
         wallet_client: WalletClient | None = None,
         cancellation_events: list[dict[str, Any]] | None = None,
     ) -> _Batch:
-        """Convert new events into API records, marking zero-amount ones as excluded.
+        """Convert new events into API records, marking zero-amount and CANCELED
+        ones as excluded.
 
         When ``cfg.category_strategy == "history"`` and a *wallet_client* is
         provided, a :class:`~app.categorizer.HistoryCategorizer` is used to
@@ -305,7 +306,7 @@ class SyncRunner:
         Returns:
             ``(c_events, c_record_indices, excluded_count)`` — parallel lists of events
             that produced at least one reversal record, their record index ranges,
-            and the count of zero-amount events that were excluded.
+            and the count of events that were excluded (already-reversed or zero-amount).
         """
         c_events: list[dict[str, Any]] = []
         c_record_indices: list[list[int]] = []

@@ -51,28 +51,22 @@ SyncRunner.resync_day(date_str, repo, wallet_client)
         ↓
 TRClient.fetch_timeline_events(since=date 00:00)
         ↓
-filter_by_lookback(events, since, until=date+1 00:00)  # narrow to exact day
+filter_by_lookback(events, since, until=date+1 00:00)   # narrow to exact day
         ↓
-For each event (_resync_single_event):
-  ├── status == CANCELED?
-  │     ├── wallet_record_id in DB?
-  │     │     YES → build_cancellation_records()           # negated amount, [Cancelada] note
-  │     │             ↓
-  │     │           WalletClient.post_records([reversal])  # POST /v1/api/records
-  │     │             ↓
-  │     │           EventRepository.mark_processed_force(wallet_record_id=None)
-  │     │               # cleared so a second resync does not post a second reversal
-  │     │     NO  → EventRepository.mark_processed_force(wallet_record_id=None)
-  │     │               # excluded; no Wallet record to reverse
-  └── status != CANCELED →
-        build_records_for_event()    # TR event dict → list[BudgetBakers record dict]
-        ├── wallet_record_id in DB?
-        │     YES → WalletClient.put_record(id, record)   # PUT /v1/api/records/{id}
-        │     NO  → WalletClient.post_records([record])   # POST /v1/api/records
+EventRepository.filter_cancellation_pending(day_events) # CANCELED events with a wallet record
         ↓
-EventRepository.mark_processed_force()   # INSERT OR REPLACE (upsert)
+SyncRunner.build_batch(day_events, repo,                # same pipeline as regular sync
+    cancellation_events=cancellation_events)            # dedup step (filter_unprocessed) is SKIPPED
+   └── build_records_for_event()   # returns [] for CANCELED / zero-amount → excluded
+   └── build_cancellation_records() # negated amount, [Cancelada] note
         ↓
-Notifier.sync_complete()                 # Telegram summary (optional)
+WalletClient.post_records()                  # POST /v1/api/records (always POST, never PUT)
+        ↓
+EventRepository.mark_processed_force()       # INSERT OR REPLACE (upsert) for new events
+EventRepository.mark_processed_force(        # wallet_record_id=None for reversed CANCELED events
+    wallet_record_id=None)                   #   cleared so a second resync does not post a second reversal
+        ↓
+Notifier.sync_complete()                     # Telegram summary (optional)
 ```
 
 ## Data flow — Check-day (dry run)
