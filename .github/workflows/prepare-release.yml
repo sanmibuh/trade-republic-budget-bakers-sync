@@ -88,6 +88,16 @@ jobs:
             { print }
           ' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
 
+      - name: Update ARG BASE_TAG in app Dockerfile (major only)
+        if: inputs.bump == 'major'
+        run: |
+          NEW="${{ steps.version.outputs.new }}"
+          sed -i "s|^ARG BASE_TAG=.*|ARG BASE_TAG=v${NEW}|" docker/app/Dockerfile
+          if ! grep -qF "ARG BASE_TAG=v${NEW}" docker/app/Dockerfile; then
+            echo "ERROR: failed to update ARG BASE_TAG in docker/app/Dockerfile"
+            exit 1
+          fi
+
       - name: Open PR
         env:
           GH_TOKEN: ${{ secrets.PAT_RELEASE }}
@@ -100,7 +110,11 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add VERSION CHANGELOG.md
+          if [ "$BUMP" = "major" ]; then
+            git add VERSION CHANGELOG.md docker/app/Dockerfile
+          else
+            git add VERSION CHANGELOG.md
+          fi
           git commit -m "[release-${NEW}]: chore: update version to ${NEW}"
           git push origin "$BRANCH" --force-with-lease 2>/dev/null || git push origin "$BRANCH" --force
 
