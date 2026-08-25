@@ -232,23 +232,44 @@ class SyncRunner:
         When *cancellation_events* is provided, reversal records are appended to
         the batch for each event that previously had a ``wallet_record_id``.
         """
-        all_records: list[dict[str, Any]] = []
-        event_record_indices: list[list[int]] = [[] for _ in new_events]
-        excluded_count = 0
-
         categorizer: HistoryCategorizer | None = None
         if self._cfg.category_strategy == "history" and wallet_client is not None:
             categorizer = HistoryCategorizer(wallet_client)
 
-        for event_idx, event in enumerate(new_events):
-            event_type = extract_event_type(event)
-            if event_type and event_type not in KNOWN_EVENT_TYPES:
-                log.warning(
-                    "Unknown TR event type %r — notifying and falling back to cash handler",
-                    event_type,
-                )
-                self._notifier.unknown_event_type(event_type)
+        all_records: list[dict[str, Any]] = []
+        event_record_indices, excluded_count = self._append_new_event_records(
+            new_events, repo, all_records, categorizer
+        )
+        c_events, c_record_indices = self._append_cancellation_records(
+            cancellation_events or [], all_records
+        )
 
+        return _Batch(
+            all_records,
+            event_record_indices,
+            excluded_count,
+            categorizer,
+            c_events,
+            c_record_indices,
+        )
+
+    def _append_new_event_records(
+        self,
+        new_events: list[dict[str, Any]],
+        repo: EventRepository,
+        all_records: list[dict[str, Any]],
+        categorizer: HistoryCategorizer | None,
+    ) -> tuple[list[list[int]], int]:
+        """Append wallet records for *new_events* into *all_records* in-place.
+
+        Returns:
+            ``(event_record_indices, excluded_count)``
+        """
+        event_record_indices: list[list[int]] = [[] for _ in new_events]
+        excluded_count = 0
+
+        for event_idx, event in enumerate(new_events):
+            self._warn_unknown_event_type(event)
             recs = build_records_for_event(
                 event,
                 cash_account_id=self._cfg.wallet_cash_account_id,
@@ -260,18 +281,28 @@ class SyncRunner:
                 excluded_count += 1
                 log.info("Excluded zero-amount event %s", dedup_event_id(event))
                 continue
-
             if categorizer is not None:
                 self._apply_category(recs, categorizer)
-
             for r in recs:
                 event_record_indices[event_idx].append(len(all_records))
                 all_records.append(r)
 
-        # Build reversal records for cancellation events
+        return event_record_indices, excluded_count
+
+    def _append_cancellation_records(
+        self,
+        cancellation_events: list[dict[str, Any]],
+        all_records: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[list[int]]]:
+        """Append reversal records for *cancellation_events* into *all_records* in-place.
+
+        Returns:
+            ``(c_events, c_record_indices)`` — parallel lists of events that
+            produced at least one reversal record and their record index ranges.
+        """
         c_events: list[dict[str, Any]] = []
         c_record_indices: list[list[int]] = []
-        for c_event in cancellation_events or []:
+        for c_event in cancellation_events:
             recs = build_cancellation_records(
                 c_event,
                 cash_account_id=self._cfg.wallet_cash_account_id,
@@ -285,15 +316,7 @@ class SyncRunner:
                     all_records.append(r)
                 c_record_indices.append(indices)
                 c_events.append(c_event)
-
-        return _Batch(
-            all_records,
-            event_record_indices,
-            excluded_count,
-            categorizer,
-            c_events,
-            c_record_indices,
-        )
+        return c_events, c_record_indices
 
     @staticmethod
     def _apply_category(
