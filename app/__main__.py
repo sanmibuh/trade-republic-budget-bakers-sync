@@ -26,6 +26,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from app.config import BackupConfig, Config
+    from app.notifier import Notifier
+    from app.wallet_client import WalletClient
 
 
 def _resolve_instance_cfg(instance: str) -> tuple[Config, Path]:
@@ -149,9 +151,9 @@ def _resolve_backup_cfg() -> BackupConfig:
 
 
 def _run_backup_mode(
-    client: object,
-    notifier: object,
-    data_dir: object,
+    client: WalletClient,
+    notifier: Notifier,
+    data_dir: Path,
     mode: str,
     param: str | None,
 ) -> None:
