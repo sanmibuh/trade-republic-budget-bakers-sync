@@ -240,14 +240,14 @@ class SyncRunner:
         event_record_indices, excluded_count = self._append_new_event_records(
             new_events, repo, all_records, categorizer
         )
-        c_events, c_record_indices = self._append_cancellation_records(
-            cancellation_events or [], all_records
+        c_events, c_record_indices, c_excluded = self._append_cancellation_records(
+            cancellation_events or [], all_records, repo
         )
 
         return _Batch(
             all_records,
             event_record_indices,
-            excluded_count,
+            excluded_count + c_excluded,
             categorizer,
             c_events,
             c_record_indices,
@@ -293,15 +293,22 @@ class SyncRunner:
         self,
         cancellation_events: list[dict[str, Any]],
         all_records: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], list[list[int]]]:
+        repo: EventRepository,
+    ) -> tuple[list[dict[str, Any]], list[list[int]], int]:
         """Append reversal records for *cancellation_events* into *all_records* in-place.
 
+        Zero-amount cancellation events produce no reversal record; their
+        ``wallet_record_id`` is cleared immediately so that
+        ``filter_cancellation_pending`` does not return them on subsequent runs.
+
         Returns:
-            ``(c_events, c_record_indices)`` — parallel lists of events that
-            produced at least one reversal record and their record index ranges.
+            ``(c_events, c_record_indices, excluded_count)`` — parallel lists of events
+            that produced at least one reversal record, their record index ranges,
+            and the count of zero-amount events that were excluded.
         """
         c_events: list[dict[str, Any]] = []
         c_record_indices: list[list[int]] = []
+        excluded_count = 0
         for c_event in cancellation_events:
             recs = build_cancellation_records(
                 c_event,
@@ -309,14 +316,21 @@ class SyncRunner:
                 portfolio_account_id=self._cfg.wallet_portfolio_account_id,
                 label_ids=self._cfg.label_ids,
             )
-            if recs:
-                indices: list[int] = []
-                for r in recs:
-                    indices.append(len(all_records))
-                    all_records.append(r)
-                c_record_indices.append(indices)
-                c_events.append(c_event)
-        return c_events, c_record_indices
+            if not recs:
+                repo.mark_processed_force(c_event, wallet_record_id=None)
+                excluded_count += 1
+                log.info(
+                    "Excluded zero-amount cancellation event %s",
+                    dedup_event_id(c_event),
+                )
+                continue
+            indices: list[int] = []
+            for r in recs:
+                indices.append(len(all_records))
+                all_records.append(r)
+            c_record_indices.append(indices)
+            c_events.append(c_event)
+        return c_events, c_record_indices, excluded_count
 
     @staticmethod
     def _apply_category(
@@ -552,27 +566,39 @@ class SyncRunner:
         )
         log.debug("API results: %s", results)
 
-        # Clear wallet_record_id for cancellation events so they are not reversed again
-        successful_indices = {r["inputIndex"] for r in results if r.get("success")}
+        # Clear wallet_record_id for cancellation events so they are not reversed again.
+        # A result is considered successful when it has no 'error' key — consistent with
+        # how process_results / _process_event_result treat API responses.
+        results_by_index = {r.get("inputIndex", i): r for i, r in enumerate(results)}
+        failed_indices = {idx for idx, r in results_by_index.items() if r.get("error")}
+        c_synced = 0
+        c_failed = 0
         for indices, c_event in zip(
             batch.cancellation_record_indices, batch.cancellation_events, strict=True
         ):
-            if all(i in successful_indices for i in indices):
+            all_present = all(i in results_by_index for i in indices)
+            any_failed = any(i in failed_indices for i in indices)
+            if all_present and not any_failed:
                 repo.mark_processed_force(c_event, wallet_record_id=None)
                 log.info(
                     "Cleared wallet_record_id for canceled event %s",
                     dedup_event_id(c_event),
                 )
+                c_synced += 1
+            else:
+                c_failed += 1
 
-        return self.process_results(
+        counts = self.process_results(
             results,
             new_events,
             batch.event_record_indices,
             repo,
             excluded_count=batch.excluded_count,
         )
+        counts.synced += c_synced
+        counts.failed += c_failed
+        return counts
 
-    # ------------------------------------------------------------------
     # resync_day helpers
     # ------------------------------------------------------------------
 

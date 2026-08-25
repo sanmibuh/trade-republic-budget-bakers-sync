@@ -47,10 +47,7 @@ TRClient.fetch_timeline_events(since=date 00:00)
         ↓
 filter_by_lookback(events, since, until=date+1 00:00)  # narrow to exact day
         ↓
-build_records_for_event()    # same mapper as regular sync
-                             # returns [] for CANCELED events (skip guard)
-        ↓
-For each event:
+For each event (_resync_single_event):
   ├── status == CANCELED?
   │     ├── wallet_record_id in DB?
   │     │     YES → build_cancellation_records()           # negated amount, [Cancelada] note
@@ -61,10 +58,11 @@ For each event:
   │     │               # cleared so a second resync does not post a second reversal
   │     │     NO  → EventRepository.mark_processed_force(wallet_record_id=None)
   │     │               # excluded; no Wallet record to reverse
-  │     NO  →
-  │     ├── wallet_record_id in DB?
-  │     │     YES → WalletClient.put_record(id, record)   # PUT /v1/api/records/{id}
-  │     │     NO  → WalletClient.post_records([record])   # POST /v1/api/records
+  └── status != CANCELED →
+        build_records_for_event()    # TR event dict → list[BudgetBakers record dict]
+        ├── wallet_record_id in DB?
+        │     YES → WalletClient.put_record(id, record)   # PUT /v1/api/records/{id}
+        │     NO  → WalletClient.post_records([record])   # POST /v1/api/records
         ↓
 EventRepository.mark_processed_force()   # INSERT OR REPLACE (upsert)
         ↓

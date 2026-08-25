@@ -1819,3 +1819,158 @@ def test_build_batch_cancellation_wallet_id_cleared_after_submit(tmp_path):
         runner.submit_batch(batch, wallet_client, repo, new_events=[])
         repo.commit()
         assert repo.get_wallet_record_id(canceled_event) is None
+
+
+def test_build_batch_zero_amount_cancellation_is_excluded_and_id_cleared(tmp_path):
+    """A cancellation event with zero amount must be counted as excluded and its
+    wallet_record_id cleared so filter_cancellation_pending never returns it again."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "none"
+    cfg.instance = "tst"
+
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    zero_canceled_event = {
+        "id": "ev-cancel-zero",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": 0.0},
+    }
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.mark_processed(zero_canceled_event, wallet_record_id="old-wid")
+        repo.commit()
+        batch = runner.build_batch([], repo, cancellation_events=[zero_canceled_event])
+        # Simulate the commit that submit_batch / process_results would do
+        repo.commit()
+
+    # No reversal record should be generated for a zero-amount cancellation
+    assert len(batch.records) == 0
+    # The excluded count must reflect this event
+    assert batch.excluded_count == 1
+    # And the wallet_record_id must have been cleared to break the loop
+    with EventRepository(tmp_path / "test.db") as repo:
+        assert repo.get_wallet_record_id(zero_canceled_event) is None
+
+
+def test_build_batch_cancellation_wallet_id_cleared_without_success_field(tmp_path):
+    """wallet_record_id must be cleared even when the API response has no 'success'
+    field — a result without 'error' is considered successful, matching process_results."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "none"
+    cfg.instance = "tst"
+
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    canceled_event = {
+        "id": "ev-cancel-no-success",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    wallet_client = MagicMock()
+    # Real API response: no 'success' field, just 'inputIndex' and 'id'
+    wallet_client.post_records.return_value = [{"inputIndex": 0, "id": "reversal-wid"}]
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.mark_processed(canceled_event, wallet_record_id="old-wid")
+        repo.commit()
+        batch = runner.build_batch([], repo, cancellation_events=[canceled_event])
+        runner.submit_batch(batch, wallet_client, repo, new_events=[])
+        repo.commit()
+        assert repo.get_wallet_record_id(canceled_event) is None
+
+
+# ---------------------------------------------------------------------------
+# submit_batch — cancellation reversal counts included in SyncCounts
+# ---------------------------------------------------------------------------
+
+
+def test_submit_batch_successful_reversal_counts_as_synced(tmp_path):
+    """A successfully posted reversal must increment synced, not be silently dropped."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "none"
+    cfg.instance = "tst"
+
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    canceled_event = {
+        "id": "ev-count-synced",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    wallet_client = MagicMock()
+    wallet_client.post_records.return_value = [{"inputIndex": 0, "id": "rev-wid"}]
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.mark_processed(canceled_event, wallet_record_id="old-wid")
+        repo.commit()
+        batch = runner.build_batch([], repo, cancellation_events=[canceled_event])
+        counts = runner.submit_batch(batch, wallet_client, repo, new_events=[])
+
+    assert counts.synced == 1
+    assert counts.failed == 0
+
+
+def test_submit_batch_failed_reversal_counts_as_failed(tmp_path):
+    """A reversal that the API rejects must increment failed, not be silently dropped."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "none"
+    cfg.instance = "tst"
+
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    canceled_event = {
+        "id": "ev-count-failed",
+        "eventType": "CARD_TRANSACTION",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Amazon",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -7.62},
+    }
+    wallet_client = MagicMock()
+    wallet_client.post_records.return_value = [
+        {"inputIndex": 0, "error": "Bad request"}
+    ]
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.mark_processed(canceled_event, wallet_record_id="old-wid")
+        repo.commit()
+        batch = runner.build_batch([], repo, cancellation_events=[canceled_event])
+        counts = runner.submit_batch(batch, wallet_client, repo, new_events=[])
+
+    assert counts.failed == 1
+    assert counts.synced == 0
