@@ -256,7 +256,7 @@ execution paths before any `EventRepository` is opened.
 - Sync/resync commands (`/sync`, `/resync`) show an inline instance picker. When a sync detects an expired session,
   2FA is triggered automatically in-process (no separate `/login` command needed).
 - `/status` reports auth state per instance — ✅ session valid, ⚠️ needs login, ❓ DB unreadable (corrupted/locked) — by reading `sync.db` directly
-  via `EventRepository` and checking cookie expiry via `has_valid_session` (`_instance_status_direct`).
+  via `_instance_status_direct`, which opens a single `EventRepository` connection to load both auth state (`has_valid_session`) and the last-sync summary.
 - `/resync [YYYY-MM-DD]` force re-syncs a specific day: instance picker → date picker (last 7 days) → executes
   `main.run_resync()` in a background thread. With a date arg, jumps straight to the instance picker.
   Callback data format: `resync_pick_date:<instance>` (date picker step) and `resync:<date>:<instance>` (execute step).
