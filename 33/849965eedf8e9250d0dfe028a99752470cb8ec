@@ -1,0 +1,16 @@
+tests/test_bot.py
+  h_97a91c9e567f87 16,2847-2955
+tests/test_history_categorizer.py
+  h_97a91c9e567f87 201-214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "33849965eedf8e9250d0dfe028a99752470cb8ec",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
