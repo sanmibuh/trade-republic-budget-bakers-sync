@@ -449,12 +449,12 @@ class TelegramBot:
                 "description": "Show today's logs — pick a level filter",
             },
             {
-                "command": "resync",
-                "description": "Force re-sync of a specific day, bypassing dedup",
+                "command": "checkday",
+                "description": "Dry-run check of TR events for a specific day",
             },
             {
-                "command": "check_day",
-                "description": "Dry-run check of TR events for a specific day",
+                "command": "resync",
+                "description": "Force re-sync of a specific day, bypassing dedup",
             },
         ]
         if self._cfg.backup_cfg:
@@ -536,7 +536,7 @@ class TelegramBot:
             "status": self._cmd_status,
             "sync": self._cmd_sync,
             "resync": self._cmd_resync,
-            "check_day": self._cmd_check_day,
+            "checkday": self._cmd_check_day,
             "logs": self._cmd_logs,
             "code": self._cmd_code,
             "backup": self._cmd_backup,
@@ -586,8 +586,8 @@ class TelegramBot:
             "logs_level": self._on_cb_logs_level,
             "resync_pick_date": self._on_cb_resync_pick_date,
             "resync": self._on_cb_resync,
-            "check_day_pick_date": self._on_cb_check_day_pick_date,
-            "check_day": self._on_cb_check_day,
+            "checkday_pick_date": self._on_cb_check_day_pick_date,
+            "checkday": self._on_cb_check_day,
         }
         handler = named.get(cmd)
         if handler is not None:
@@ -661,9 +661,9 @@ class TelegramBot:
         )
 
     def _on_cb_check_day(self, parts: list[str], data: str) -> None:
-        # Format: check_day:<date>:<instance>
+        # Format: checkday:<date>:<instance>
         if len(parts) < 3:
-            log.warning("Malformed check_day callback_data: %r", data)
+            log.warning("Malformed checkday callback_data: %r", data)
             return
         date_str = parts[1]
         instance_key = parts[2].lower()
@@ -746,10 +746,10 @@ class TelegramBot:
         )
 
     def _cmd_check_day(self, args: list[str]) -> None:
-        """Handle /check_day [YYYY-MM-DD]."""
+        """Handle /checkday [YYYY-MM-DD]."""
         if not args:
             self._pick_instance(
-                "check_day_pick_date", "📋 *Check\\-day* — Choose instance:"
+                "checkday_pick_date", "📋 *Check\\-day* — Choose instance:"
             )
             return
 
@@ -1127,7 +1127,7 @@ class TelegramBot:
         buttons = [
             {
                 "text": name,
-                "callback_data": f"check_day{_CB_SEP}{date_str}{_CB_SEP}{name.lower()}",
+                "callback_data": f"checkday{_CB_SEP}{date_str}{_CB_SEP}{name.lower()}",
             }
             for name in names
         ]

@@ -282,9 +282,9 @@ execution paths before any `EventRepository` is opened.
 - `/resync [YYYY-MM-DD]` force re-syncs a specific day: instance picker → date picker (last 7 days) → executes
   `main.run_resync()` in a background thread. With a date arg, jumps straight to the instance picker.
   Callback data format: `resync_pick_date:<instance>` (date picker step) and `resync:<date>:<instance>` (execute step).
-- `/check_day [YYYY-MM-DD]` dry-runs a check for a specific day: instance picker → date picker (last 7 days) → executes
+- `/checkday [YYYY-MM-DD]` dry-runs a check for a specific day: instance picker → date picker (last 7 days) → executes
   `main.run_check_day()` in a background thread and sends a formatted report. No writes to BudgetBakers or the DB.
-  Callback data format: `check_day_pick_date:<instance>` (date picker step) and `check_day:<date>:<instance>` (execute step).
+  Callback data format: `checkday_pick_date:<instance>` (date picker step) and `checkday:<date>:<instance>` (execute step).
 
 ### Config
 - All configuration is read exclusively from `instances.yml` (mounted at `INSTANCES_CONFIG_PATH`).

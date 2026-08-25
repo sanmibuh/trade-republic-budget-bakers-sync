@@ -182,7 +182,7 @@ def check_day_date_buttons(
     buttons = [
         {
             "text": d,
-            "callback_data": f"check_day{_CB_SEP}{d}{_CB_SEP}{instance_key}",
+            "callback_data": f"checkday{_CB_SEP}{d}{_CB_SEP}{instance_key}",
         }
         for d in days
     ]

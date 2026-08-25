@@ -272,4 +272,4 @@ def test_check_day_date_buttons_encode_instance_and_prefix():
     for row in rows:
         for btn in row:
             assert "david" in btn["callback_data"]
-            assert btn["callback_data"].startswith(f"check_day{_CB_SEP}")
+            assert btn["callback_data"].startswith(f"checkday{_CB_SEP}")

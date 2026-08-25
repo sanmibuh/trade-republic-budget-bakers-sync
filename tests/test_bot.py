@@ -2769,17 +2769,17 @@ def test_register_commands_order_without_backup(tmp_path):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock())
         bot._register_commands()
     commands = [c["command"] for c in mock_post.call_args.kwargs["json"]["commands"]]
-    assert commands == ["sync", "status", "logs", "resync", "check_day"]
+    assert commands == ["sync", "status", "logs", "checkday", "resync"]
 
 
 def test_register_commands_order_with_backup(tmp_path):
-    """Commands must be registered in order: sync, status, logs, backup, resync, check_day."""
+    """Commands must be registered in order: sync, status, logs, checkday, backup, resync."""
     bot = _bot(backup_cfg=_make_backup_config(tmp_path), tmp_path=tmp_path)
     with patch.object(bot._session, "post") as mock_post:
         mock_post.return_value = MagicMock(raise_for_status=MagicMock())
         bot._register_commands()
     commands = [c["command"] for c in mock_post.call_args.kwargs["json"]["commands"]]
-    assert commands == ["sync", "status", "logs", "backup", "resync", "check_day"]
+    assert commands == ["sync", "status", "logs", "backup", "checkday", "resync"]
 
 
 # ---------------------------------------------------------------------------
@@ -2967,7 +2967,7 @@ def test_cmd_check_day_no_args_sends_instance_picker(tmp_path):
     assert keyboard is not None
     all_buttons = [btn for row in keyboard for btn in row]
     cb_data = [b["callback_data"] for b in all_buttons]
-    assert any(d.startswith("check_day_pick_date:") for d in cb_data)
+    assert any(d.startswith("checkday_pick_date:") for d in cb_data)
 
 
 def test_cmd_check_day_with_date_sends_instance_picker_for_date(tmp_path):
@@ -3009,7 +3009,7 @@ def test_callback_check_day_pick_date_sends_date_keyboard(tmp_path):
         bot._handle_callback_query(
             {
                 "id": "cq1",
-                "data": "check_day_pick_date:user1",
+                "data": "checkday_pick_date:user1",
                 "message": {"chat": {"id": 42}},
             }
         )
@@ -3018,7 +3018,7 @@ def test_callback_check_day_pick_date_sends_date_keyboard(tmp_path):
 
 
 def test_callback_check_day_dispatches_launch_check_day(tmp_path):
-    """check_day:<date>:<instance> callback must call _launch_check_day."""
+    """checkday:<date>:<instance> callback must call _launch_check_day."""
     bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
@@ -3027,7 +3027,7 @@ def test_callback_check_day_dispatches_launch_check_day(tmp_path):
         bot._handle_callback_query(
             {
                 "id": "cq1",
-                "data": "check_day:2026-08-20:user1",
+                "data": "checkday:2026-08-20:user1",
                 "message": {"chat": {"id": 42}},
             }
         )
@@ -3038,7 +3038,7 @@ def test_callback_check_day_dispatches_launch_check_day(tmp_path):
 
 
 def test_callback_check_day_unknown_instance_replies(tmp_path):
-    """check_day:<date>:<unknown> callback must reply with error."""
+    """checkday:<date>:<unknown> callback must reply with error."""
     bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
@@ -3047,7 +3047,7 @@ def test_callback_check_day_unknown_instance_replies(tmp_path):
         bot._handle_callback_query(
             {
                 "id": "cq1",
-                "data": "check_day:2026-08-20:nobody",
+                "data": "checkday:2026-08-20:nobody",
                 "message": {"chat": {"id": 42}},
             }
         )
@@ -3056,7 +3056,7 @@ def test_callback_check_day_unknown_instance_replies(tmp_path):
 
 
 def test_callback_check_day_pick_date_unknown_instance_replies(tmp_path):
-    """check_day_pick_date:<unknown> callback must reply with error."""
+    """checkday_pick_date:<unknown> callback must reply with error."""
     bot = _bot(tmp_path=tmp_path)
     with (
         patch.object(bot, "_answer_callback_query"),
@@ -3065,7 +3065,7 @@ def test_callback_check_day_pick_date_unknown_instance_replies(tmp_path):
         bot._handle_callback_query(
             {
                 "id": "cq1",
-                "data": "check_day_pick_date:nobody",
+                "data": "checkday_pick_date:nobody",
                 "message": {"chat": {"id": 42}},
             }
         )
