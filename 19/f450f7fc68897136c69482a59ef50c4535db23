@@ -1,0 +1,18 @@
+ARCHITECTURE.md
+  h_97a91c9e567f87 20-27,38
+app/sync_runner.py
+  h_97a91c9e567f87 318
+tests/test_sync_runner.py
+  h_97a91c9e567f87 2056-2092
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "19f450f7fc68897136c69482a59ef50c4535db23",
+  "prompts": {},
+  "humans": {
+    "h_97a91c9e567f87": {
+      "author": "David Belmez <davidbvic@inditex.com>"
+    }
+  }
+}
