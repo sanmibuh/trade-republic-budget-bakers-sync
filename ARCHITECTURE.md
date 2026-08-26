@@ -17,21 +17,31 @@ TRClient.fetch_timeline_events()
   └── pytr Timeline (WebSocket) → event_callback collects events + details
         ↓
 filter_by_lookback()         # drops events older than lookback_days (from instances.yml)
+        ↓ recent_events
+        ├── EventRepository.filter_unprocessed()          # dedup: keep only events not yet in SQLite → new_events
+        └── EventRepository.filter_cancellation_pending() # CANCELED events that already have a wallet record
+            # Both filters operate on the same recent_events window (in parallel, not sequentially).
+            # filter_cancellation_pending must see already-processed events so previously-synced
+            # CANCELED transactions can be reversed.
         ↓
-build_records_for_event()    # TR event dict → list[BudgetBakers record dict]
+build_records_for_event()    # TR event dict → list[BudgetBakers record dict]  (applied to new_events)
    └── _build_note()          # single source of truth for the note/description
    └── _HANDLERS[event_type]  # per-type handler builds record structure (accounts, payment type, counter-party)
    └── label applied generically post-handler if label is configured in instances.yml
    └── category_id applied generically post-handler when category_strategy=history (instances.yml)
+   └── returns [] for CANCELED events (skipped) and zero-amount events (excluded)
          ↓
 HistoryCategorizer.get_category_id(note)   # majority-vote lookup from recent Wallet records
    └── CategoryCache.category_ids()         # 24h TTL wrapper around WalletClient.get_categories()
         ↓
-EventRepository.dedup_event_id()   # filters already-synced events (SQLite)
+build_cancellation_records()  # for filter_cancellation_pending events: negated amount, [Cancelada] note
+                              # category also applied to reversals when category_strategy=history
         ↓
 WalletClient.post_records()        # POST /v1/api/records (max 20 per request)
+                                   # batch includes both new records and cancellation reversals
         ↓
-EventRepository.mark_processed()   # INSERT OR IGNORE into processed_events
+EventRepository.mark_processed()        # INSERT OR IGNORE for new events
+EventRepository.mark_processed_force()  # wallet_record_id=None for reversed CANCELED events
         ↓
 Notifier.sync_complete()           # Telegram summary (optional)
 ```
@@ -45,18 +55,22 @@ SyncRunner.resync_day(date_str, repo, wallet_client)
         ↓
 TRClient.fetch_timeline_events(since=date 00:00)
         ↓
-filter_by_lookback(events, since, until=date+1 00:00)  # narrow to exact day
+filter_by_lookback(events, since, until=date+1 00:00)   # narrow to exact day
         ↓
-build_records_for_event()    # same mapper as regular sync
+EventRepository.filter_cancellation_pending(day_events) # CANCELED events with a wallet record
         ↓
-For each event:
-  ├── wallet_record_id in DB?
-  │     YES → WalletClient.put_record(id, record)   # PUT /v1/api/records/{id}
-  │     NO  → WalletClient.post_records([record])   # POST /v1/api/records
+SyncRunner.build_batch(day_events, repo,                # same pipeline as regular sync
+    cancellation_events=cancellation_events)            # dedup step (filter_unprocessed) is SKIPPED
+   └── build_records_for_event()   # returns [] for CANCELED / zero-amount → excluded
+   └── build_cancellation_records() # negated amount, [Cancelada] note
         ↓
-EventRepository.mark_processed_force()   # INSERT OR REPLACE (upsert)
+WalletClient.post_records()                  # POST /v1/api/records (always POST, never PUT)
         ↓
-Notifier.sync_complete()                 # Telegram summary (optional)
+EventRepository.mark_processed_force()       # INSERT OR REPLACE (upsert) for new events
+EventRepository.mark_processed_force(        # wallet_record_id=None for reversed CANCELED events
+    wallet_record_id=None)                   #   cleared so a second resync does not post a second reversal
+        ↓
+Notifier.sync_complete()                     # Telegram summary (optional)
 ```
 
 ## Data flow — Check-day (dry run)

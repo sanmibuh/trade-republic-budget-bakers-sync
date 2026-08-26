@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -15,9 +15,11 @@ from app.persistence import EventRepository, dedup_event_id
 from app.tr_client import LoginFailedError, SessionExpiredError, TRClient
 from app.tr_mapper import (
     KNOWN_EVENT_TYPES,
+    build_cancellation_records,
     build_records_for_event,
     extract_event_type,
     filter_by_lookback,
+    is_canceled_event,
 )
 from app.twofa import (
     TelegramCodeProvider,
@@ -57,6 +59,8 @@ class _Batch:
     event_record_indices: list[list[int]]
     excluded_count: int
     categorizer: HistoryCategorizer | None = None
+    cancellation_events: list[dict[str, Any]] = field(default_factory=list)
+    cancellation_record_indices: list[list[int]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -217,30 +221,59 @@ class SyncRunner:
         repo: EventRepository,
         *,
         wallet_client: WalletClient | None = None,
+        cancellation_events: list[dict[str, Any]] | None = None,
     ) -> _Batch:
-        """Convert new events into API records, marking zero-amount ones as excluded.
+        """Convert new events into API records, marking zero-amount and CANCELED
+        ones as excluded.
 
         When ``cfg.category_strategy == "history"`` and a *wallet_client* is
         provided, a :class:`~app.categorizer.HistoryCategorizer` is used to
         look up a category for each record based on its ``note``.
-        """
-        all_records: list[dict[str, Any]] = []
-        event_record_indices: list[list[int]] = [[] for _ in new_events]
-        excluded_count = 0
 
+        When *cancellation_events* is provided, reversal records are appended to
+        the batch for each event that previously had a ``wallet_record_id``.
+        """
         categorizer: HistoryCategorizer | None = None
         if self._cfg.category_strategy == "history" and wallet_client is not None:
             categorizer = HistoryCategorizer(wallet_client)
 
-        for event_idx, event in enumerate(new_events):
-            event_type = extract_event_type(event)
-            if event_type and event_type not in KNOWN_EVENT_TYPES:
-                log.warning(
-                    "Unknown TR event type %r — notifying and falling back to cash handler",
-                    event_type,
-                )
-                self._notifier.unknown_event_type(event_type)
+        all_records: list[dict[str, Any]] = []
+        event_record_indices, excluded_count = self._append_new_event_records(
+            new_events, repo, all_records, categorizer
+        )
+        c_events, c_record_indices, c_excluded = self._append_cancellation_records(
+            cancellation_events or [], all_records, repo
+        )
+        if categorizer is not None:
+            for indices in c_record_indices:
+                self._apply_category([all_records[i] for i in indices], categorizer)
 
+        return _Batch(
+            all_records,
+            event_record_indices,
+            excluded_count + c_excluded,
+            categorizer,
+            c_events,
+            c_record_indices,
+        )
+
+    def _append_new_event_records(
+        self,
+        new_events: list[dict[str, Any]],
+        repo: EventRepository,
+        all_records: list[dict[str, Any]],
+        categorizer: HistoryCategorizer | None,
+    ) -> tuple[list[list[int]], int]:
+        """Append wallet records for *new_events* into *all_records* in-place.
+
+        Returns:
+            ``(event_record_indices, excluded_count)``
+        """
+        event_record_indices: list[list[int]] = [[] for _ in new_events]
+        excluded_count = 0
+
+        for event_idx, event in enumerate(new_events):
+            self._warn_unknown_event_type(event)
             recs = build_records_for_event(
                 event,
                 cash_account_id=self._cfg.wallet_cash_account_id,
@@ -250,17 +283,69 @@ class SyncRunner:
             if not recs:
                 repo.mark_processed(event)
                 excluded_count += 1
-                log.info("Excluded zero-amount event %s", dedup_event_id(event))
+                reason = "CANCELED" if is_canceled_event(event) else "zero amount"
+                log.info("Excluded event %s (%s)", dedup_event_id(event), reason)
                 continue
-
             if categorizer is not None:
                 self._apply_category(recs, categorizer)
-
             for r in recs:
                 event_record_indices[event_idx].append(len(all_records))
                 all_records.append(r)
 
-        return _Batch(all_records, event_record_indices, excluded_count, categorizer)
+        return event_record_indices, excluded_count
+
+    def _append_cancellation_records(
+        self,
+        cancellation_events: list[dict[str, Any]],
+        all_records: list[dict[str, Any]],
+        repo: EventRepository,
+    ) -> tuple[list[dict[str, Any]], list[list[int]], int]:
+        """Append reversal records for *cancellation_events* into *all_records* in-place.
+
+        Zero-amount cancellation events produce no reversal record; their
+        ``wallet_record_id`` is cleared immediately so that
+        ``filter_cancellation_pending`` does not return them on subsequent runs.
+
+        Returns:
+            ``(c_events, c_record_indices, excluded_count)`` — parallel lists of events
+            that produced at least one reversal record, their record index ranges,
+            and the count of events that were excluded (already-reversed or zero-amount).
+        """
+        c_events: list[dict[str, Any]] = []
+        c_record_indices: list[list[int]] = []
+        excluded_count = 0
+        for c_event in cancellation_events:
+            self._warn_unknown_event_type(c_event)
+            # Skip if the wallet_record_id was already cleared by a previous reversal —
+            # this makes build_batch idempotent when called again with the same event.
+            if repo.get_wallet_record_id(c_event) is None:
+                excluded_count += 1
+                log.info(
+                    "Excluded already-reversed cancellation event %s",
+                    dedup_event_id(c_event),
+                )
+                continue
+            recs = build_cancellation_records(
+                c_event,
+                cash_account_id=self._cfg.wallet_cash_account_id,
+                portfolio_account_id=self._cfg.wallet_portfolio_account_id,
+                label_ids=self._cfg.label_ids,
+            )
+            if not recs:
+                repo.mark_processed_force(c_event, wallet_record_id=None)
+                excluded_count += 1
+                log.info(
+                    "Excluded zero-amount cancellation event %s",
+                    dedup_event_id(c_event),
+                )
+                continue
+            indices: list[int] = []
+            for r in recs:
+                indices.append(len(all_records))
+                all_records.append(r)
+            c_record_indices.append(indices)
+            c_events.append(c_event)
+        return c_events, c_record_indices, excluded_count
 
     @staticmethod
     def _apply_category(
@@ -344,8 +429,15 @@ class SyncRunner:
         record_indices: list[int],
         results_by_index: dict[int, dict[str, Any]],
         repo: EventRepository,
+        *,
+        force: bool = False,
     ) -> tuple[int, int]:
         """Process the API result for one event.
+
+        When *force* is ``True``, the event is persisted via
+        :meth:`~app.persistence.EventRepository.mark_processed_force`
+        (``INSERT OR REPLACE``) instead of the default ``INSERT OR IGNORE``.
+        Use this for the resync path where an existing record must be updated.
 
         Returns:
             ``(synced_delta, failed_delta)`` — exactly one of the two is 1;
@@ -382,31 +474,17 @@ class SyncRunner:
             if results_by_index[i].get("id")
         ]
         wallet_record_id = ",".join(wallet_ids) if wallet_ids else None
-        repo.mark_processed(event, wallet_record_id=wallet_record_id)
+        if force:
+            repo.mark_processed_force(event, wallet_record_id=wallet_record_id)
+        else:
+            repo.mark_processed(event, wallet_record_id=wallet_record_id)
         return 1, 0
 
-    def process_results(
-        self,
-        results: list[dict[str, Any]],
-        new_events: list[dict[str, Any]],
-        event_record_indices: list[list[int]],
-        repo: EventRepository,
-        excluded_count: int = 0,
-    ) -> _SyncCounts:
-        """Interpret API results, mark successful events as processed, log failures."""
-        results_by_index = {r.get("inputIndex", i): r for i, r in enumerate(results)}
+    def _persist_sync_run(self, repo: EventRepository, counts: _SyncCounts) -> None:
+        """Write a ``sync_run`` row reflecting *counts*.
 
-        synced = 0
-        failed = 0
-        for event_idx, event in enumerate(new_events):
-            s, f = self._process_event_result(
-                event, event_record_indices[event_idx], results_by_index, repo
-            )
-            synced += s
-            failed += f
-
-        repo.commit()
-        counts = _SyncCounts(synced=synced, excluded=excluded_count, failed=failed)
+        Best-effort: failures are logged as warnings and never interrupt the caller.
+        """
         if counts.failed == 0:
             status = "success"
         elif counts.synced == 0:
@@ -428,6 +506,41 @@ class SyncRunner:
                 self._cfg.instance,
                 exc_info=True,
             )
+
+    def process_results(
+        self,
+        results: list[dict[str, Any]],
+        new_events: list[dict[str, Any]],
+        event_record_indices: list[list[int]],
+        repo: EventRepository,
+        excluded_count: int = 0,
+        *,
+        force: bool = False,
+    ) -> _SyncCounts:
+        """Interpret API results, mark successful events as processed, log failures.
+
+        When *force* is ``True``, successful events are persisted via
+        ``INSERT OR REPLACE`` (upsert) so that an existing ``wallet_record_id``
+        is updated.  Use this for the resync path.
+        """
+        results_by_index = {r.get("inputIndex", i): r for i, r in enumerate(results)}
+
+        synced = 0
+        failed = 0
+        for event_idx, event in enumerate(new_events):
+            s, f = self._process_event_result(
+                event,
+                event_record_indices[event_idx],
+                results_by_index,
+                repo,
+                force=force,
+            )
+            synced += s
+            failed += f
+
+        repo.commit()
+        counts = _SyncCounts(synced=synced, excluded=excluded_count, failed=failed)
+        self._persist_sync_run(repo, counts)
         return counts
 
     # ------------------------------------------------------------------
@@ -468,6 +581,7 @@ class SyncRunner:
         repo: EventRepository,
         *,
         new_events: list[dict[str, Any]],
+        force: bool = False,
     ) -> _SyncCounts:
         """Submit *batch* to the Wallet API and persist the results.
 
@@ -479,6 +593,9 @@ class SyncRunner:
             wallet_client: Authenticated wallet API client.
             repo:          Open repository for marking events as processed.
             new_events:    The same list of new events passed to :meth:`build_batch`.
+            force:         When ``True``, persist results via ``INSERT OR REPLACE``
+                           so that an existing ``wallet_record_id`` is updated.
+                           Use this for the resync path.
 
         Returns:
             A :class:`_SyncCounts` with synced / excluded / failed tallies.
@@ -495,17 +612,89 @@ class SyncRunner:
             categorizer=batch.categorizer,
         )
         log.debug("API results: %s", results)
-        return self.process_results(
+
+        # Clear wallet_record_id for cancellation events so they are not reversed again.
+        # A result is considered successful when it has no 'error' key — consistent with
+        # how process_results / _process_event_result treat API responses.
+        results_by_index = {r.get("inputIndex", i): r for i, r in enumerate(results)}
+        failed_indices = {idx for idx, r in results_by_index.items() if r.get("error")}
+        c_synced = 0
+        c_failed = 0
+        for indices, c_event in zip(
+            batch.cancellation_record_indices, batch.cancellation_events, strict=True
+        ):
+            s, f = self._process_cancellation_result(
+                c_event, indices, results_by_index, failed_indices, repo
+            )
+            c_synced += s
+            c_failed += f
+
+        counts = self.process_results(
             results,
             new_events,
             batch.event_record_indices,
             repo,
             excluded_count=batch.excluded_count,
+            force=force,
         )
+        counts.synced += c_synced
+        counts.failed += c_failed
+        # Re-persist sync_run with the final counts that include cancellation reversals.
+        # process_results already wrote a preliminary row; this overwrites it via upsert.
+        if c_synced or c_failed:
+            self._persist_sync_run(repo, counts)
+        return counts
 
-    # ------------------------------------------------------------------
     # resync_day helpers
     # ------------------------------------------------------------------
+
+    def _process_cancellation_result(
+        self,
+        c_event: dict[str, Any],
+        indices: list[int],
+        results_by_index: dict[int, dict[str, Any]],
+        failed_indices: set[int],
+        repo: EventRepository,
+    ) -> tuple[int, int]:
+        """Process the API result for one cancellation reversal.
+
+        Clears ``wallet_record_id`` on success (so a subsequent sync does not
+        post a second reversal) and logs/notifies on failure.
+
+        Returns:
+            ``(synced_delta, failed_delta)`` — exactly one of the two is 1.
+        """
+        all_present = all(i in results_by_index for i in indices)
+        any_failed = any(i in failed_indices for i in indices)
+        if all_present and not any_failed:
+            repo.mark_processed_force(c_event, wallet_record_id=None)
+            log.info(
+                "Cleared wallet_record_id for canceled event %s",
+                dedup_event_id(c_event),
+            )
+            return 1, 0
+
+        eid = dedup_event_id(c_event)
+        missing = [i for i in indices if i not in results_by_index]
+        if missing:
+            log.error(
+                "Cancellation reversal for event %s has no API result"
+                " for record index(es): %s",
+                eid,
+                missing,
+            )
+            self._notifier.missing_api_result(eid, missing)
+        else:
+            for i in indices:
+                r = results_by_index[i]
+                if r.get("error"):
+                    log.error(
+                        "Cancellation reversal for event %s record %d failed: %s",
+                        eid,
+                        r.get("inputIndex"),
+                        r.get("error"),
+                    )
+        return 0, 1
 
     def _warn_unknown_event_type(self, event: dict[str, Any]) -> None:
         """Log a warning and notify if *event* carries an unrecognised type."""
@@ -516,175 +705,6 @@ class SyncRunner:
             )
             self._notifier.unknown_event_type(event_type)
 
-    @staticmethod
-    def _parse_existing_ids(raw: str | None) -> list[str]:
-        """Split a comma-joined wallet-record-id string into a list."""
-        return [wid for wid in raw.split(",") if wid] if raw else []
-
-    def _resync_put_single(
-        self,
-        wid: str,
-        record: dict[str, Any],
-        event: dict[str, Any],
-        wallet_client: WalletClient,
-    ) -> tuple[bool, str]:
-        """PUT one record; return ``(failed, new_id)``."""
-        try:
-            resp = wallet_client.put_record(wid, record)
-            return False, resp.get("id") or wid
-        except Exception:
-            log.exception(
-                "PUT failed for event %s record %s", dedup_event_id(event), wid
-            )
-            return True, ""
-
-    def _resync_post_extra(
-        self,
-        record: dict[str, Any],
-        event: dict[str, Any],
-        wallet_client: WalletClient,
-    ) -> tuple[bool, str]:
-        """POST a single extra record; return ``(failed, new_id)``."""
-        try:
-            results = wallet_client.post_records([record])
-            if not results:
-                log.error(
-                    "POST returned no results for extra record of event %s",
-                    dedup_event_id(event),
-                )
-                return True, ""
-            item = results[0]
-            if item.get("error"):
-                log.error(
-                    "POST error for extra record of event %s: %s",
-                    dedup_event_id(event),
-                    item["error"],
-                )
-                return True, ""
-            return False, item.get("id") or ""
-        except Exception:
-            log.exception(
-                "POST failed for extra record of event %s", dedup_event_id(event)
-            )
-            return True, ""
-
-    def _resync_put_records(
-        self,
-        event: dict[str, Any],
-        recs: list[dict[str, Any]],
-        existing_ids: list[str],
-        wallet_client: WalletClient,
-    ) -> tuple[bool, list[str]]:
-        """PUT existing sub-records; POST any extras beyond the stored IDs.
-
-        Returns:
-            ``(failed, new_ids)`` — *failed* is ``True`` if any call raised.
-        """
-        new_ids: list[str] = []
-        for i, record in enumerate(recs):
-            wid = existing_ids[i] if i < len(existing_ids) else None
-            failed, new_id = (
-                self._resync_put_single(wid, record, event, wallet_client)
-                if wid
-                else self._resync_post_extra(record, event, wallet_client)
-            )
-            if failed:
-                return True, []
-            if new_id:
-                new_ids.append(new_id)
-        return False, new_ids
-
-    def _resync_post_records(
-        self,
-        event: dict[str, Any],
-        recs: list[dict[str, Any]],
-        wallet_client: WalletClient,
-    ) -> tuple[bool, str | None]:
-        """POST all records for an event that has no prior wallet ID.
-
-        Returns:
-            ``(failed, wallet_record_id)`` — *failed* is ``True`` on error.
-        """
-        try:
-            results = wallet_client.post_records(recs)
-            results_by_index = {
-                r.get("inputIndex", i): r for i, r in enumerate(results)
-            }
-            missing = [i for i in range(len(recs)) if i not in results_by_index]
-            if missing:
-                log.error(
-                    "POST returned no result for record index(es) %s of event %s",
-                    missing,
-                    dedup_event_id(event),
-                )
-                return True, None
-            failures = [
-                results_by_index[i]
-                for i in range(len(recs))
-                if results_by_index[i].get("error")
-            ]
-            if failures:
-                eid = dedup_event_id(event)
-                for f in failures:
-                    log.error(
-                        "POST error for event %s record %d: %s",
-                        eid,
-                        f.get("inputIndex"),
-                        f.get("error"),
-                    )
-                return True, None
-            wallet_ids = [
-                results_by_index[i]["id"]
-                for i in range(len(recs))
-                if results_by_index[i].get("id")
-            ]
-            return False, ",".join(wallet_ids) if wallet_ids else None
-        except Exception:
-            log.exception("POST failed for event %s", dedup_event_id(event))
-            return True, None
-
-    def _resync_single_event(
-        self,
-        event: dict[str, Any],
-        repo: EventRepository,
-        wallet_client: WalletClient,
-    ) -> tuple[int, int, int]:
-        """Process one event during a resync.
-
-        Returns:
-            ``(synced, excluded, failed)`` increment tuple.
-        """
-        self._warn_unknown_event_type(event)
-
-        recs = build_records_for_event(
-            event,
-            cash_account_id=self._cfg.wallet_cash_account_id,
-            portfolio_account_id=self._cfg.wallet_portfolio_account_id,
-            label_ids=self._cfg.label_ids,
-        )
-        if not recs:
-            repo.mark_processed_force(event, wallet_record_id=None)
-            log.info("Resync: excluded zero-amount event %s", dedup_event_id(event))
-            return 0, 1, 0
-
-        existing_ids = self._parse_existing_ids(repo.get_wallet_record_id(event))
-        failed: bool = False
-        wallet_record_id: str | None = None
-        if existing_ids:
-            failed, new_ids = self._resync_put_records(
-                event, recs, existing_ids, wallet_client
-            )
-            wallet_record_id = ",".join(new_ids) if new_ids else None
-        else:
-            failed, wallet_record_id = self._resync_post_records(
-                event, recs, wallet_client
-            )
-
-        if failed:
-            return 0, 0, 1
-        repo.mark_processed_force(event, wallet_record_id=wallet_record_id)
-        return 1, 0, 0
-
     def resync_day(
         self,
         date_str: str,
@@ -693,12 +713,17 @@ class SyncRunner:
     ) -> _SyncCounts:
         """Re-sync all TR events for a specific day, bypassing dedup.
 
-        For events already in the database with a ``wallet_record_id``, each
-        sub-record is updated via ``PUT``.  For new or previously-excluded events
-        (no wallet ID), the records are inserted via ``POST``.
+        Uses the same pipeline as the regular sync (:meth:`build_batch` +
+        :meth:`submit_batch`) but skips the ``filter_unprocessed`` dedup step
+        so that all events for the day are re-processed regardless of whether
+        they were seen before.
 
-        All events are force-marked processed (upsert) so subsequent regular
-        syncs continue to skip them correctly.
+        CANCELED events are handled via :meth:`~app.persistence.EventRepository\
+.filter_cancellation_pending`: if a wallet record already exists, a reversal is
+        posted; otherwise the event is excluded.
+
+        All results are persisted via ``INSERT OR REPLACE`` (upsert) so that
+        existing ``wallet_record_id`` values are updated in the local DB.
 
         Args:
             date_str: ISO date string ``YYYY-MM-DD`` for the day to resync.
@@ -717,12 +742,13 @@ class SyncRunner:
             "Resync %s: %d events fetched (dedup bypassed)", date_str, len(day_events)
         )
 
-        synced = excluded = failed = 0
-        for event in day_events:
-            s, e, f = self._resync_single_event(event, repo, wallet_client)
-            synced += s
-            excluded += e
-            failed += f
-
-        repo.commit()
-        return _SyncCounts(synced=synced, excluded=excluded, failed=failed)
+        cancellation_events = repo.filter_cancellation_pending(day_events)
+        batch = self.build_batch(
+            day_events,
+            repo,
+            wallet_client=wallet_client,
+            cancellation_events=cancellation_events,
+        )
+        return self.submit_batch(
+            batch, wallet_client, repo, new_events=day_events, force=True
+        )

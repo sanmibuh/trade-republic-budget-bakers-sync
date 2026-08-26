@@ -969,9 +969,10 @@ class TelegramBot:
             for ev in result.processed:
                 amount_str = f"{ev.amount} {ev.currency}".strip()
                 ts = ev.timestamp[:16]
+                status_str = f" \\[{_esc(ev.status)}\\]" if ev.status else ""
                 lines.append(
                     f"  • \\[{_esc(ts)}\\] {_esc(ev.description)} — {_esc(amount_str)}"
-                    f"  \\(id: `{_esc_code(ev.event_id)}`\\)"
+                    f"{status_str}  \\(id: `{_esc_code(ev.event_id)}`\\)"
                 )
         else:
             lines.append("✅ *Already processed* \\(0\\)")
@@ -983,9 +984,10 @@ class TelegramBot:
             for ev in result.not_processed:
                 amount_str = f"{ev.amount} {ev.currency}".strip()
                 ts = ev.timestamp[:16]
+                status_str = f" \\[{_esc(ev.status)}\\]" if ev.status else ""
                 lines.append(
                     f"  • \\[{_esc(ts)}\\] {_esc(ev.description)} — {_esc(amount_str)}"
-                    f"  \\(id: `{_esc_code(ev.event_id)}`\\)"
+                    f"{status_str}  \\(id: `{_esc_code(ev.event_id)}`\\)"
                 )
         else:
             lines.append("🆕 *Not yet processed* \\(0\\)")

@@ -135,6 +135,20 @@ See `deploy/example/docker-compose.yml` for a ready-to-use template.
 
 ---
 
+## Handling CANCELED transactions
+
+Trade Republic can mark a previously active transaction as `CANCELED` (e.g. a card charge that was reversed by the merchant before settlement).
+
+**During regular sync** — new CANCELED events (never posted to BudgetBakers) are skipped entirely and appear as *Excluded* in sync summaries. If a transaction was previously synced and TR has since marked it as CANCELED, the regular sync automatically posts a **reversal record** on the next run.
+
+**During forced resync** (`/resync` or `python -m app resync`) — the same reversal logic applies: if a wallet record exists for a CANCELED event, a reversal is posted. This is useful for backfilling cancellations that occurred before the feature was deployed.
+
+Both paths post a reversal with the opposite sign and a `[Cancelada]` prefix in the note, keeping a full audit trail. After the reversal is posted, the stored ID is cleared so that subsequent syncs do not post a second reversal.
+
+> If you see a `[Cancelada]` entry in BudgetBakers, it is an intentional reversal — either generated automatically by the regular sync or manually triggered via resync. It is not a duplicate.
+
+---
+
 ## Wallet backup
 
 The `backup` service runs a daily backup in **`auto` mode**:

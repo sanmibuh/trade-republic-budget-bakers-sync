@@ -516,12 +516,14 @@ def test_send_telegram_message_includes_reply_markup_in_payload():
 
 
 def test_notifier_sync_complete_includes_excluded_line_when_nonzero():
-    """When excluded > 0, sync_complete must mention the excluded count."""
+    """When excluded > 0, sync_complete must mention the excluded count without
+    implying a specific reason (e.g. not hard-coded as 'zero amount')."""
     with patch("app.notifier.send_telegram_message", return_value=True) as mock_send:
         _make_notifier().sync_complete(synced=5, failed=0, skipped=0, excluded=3)
     msg = mock_send.call_args.kwargs["message"]
     assert "3" in msg
-    assert "zero amount" in msg.lower() or "excluded" in msg.lower()
+    assert "excluded" in msg.lower()
+    assert "zero amount" not in msg.lower()
 
 
 # ---------------------------------------------------------------------------

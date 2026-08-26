@@ -14,7 +14,7 @@ from app.sync_runner import (  # noqa: F401 — re-exported for backward compati
     _Batch,
     _SyncCounts,
 )
-from app.tr_mapper import filter_by_lookback, normalize_event_time
+from app.tr_mapper import extract_event_status, filter_by_lookback, normalize_event_time
 from app.wallet_client import WalletClient
 
 log = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ class EventSummary:
     amount: str
     currency: str
     description: str
+    status: str = ""
 
 
 @dataclass
@@ -69,6 +70,7 @@ def _event_to_summary(event: dict[str, Any]) -> EventSummary:
         amount=amount_val,
         currency=currency,
         description=description,
+        status=extract_event_status(event),
     )
 
 
@@ -114,12 +116,18 @@ def run(cfg: Config) -> int:
 
         recent_events = filter_by_lookback(events, since)
         new_events = repo.filter_unprocessed(recent_events)
+        cancellation_events = repo.filter_cancellation_pending(recent_events)
         skipped_count = runner.notify_fetch_summary(since, recent_events, new_events)
 
         counts = _SyncCounts()
         try:
             wallet_client = WalletClient(api_key=cfg.wallet_api_key)
-            batch = runner.build_batch(new_events, repo, wallet_client=wallet_client)
+            batch = runner.build_batch(
+                new_events,
+                repo,
+                wallet_client=wallet_client,
+                cancellation_events=cancellation_events,
+            )
             counts.excluded = batch.excluded_count  # preserved for finally on exception
             counts = runner.submit_batch(
                 batch, wallet_client, repo, new_events=new_events

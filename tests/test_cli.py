@@ -1100,3 +1100,48 @@ def test_check_day_prints_report(tmp_path):
     assert "abc123" in result.output
     assert "jkl012" in result.output
     assert "Total: 2 events found" in result.output
+
+
+def test_check_day_prints_status_when_present(tmp_path):
+    """check-day must show the TR status in the CLI report when it is non-empty."""
+    from app.config import Config, InstancesConfig
+    from app.main import CheckDayResult, EventSummary
+
+    db_path = tmp_path / "sync.db"
+    db_path.touch()
+
+    mock_cfg = MagicMock(spec=Config)
+    mock_cfg.allow_insecure_ssl = False
+    mock_cfg.owner_name = "MyAccount"
+    mock_cfg.shared_db_path = db_path
+    mock_instances = MagicMock(spec=InstancesConfig)
+    mock_instances.to_config.return_value = mock_cfg
+    mock_instances.data_dir = tmp_path
+
+    check_result = CheckDayResult(
+        date="2026-08-24",
+        processed=[],
+        not_processed=[
+            EventSummary(
+                event_id="ev-canceled",
+                timestamp="2026-08-24T05:43:38+00:00",
+                amount="-7.62",
+                currency="EUR",
+                description="Amazon",
+                status="CANCELED",
+            )
+        ],
+    )
+
+    with (
+        patch("app.config.InstancesConfig.load", return_value=mock_instances),
+        patch("app.main.run_check_day", return_value=check_result),
+        patch("app.__main__.setup_logging"),
+        patch("app.http_client.configure"),
+    ):
+        result = _runner().invoke(
+            cli, ["check-day", "--instance", "user1", "2026-08-24"]
+        )
+
+    assert result.exit_code == 0
+    assert "CANCELED" in result.output

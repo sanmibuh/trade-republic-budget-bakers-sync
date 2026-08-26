@@ -3123,3 +3123,56 @@ def test_run_check_day_in_thread_handles_none_result(tmp_path):
         bot._run_check_day_for_instance(inst, "2026-08-20")
     mock_send.assert_called_once()
     assert "error" in mock_send.call_args.args[0].lower()
+
+
+def test_send_check_day_report_shows_status_when_present(tmp_path):
+    """Status must appear in the check-day report line when the event has one."""
+    from app.main import CheckDayResult, EventSummary
+
+    bot = _bot(tmp_path=tmp_path)
+    check_result = CheckDayResult(
+        date="2026-08-24",
+        processed=[],
+        not_processed=[
+            EventSummary(
+                event_id="ev-canceled",
+                timestamp="2026-08-24T05:43:38+00:00",
+                amount="-7.62",
+                currency="EUR",
+                description="Amazon",
+                status="CANCELED",
+            )
+        ],
+    )
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._send_check_day_report(check_result, "user1")
+
+    msg = mock_send.call_args.args[0]
+    assert "CANCELED" in msg
+
+
+def test_send_check_day_report_omits_status_when_absent(tmp_path):
+    """No status marker should appear in the line when status is empty."""
+    from app.main import CheckDayResult, EventSummary
+
+    bot = _bot(tmp_path=tmp_path)
+    check_result = CheckDayResult(
+        date="2026-08-24",
+        processed=[
+            EventSummary(
+                event_id="ev-normal",
+                timestamp="2026-08-24T08:00:00+00:00",
+                amount="50.0",
+                currency="EUR",
+                description="Transfer",
+                status="",
+            )
+        ],
+        not_processed=[],
+    )
+    with patch.object(bot, "_send_message") as mock_send:
+        bot._send_check_day_report(check_result, "user1")
+
+    msg = mock_send.call_args.args[0]
+    # No spurious empty brackets in the output
+    assert "[]" not in msg

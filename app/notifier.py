@@ -249,7 +249,7 @@ class Notifier:
             f"Saved: *{synced}* · Failed: *{escape_markdown(str(failed))}* · Skipped: *{skipped}*"
         )
         if excluded:
-            lines.append(f"Excluded \\(zero amount\\): *{excluded}*")
+            lines.append(f"Excluded: *{excluded}*")
         return self._send("\n".join(lines))
 
     def backup_complete(
