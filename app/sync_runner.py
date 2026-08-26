@@ -315,6 +315,7 @@ class SyncRunner:
         c_record_indices: list[list[int]] = []
         excluded_count = 0
         for c_event in cancellation_events:
+            self._warn_unknown_event_type(c_event)
             # Skip if the wallet_record_id was already cleared by a previous reversal —
             # this makes build_batch idempotent when called again with the same event.
             if repo.get_wallet_record_id(c_event) is None:

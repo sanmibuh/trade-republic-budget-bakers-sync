@@ -2053,3 +2053,40 @@ def test_build_batch_no_category_applied_to_cancellation_when_strategy_is_none(
 
     assert len(batch.records) == 1
     assert "categoryId" not in batch.records[0]
+
+
+# ---------------------------------------------------------------------------
+# _append_cancellation_records — unknown event type warning
+# ---------------------------------------------------------------------------
+
+
+def test_build_batch_cancellation_unknown_event_type_notifies(tmp_path):
+    """build_batch must call notifier.unknown_event_type for CANCELED events
+    with an unrecognised eventType, just like it does for normal new events."""
+    from app.config import Config
+    from app.notifier import Notifier
+
+    cfg = MagicMock(spec=Config)
+    cfg.wallet_cash_account_id = "cash"
+    cfg.wallet_portfolio_account_id = "port"
+    cfg.label_ids = {}
+    cfg.category_strategy = "none"
+
+    notifier = MagicMock(spec=Notifier)
+    runner = SyncRunner(cfg, notifier)
+
+    canceled_event = {
+        "id": "ev-unknown-cancel",
+        "eventType": "SUPER_UNKNOWN_FUTURE_TYPE",
+        "timestamp": "2026-08-24T05:43:38.971+0000",
+        "title": "Mystery",
+        "status": "CANCELED",
+        "amount": {"currency": "EUR", "value": -9.99},
+    }
+
+    with EventRepository(tmp_path / "test.db") as repo:
+        repo.mark_processed(canceled_event, wallet_record_id="old-wid")
+        repo.commit()
+        runner.build_batch([], repo, cancellation_events=[canceled_event])
+
+    notifier.unknown_event_type.assert_called_once_with("SUPER_UNKNOWN_FUTURE_TYPE")

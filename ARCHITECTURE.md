@@ -17,11 +17,14 @@ TRClient.fetch_timeline_events()
   └── pytr Timeline (WebSocket) → event_callback collects events + details
         ↓
 filter_by_lookback()         # drops events older than lookback_days (from instances.yml)
+        ↓ recent_events
+        ├── EventRepository.filter_unprocessed()          # dedup: keep only events not yet in SQLite → new_events
+        └── EventRepository.filter_cancellation_pending() # CANCELED events that already have a wallet record
+            # Both filters operate on the same recent_events window (in parallel, not sequentially).
+            # filter_cancellation_pending must see already-processed events so previously-synced
+            # CANCELED transactions can be reversed.
         ↓
-EventRepository.filter_unprocessed()     # dedup: keep only events not yet in SQLite
-EventRepository.filter_cancellation_pending()  # CANCELED events that already have a wallet record
-        ↓
-build_records_for_event()    # TR event dict → list[BudgetBakers record dict]
+build_records_for_event()    # TR event dict → list[BudgetBakers record dict]  (applied to new_events)
    └── _build_note()          # single source of truth for the note/description
    └── _HANDLERS[event_type]  # per-type handler builds record structure (accounts, payment type, counter-party)
    └── label applied generically post-handler if label is configured in instances.yml
@@ -32,6 +35,7 @@ HistoryCategorizer.get_category_id(note)   # majority-vote lookup from recent Wa
    └── CategoryCache.category_ids()         # 24h TTL wrapper around WalletClient.get_categories()
         ↓
 build_cancellation_records()  # for filter_cancellation_pending events: negated amount, [Cancelada] note
+                              # category also applied to reversals when category_strategy=history
         ↓
 WalletClient.post_records()        # POST /v1/api/records (max 20 per request)
                                    # batch includes both new records and cancellation reversals
