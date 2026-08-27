@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [8.1.0] - 2026-08-27
+
+### What's Changed
+* Handle CANCELED card transactions: skip on sync, post reversal on resync — [#227](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/227)
+* fix: bump-version workflow is incomplete — missing CHANGELOG update and Dockerfile BASE_TAG update — [#225](https://github.com/sanmibuh/trade-republic-budget-bakers-sync/pull/225)
+**Full Changelog**: https://github.com/sanmibuh/trade-republic-budget-bakers-sync/compare/v8.0.1...v8.1.0
+
+
 ## [8.0.1] - 2026-08-25
 
 ### What's Changed
