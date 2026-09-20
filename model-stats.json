@@ -526,5 +526,17 @@
     "model": "gemini-3.7-flash",
     "outcome": "ok",
     "findings": 0
+  },
+  {
+    "date": "2026-09-20",
+    "model": "gemini-3.1-pro-preview",
+    "outcome": "nok",
+    "reason": "quota_exceeded"
+  },
+  {
+    "date": "2026-09-20",
+    "model": "gemini-3.7-flash",
+    "outcome": "ok",
+    "findings": 3
   }
 ]
