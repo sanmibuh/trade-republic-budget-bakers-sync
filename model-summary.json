@@ -25,14 +25,14 @@
   },
   "gemini-3.1-pro-preview": {
     "ok": 0,
-    "nok": 26,
+    "nok": 27,
     "last_ok": null,
-    "last_nok": "2026-09-26"
+    "last_nok": "2026-09-27"
   },
   "gemini-3.7-flash": {
-    "ok": 16,
+    "ok": 17,
     "nok": 10,
-    "last_ok": "2026-09-24",
+    "last_ok": "2026-09-27",
     "last_nok": "2026-09-26"
   },
   "gemini-3.5-flash": {
