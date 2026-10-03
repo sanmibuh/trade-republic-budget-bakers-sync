@@ -166,7 +166,7 @@ def _resolve_iban(item: dict[str, Any]) -> str | None:
             "title"
         ]
         return full_iban.replace(" ", "")
-    except (KeyError, IndexError, TypeError):
+    except (KeyError, IndexError, TypeError, AttributeError):
         return (item.get("detail") or {}).get("text") or None
 
 
