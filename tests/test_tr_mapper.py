@@ -1430,3 +1430,29 @@ def test_build_cancellation_records_buy_order_uses_portfolio_account():
     assert r["amount"]["value"] == pytest.approx(100.0)
     assert r["accountId"] == "cash"
     assert r["transfer"]["accountId"] == "port"
+
+
+def test_extract_iban_returns_none_when_detail_is_not_a_dict():
+    """A string `detail` payload must not crash the IBAN extraction (issue #286)."""
+    details = {
+        "sections": [
+            {
+                "title": "Übersicht",
+                "data": [{"title": "IBAN", "detail": "ES86 0182 5297 2402 0031 7648"}],
+            }
+        ]
+    }
+    assert _extract_iban_from_details(details) is None
+
+
+def test_extract_iban_returns_none_when_row_is_not_a_dict():
+    """Non-dict rows in the `data` list must be skipped without raising (issue #286)."""
+    details = {
+        "sections": [
+            {
+                "title": "Übersicht",
+                "data": ["not-a-dict", {"title": "IBAN", "detail": {"text": "..7648"}}],
+            }
+        ]
+    }
+    assert _extract_iban_from_details(details) == "..7648"

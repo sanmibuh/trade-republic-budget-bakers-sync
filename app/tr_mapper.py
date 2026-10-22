@@ -159,15 +159,20 @@ def _extract_detail_row(details: dict[str, Any], row_title: str) -> str | None:
     return None
 
 
-def _resolve_iban(item: dict[str, Any]) -> str | None:
+def _resolve_iban(item: Any) -> str | None:
     """Extract full or masked IBAN from a detail item."""
+    if not isinstance(item, dict):
+        return None
     try:
         full_iban: str = item["detail"]["action"]["payload"]["sections"][0]["data"][0][
             "title"
         ]
         return full_iban.replace(" ", "")
     except (KeyError, IndexError, TypeError):
-        return (item.get("detail") or {}).get("text") or None
+        detail = item.get("detail")
+        if isinstance(detail, dict):
+            return detail.get("text")
+        return None
 
 
 def _extract_iban_from_details(details: dict[str, Any]) -> str | None:
