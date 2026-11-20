@@ -25,26 +25,26 @@
   },
   "gemini-3.1-pro-preview": {
     "ok": 0,
-    "nok": 56,
+    "nok": 57,
     "last_ok": null,
-    "last_nok": "2026-11-18"
+    "last_nok": "2026-11-20"
   },
   "gemini-3.7-flash": {
     "ok": 19,
-    "nok": 37,
+    "nok": 38,
     "last_ok": "2026-10-04",
-    "last_nok": "2026-11-18"
+    "last_nok": "2026-11-20"
   },
   "gemini-3.5-flash": {
     "ok": 9,
-    "nok": 28,
+    "nok": 29,
     "last_ok": "2026-11-18",
-    "last_nok": "2026-11-17"
+    "last_nok": "2026-11-20"
   },
   "gemini-3.5-flash-lite": {
     "ok": 22,
-    "nok": 6,
+    "nok": 7,
     "last_ok": "2026-11-07",
-    "last_nok": "2026-11-17"
+    "last_nok": "2026-11-20"
   }
 }
